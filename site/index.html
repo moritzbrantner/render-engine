@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>render-engine · Bevy parity</title>
+  <style>
+    :root{color-scheme:light dark;--bg:#14161c;--panel:#1d2029;--text:#e3e6ee;--muted:#9aa1b2;--line:#323646;--ok:#6fcf8f;--bad:#ef6f6f}
+    body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,sans-serif}
+    main{max-width:1280px;margin:auto;padding:24px 16px}h1{font-size:28px;margin:0 0 8px}
+    p{color:var(--muted)}section{border:1px solid var(--line);border-radius:8px;margin:20px 0;overflow:hidden}
+    header{display:flex;flex-wrap:wrap;gap:16px;align-items:baseline;padding:10px 14px;background:var(--panel);font:13px ui-monospace,monospace}
+    header b{font-size:15px}.ok{color:var(--ok)}.bad{color:var(--bad)}
+    .row{display:grid;grid-template-columns:repeat(3,1fr);gap:2px}@media(max-width:800px){.row{grid-template-columns:1fr}}
+    figure{margin:0}figure img{display:block;width:100%;height:auto}figcaption{padding:4px 10px;font-size:12px;color:var(--muted)}
+  </style>
+</head>
+<body><main>
+  <h1>Bevy parity</h1>
+  <p>Each scenario rendered headless by Bevy (the oracle) and by render-engine, with the NVIDIA FLIP error map. Numbers come from the oracle run that built this page (<code>oracle/report.json</code>).</p>
+  <div id="summary"></div>
+  <div id="scenarios"></div>
+  <script type="module">
+    const out = document.getElementById('scenarios');
+    const summary = document.getElementById('summary');
+    try {
+      const report = await (await fetch('oracle/report.json')).json();
+      summary.innerHTML = `<p>Adapter <b>${report.adapter}</b>${report.software ? ' (software)' : ''}. Gates: mean FLIP ≤ ${report.flip_mean_max.toFixed(3)}; GPU time ≤ ${report.gpu_margin.toFixed(2)}× Bevy (${report.gpu_gate ? 'enforced' : 'advisory'}).</p>`;
+      for (const s of report.scenarios) {
+        const ms = v => v == null ? '–' : v.toFixed(3) + ' ms';
+        const ok = s.result.startsWith('ok');
+        const el = document.createElement('section');
+        el.innerHTML = `<header><b>${s.scenario}</b><span>FLIP ${s.flip_mean.toFixed(4)}</span><span>engine ${ms(s.engine_gpu_ms)}</span><span>bevy ${ms(s.bevy_gpu_ms)}</span><span class="${ok ? 'ok' : 'bad'}">${s.result}</span></header>
+          <div class="row">${['bevy', 'engine', 'flip'].map(k => `<figure><img loading="lazy" src="oracle/${s.scenario}.${k}.png" alt="${s.scenario} ${k}"><figcaption>${k === 'flip' ? 'FLIP error' : k}</figcaption></figure>`).join('')}</div>`;
+        out.append(el);
+      }
+    } catch (e) {
+      summary.innerHTML = '<p>No oracle report yet. Run the oracle, then <code>bash scripts/build-pages.sh</code>.</p>';
+    }
+  </script>
+</main></body></html>

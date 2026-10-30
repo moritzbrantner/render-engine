@@ -1,0 +1,27 @@
+{
+  "extends": [
+    "github>moritzbrantner/coding-agent-conventions"
+  ],
+  "platformAutomerge": true,
+  "packageRules": [
+    {
+      "description": "Bevy is the oracle: bevy and bevy_hanabi move together, never automerged, because a new Bevy can change the reference images",
+      "matchPackageNames": [
+        "bevy",
+        "bevy_hanabi"
+      ],
+      "groupName": "bevy oracle",
+      "automerge": false
+    },
+    {
+      "description": "wgpu major follows the mmorpg native client (moenarch-games/mmorpg crates/mmorpg-client)",
+      "matchPackageNames": [
+        "wgpu"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "automerge": false
+    }
+  ]
+}

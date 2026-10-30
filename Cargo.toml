@@ -1,0 +1,25 @@
+[workspace]
+# The Bevy oracle has its own manifest and lockfile (like physics-engine's Rapier oracle) so the
+# engine's own fmt/clippy/test loop never compiles Bevy.
+exclude = ["oracle"]
+
+[package]
+name = "render-engine"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+rust-version = "1.98"
+description = "Lighting and particle renderer for the owner's games, measured against Bevy"
+
+[dependencies]
+# Same wgpu major as the mmorpg native client (crates/mmorpg-client) and Bevy 0.20.
+wgpu = "30.0.1"
+glam = { version = "0.34.1", features = ["bytemuck"] }
+bytemuck = { version = "1.25.2", features = ["derive"] }
+pollster = "1.0.1"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
