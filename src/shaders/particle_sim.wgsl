@@ -31,7 +31,8 @@ struct EmitterStep {
     color_t: array<vec4<f32>, 2>,
     color_v: array<vec4<f32>, 8>,
     size_t: array<vec4<f32>, 2>,
-    size_v: array<vec4<f32>, 2>,
+    // Two (x, y) keys per element: key i in `.xy` (even i) or `.zw` (odd i) of element i / 2.
+    size_v: array<vec4<f32>, 4>,
     id: u32,
     base: u32,
     capacity: u32,
@@ -42,8 +43,8 @@ struct EmitterStep {
     color_blend: u32,
     n_color: u32,
     n_size: u32,
+    sprite_frames: u32,
     _pad0: u32,
-    _pad1: u32,
     mods: array<Modifier, 8>,
 }
 
@@ -67,9 +68,15 @@ struct Particle {
     _pad2: f32,
 }
 
-// One quad of the render pass (`particle_pass`): position and size, linear colour and alpha.
+// One quad of the render pass (`particle_pass`): position, flipbook sprite, velocity (for
+// `Orient::AlongVelocity`), size, linear colour and alpha.
 struct Quad {
-    position_size: vec4<f32>,
+    position: vec3<f32>,
+    sprite: u32,
+    velocity: vec3<f32>,
+    _pad0: u32,
+    size: vec2<f32>,
+    _pad1: vec2<f32>,
     color: vec4<f32>,
 }
 
@@ -323,22 +330,28 @@ fn sample_color(k: u32, t: f32) -> vec4<f32> {
     return (*e).color_v[n - 1u];
 }
 
-fn sample_size(k: u32, t: f32) -> f32 {
+fn size_key(k: u32, i: u32) -> vec2<f32> {
+    let v = step.emitters[k].size_v[i / 2u];
+    if (i % 2u == 0u) {
+        return v.xy;
+    }
+    return v.zw;
+}
+
+fn sample_size(k: u32, t: f32) -> vec2<f32> {
     let e = &step.emitters[k];
     let n = (*e).n_size;
     if (n == 1u || t <= (*e).size_t[0].x) {
-        return (*e).size_v[0].x;
+        return size_key(k, 0u);
     }
     for (var i = 1u; i < n; i++) {
         let ta = (*e).size_t[(i - 1u) / 4u][(i - 1u) % 4u];
         let tb = (*e).size_t[i / 4u][i % 4u];
         if (t <= tb) {
-            let va = (*e).size_v[(i - 1u) / 4u][(i - 1u) % 4u];
-            let vb = (*e).size_v[i / 4u][i % 4u];
-            return mix(va, vb, (t - ta) / (tb - ta));
+            return mix(size_key(k, i - 1u), size_key(k, i), (t - ta) / (tb - ta));
         }
     }
-    return (*e).size_v[(n - 1u) / 4u][(n - 1u) % 4u];
+    return size_key(k, n - 1u);
 }
 
 @compute @workgroup_size(64)
@@ -367,7 +380,7 @@ fn update(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     // hanabi's render modifiers, evaluated once per step instead of per vertex.
     let t = p.age / p.lifetime;
-    var size = p.size;
+    var size = vec2<f32>(p.size);
     if ((*e).n_size > 0u) {
         size = sample_size(k, t);
     }
@@ -381,5 +394,10 @@ fn update(@builtin(global_invocation_id) gid: vec3<u32>) {
             default: {}
         }
     }
-    quads[base + j] = Quad(vec4<f32>(p.position, size), color);
+    // The flipbook's `SetAttributeModifier(SPRITE_INDEX, i32(age / lifetime * frames))`.
+    var sprite = 0u;
+    if ((*e).sprite_frames > 0u) {
+        sprite = u32(i32(p.age / p.lifetime * f32((*e).sprite_frames)));
+    }
+    quads[base + j] = Quad(p.position, sprite, p.velocity, 0u, size, vec2<f32>(0.0), color);
 }

@@ -395,12 +395,13 @@ fn texture_data(image: &gltf::image::Data, srgb: bool, sampler: Sampler) -> Text
 }
 
 /// Uploads a scenario's data and objects into a new `World`: each texture, mesh, shape and
-/// distinct material once (the Bevy side shares its handles the same way).
+/// distinct material once (the Bevy side shares its handles the same way). Also returns the
+/// textures' handles, in [`Assets::textures`] order.
 pub fn upload(
     renderer: &Renderer,
     assets: &Assets,
     objects: &[MeshInstance],
-) -> (World, Vec<Instance>) {
+) -> (World, Vec<Instance>, Vec<TextureId>) {
     let mut world = World::new(renderer);
     let textures: Vec<TextureId> = assets
         .textures
@@ -431,5 +432,5 @@ pub fn upload(
             skin: o.skin.map(|i| skins[i]),
         })
         .collect();
-    (world, instances)
+    (world, instances, textures)
 }

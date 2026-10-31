@@ -46,7 +46,7 @@ use bevy::{
     render::render_resource::Face,
 };
 use bevy_hanabi as hanabi;
-use render_engine::particles::ParticleBlend;
+use render_engine::particles::{Orient, ParticleBlend, TextureMapping};
 use render_engine::{
     material::{AlphaMode as EngineAlphaMode, TextureData},
     mesh::{MeshData, Shape},
@@ -254,311 +254,336 @@ pub fn run(scenario: Scenario, timed_frames: u32) -> BevyRun {
     } = scenario;
 
     let mut app = headless_app();
-    app.insert_resource(shared.clone())
-        .insert_resource(Plan {
-            frame: 0,
-            timed_frames,
-        })
-        .insert_resource(GlobalAmbientLight {
-            color: linear(scene.ambient.color),
-            brightness: scene.ambient.brightness,
-            ..default()
-        })
-        .insert_resource(DirectionalLightShadowMap {
-            size: scene.shadow_maps.directional as usize,
-        })
-        .insert_resource(PointLightShadowMap {
-            size: scene.shadow_maps.point as usize,
-        });
-
-    app.add_systems(
-        Startup,
-        move |mut commands: Commands,
-              mut images: ResMut<Assets<Image>>,
-              mut meshes: ResMut<Assets<Mesh>>,
-              mut materials: ResMut<Assets<StandardMaterial>>,
-              mut media: ResMut<Assets<ScatteringMedium>>,
-              mut bindposes: ResMut<Assets<SkinnedMeshInverseBindposes>>| {
-            let target = images.add(Image::new_target_texture(
-                width,
-                height,
-                TextureFormat::Rgba8UnormSrgb,
-                None,
-            ));
-            commands.insert_resource(TargetImage(target.clone()));
-            let cam = scene.camera;
-            let mut camera = commands.spawn((
-                Camera3d::default(),
-                Camera {
-                    clear_color: ClearColorConfig::Custom(linear(scene.clear_color)),
-                    ..default()
-                },
-                RenderTarget::Image(target.into()),
-                Projection::Perspective(PerspectiveProjection {
-                    fov: cam.fov_y,
-                    near: cam.near,
-                    ..default()
-                }),
-                Exposure { ev100: cam.ev100 },
-                Hdr,
-                match cam.tonemapping {
-                    EngineTonemapping::AcesFitted => Tonemapping::AcesFitted,
-                    EngineTonemapping::TonyMcMapface => Tonemapping::TonyMcMapface,
-                    EngineTonemapping::AgX => Tonemapping::AgX,
-                },
-                DebandDither::Disabled,
-                Msaa::Sample4,
-                match cam.shadow_filter {
-                    ShadowFilter::Hardware2x2 => ShadowFilteringMethod::Hardware2x2,
-                    ShadowFilter::Gaussian => ShadowFilteringMethod::Gaussian,
-                },
-                Transform::from_translation(v3(cam.eye)).looking_at(v3(cam.target), Vec3::Y),
-            ));
-            if let Some(env) = &scene.environment {
-                camera.insert(EnvironmentMapLight {
-                    diffuse_map: images.add(cube_image(&env.diffuse)),
-                    specular_map: images.add(cube_image(&env.specular)),
-                    intensity: env.intensity,
-                    ..default()
-                });
-            }
-            if let Some(fog) = scene.fog {
-                let rgba = |v: render_engine::glam::Vec4| Color::linear_rgba(v.x, v.y, v.z, v.w);
-                camera.insert(DistanceFog {
-                    color: rgba(fog.color),
-                    directional_light_color: rgba(fog.directional_light_color),
-                    directional_light_exponent: fog.directional_light_exponent,
-                    falloff: match fog.falloff {
-                        EngineFogFalloff::Linear { start, end } => {
-                            FogFalloff::Linear { start, end }
-                        }
-                        EngineFogFalloff::Exponential { density } => {
-                            FogFalloff::Exponential { density }
-                        }
-                        EngineFogFalloff::ExponentialSquared { density } => {
-                            FogFalloff::ExponentialSquared { density }
-                        }
-                        EngineFogFalloff::Atmospheric {
-                            extinction,
-                            inscattering,
-                        } => FogFalloff::Atmospheric {
-                            extinction: v3(extinction),
-                            inscattering: v3(inscattering),
-                        },
-                    },
-                });
-            }
-            let disk = |d: render_engine::scene::SunDisk| SunDisk {
-                angular_size: d.angular_size,
-                intensity: d.intensity,
-            };
-            if let Some(sky) = scene.sky {
-                camera.insert(AtmosphereSettings::default());
-                if let Some(intensity) = sky.environment_intensity {
-                    camera.insert(AtmosphereEnvironmentMapLight {
-                        intensity,
-                        ..default()
-                    });
-                }
-                // Bevy's Earth atmosphere, placed by its hook 6 360 km below the origin.
-                commands.spawn(Atmosphere {
-                    ground_albedo: v3(sky.ground_albedo),
-                    ..Atmosphere::earth(media.add(ScatteringMedium::earth(256, 256)))
-                });
-            }
-            if let Some(sun) = scene.sun {
-                let mut light = commands.spawn((
-                    DirectionalLight {
-                        color: linear(sun.color),
-                        illuminance: sun.illuminance,
-                        shadow_maps_enabled: sun.shadows.is_some(),
-                        ..default()
-                    },
-                    Transform::default().looking_to(v3(sun.direction), Vec3::Y),
-                ));
-                if let Some(sky) = scene.sky {
-                    light.insert(disk(sky.sun_disk));
-                }
-                if let Some(s) = sun.shadows {
-                    light.insert((CascadeShadowConfigBuilder {
-                        num_cascades: s.num_cascades,
-                        minimum_distance: s.min_distance,
-                        maximum_distance: s.max_distance,
-                        first_cascade_far_bound: s.first_cascade_far_bound,
-                        overlap_proportion: s.overlap_proportion,
-                    }
-                    .build(),));
-                    light.entry::<DirectionalLight>().and_modify(move |mut l| {
-                        l.shadow_depth_bias = s.depth_bias;
-                        l.shadow_normal_bias = s.normal_bias;
-                    });
-                }
-            }
-            // Spawned after the sun: Bevy orders unshadowed directional lights first, then by
-            // entity.
-            if let Some(moon) = scene.moon {
-                let mut light = commands.spawn((
-                    DirectionalLight {
-                        color: linear(moon.color),
-                        illuminance: moon.illuminance,
-                        shadow_maps_enabled: false,
-                        ..default()
-                    },
-                    Transform::default().looking_to(v3(moon.direction), Vec3::Y),
-                ));
-                if let Some(sky) = scene.sky {
-                    light.insert(disk(sky.moon_disk));
-                }
-            }
-            // Shadow settings default to Bevy's for lights without shadows.
-            let shadows = |s: Option<LightShadows>, default: LightShadows| s.unwrap_or(default);
-            for l in &scene.point_lights {
-                let s = shadows(l.shadows, LightShadows::POINT);
-                commands.spawn((
-                    PointLight {
-                        color: linear(l.color),
-                        intensity: l.intensity,
-                        range: l.range,
-                        radius: l.radius,
-                        shadow_maps_enabled: l.shadows.is_some(),
-                        shadow_depth_bias: s.depth_bias,
-                        shadow_normal_bias: s.normal_bias,
-                        shadow_map_near_z: s.near_z,
-                        soft_shadows_enabled: s.soft,
-                        ..default()
-                    },
-                    Transform::from_translation(v3(l.position)),
-                ));
-            }
-            for l in &scene.spot_lights {
-                let s = shadows(l.shadows, LightShadows::SPOT);
-                commands.spawn((
-                    SpotLight {
-                        color: linear(l.color),
-                        intensity: l.intensity,
-                        range: l.range,
-                        radius: l.radius,
-                        inner_angle: l.inner_angle,
-                        outer_angle: l.outer_angle,
-                        shadow_maps_enabled: l.shadows.is_some(),
-                        shadow_depth_bias: s.depth_bias,
-                        shadow_normal_bias: s.normal_bias,
-                        shadow_map_near_z: s.near_z,
-                        soft_shadows_enabled: s.soft,
-                        ..default()
-                    },
-                    Transform::from_translation(v3(l.position)).with_rotation(
-                        Quat::from_rotation_arc(Vec3::NEG_Z, v3(l.direction).normalize()),
-                    ),
-                ));
-            }
-            let mesh_handles: Vec<Handle<Mesh>> =
-                assets.meshes.iter().map(|m| meshes.add(mesh(m))).collect();
-            let image_handles: Vec<Handle<Image>> = assets
-                .textures
-                .iter()
-                .map(|t| images.add(texture_image(t)))
-                .collect();
-            // Shapes and materials are shared between objects, as a game shares its handles.
-            let mut shapes = std::collections::HashMap::new();
-            let mut shared_materials = std::collections::HashMap::new();
-            for m in &objects {
-                let mesh = match m.geometry {
-                    Geometry::Mesh(i) => mesh_handles[i].clone(),
-                    Geometry::Shape(shape) => shapes
-                        .entry(format!("{shape:?}"))
-                        .or_insert_with(|| match shape {
-                            Shape::Cuboid(size) => meshes.add(Cuboid::new(size.x, size.y, size.z)),
-                            Shape::Plane(size) => {
-                                meshes.add(Plane3d::default().mesh().size(size.x, size.y))
-                            }
-                            Shape::Sphere {
-                                radius,
-                                sectors,
-                                stacks,
-                            } => meshes.add(Sphere::new(radius).mesh().uv(sectors, stacks)),
-                        })
-                        .clone(),
-                };
-                let mat = m.material;
-                let texture = |i: Option<usize>| i.map(|i| image_handles[i].clone());
-                let c = mat.base_color;
-                let material = shared_materials
-                    .entry(format!("{mat:?}"))
-                    .or_insert_with(|| {
-                        materials.add(StandardMaterial {
-                            base_color: Color::linear_rgba(c.x, c.y, c.z, mat.alpha),
-                            base_color_texture: texture(mat.base_color_texture),
-                            emissive: LinearRgba::rgb(
-                                mat.emissive.x,
-                                mat.emissive.y,
-                                mat.emissive.z,
-                            ),
-                            emissive_texture: texture(mat.emissive_texture),
-                            metallic: mat.metallic,
-                            perceptual_roughness: mat.perceptual_roughness,
-                            metallic_roughness_texture: texture(mat.metallic_roughness_texture),
-                            reflectance: mat.reflectance,
-                            normal_map_texture: texture(mat.normal_map_texture),
-                            occlusion_texture: texture(mat.occlusion_texture),
-                            alpha_mode: match mat.alpha_mode {
-                                EngineAlphaMode::Opaque => AlphaMode::Opaque,
-                                EngineAlphaMode::Mask(cutoff) => AlphaMode::Mask(cutoff),
-                                EngineAlphaMode::Blend => AlphaMode::Blend,
-                            },
-                            double_sided: mat.double_sided,
-                            // What Bevy's glTF loader sets for `doubleSided`.
-                            cull_mode: (!mat.double_sided).then_some(Face::Back),
-                            unlit: mat.unlit,
-                            ..default()
-                        })
-                    })
-                    .clone();
-                let transform = Transform {
-                    translation: v3(m.translation),
-                    rotation: Quat::from_array(m.rotation.to_array()),
-                    scale: v3(m.scale),
-                };
-                let mut entity =
-                    commands.spawn((Mesh3d(mesh), MeshMaterial3d(material), transform));
-                if let Some(skin) = m.skin {
-                    // Bevy's joints are world-space entities: the figure's transform times each
-                    // joint's pose, without a hierarchy. The skinned model matrix replaces the
-                    // mesh entity's; that one only places the bounds, so culling is off.
-                    let skin = &assets.skins[skin];
-                    let world_from_local = m.transform();
-                    let joints = skin
-                        .model_from_joint
-                        .iter()
-                        .map(|j| {
-                            entity
-                                .commands()
-                                .spawn(Transform::from_matrix(mat4(world_from_local * *j)))
-                                .id()
-                        })
-                        .collect();
-                    let inverse_bindposes = bindposes.add(SkinnedMeshInverseBindposes::from(
-                        skin.inverse_bindposes
-                            .iter()
-                            .map(|m| mat4(*m))
-                            .collect::<Vec<_>>(),
-                    ));
-                    entity.insert((
-                        SkinnedMesh {
-                            inverse_bindposes,
-                            joints,
-                        },
-                        NoFrustumCulling,
-                    ));
-                }
-            }
-        },
-    )
+    app.insert_resource(shared.clone()).insert_resource(Plan {
+        frame: 0,
+        timed_frames,
+    });
+    insert_scene_resources(&mut app, &scene);
+    app.add_systems(Startup, move |mut set: SceneSet| {
+        set.spawn((width, height), &scene, &objects, &assets);
+    })
     .add_systems(Update, drive);
 
     app.run();
     let mut run = shared.0.lock().unwrap();
     std::mem::take(&mut *run)
+}
+
+/// The scene's global lighting resources: ambient light and shadow-map sizes.
+fn insert_scene_resources(app: &mut App, scene: &render_engine::scene::Scene) {
+    app.insert_resource(GlobalAmbientLight {
+        color: linear(scene.ambient.color),
+        brightness: scene.ambient.brightness,
+        ..default()
+    })
+    .insert_resource(DirectionalLightShadowMap {
+        size: scene.shadow_maps.directional as usize,
+    })
+    .insert_resource(PointLightShadowMap {
+        size: scene.shadow_maps.point as usize,
+    });
+}
+
+/// What [`SceneSet::spawn`] spawns into.
+#[derive(bevy::ecs::system::SystemParam)]
+struct SceneSet<'w, 's> {
+    commands: Commands<'w, 's>,
+    images: ResMut<'w, Assets<Image>>,
+    meshes: ResMut<'w, Assets<Mesh>>,
+    materials: ResMut<'w, Assets<StandardMaterial>>,
+    media: ResMut<'w, Assets<ScatteringMedium>>,
+    bindposes: ResMut<'w, Assets<SkinnedMeshInverseBindposes>>,
+}
+
+impl SceneSet<'_, '_> {
+    /// The render target (as [`TargetImage`]), the camera, lights and objects of a scene, field
+    /// by field. Returns the Bevy images of the scene's textures, in [`content::Assets`] order.
+    ///
+    /// [`content::Assets`]: crate::content::Assets
+    fn spawn(
+        &mut self,
+        (width, height): (u32, u32),
+        scene: &render_engine::scene::Scene,
+        objects: &[crate::content::MeshInstance],
+        assets: &crate::content::Assets,
+    ) -> Vec<Handle<Image>> {
+        let SceneSet {
+            commands,
+            images,
+            meshes,
+            materials,
+            media,
+            bindposes,
+        } = self;
+        let target = images.add(Image::new_target_texture(
+            width,
+            height,
+            TextureFormat::Rgba8UnormSrgb,
+            None,
+        ));
+        commands.insert_resource(TargetImage(target.clone()));
+        let cam = scene.camera;
+        let mut camera = commands.spawn((
+            Camera3d::default(),
+            Camera {
+                clear_color: ClearColorConfig::Custom(linear(scene.clear_color)),
+                ..default()
+            },
+            RenderTarget::Image(target.into()),
+            Projection::Perspective(PerspectiveProjection {
+                fov: cam.fov_y,
+                near: cam.near,
+                ..default()
+            }),
+            Exposure { ev100: cam.ev100 },
+            Hdr,
+            match cam.tonemapping {
+                EngineTonemapping::AcesFitted => Tonemapping::AcesFitted,
+                EngineTonemapping::TonyMcMapface => Tonemapping::TonyMcMapface,
+                EngineTonemapping::AgX => Tonemapping::AgX,
+            },
+            DebandDither::Disabled,
+            Msaa::Sample4,
+            match cam.shadow_filter {
+                ShadowFilter::Hardware2x2 => ShadowFilteringMethod::Hardware2x2,
+                ShadowFilter::Gaussian => ShadowFilteringMethod::Gaussian,
+            },
+            Transform::from_translation(v3(cam.eye)).looking_at(v3(cam.target), Vec3::Y),
+        ));
+        if let Some(env) = &scene.environment {
+            camera.insert(EnvironmentMapLight {
+                diffuse_map: images.add(cube_image(&env.diffuse)),
+                specular_map: images.add(cube_image(&env.specular)),
+                intensity: env.intensity,
+                ..default()
+            });
+        }
+        if let Some(fog) = scene.fog {
+            let rgba = |v: render_engine::glam::Vec4| Color::linear_rgba(v.x, v.y, v.z, v.w);
+            camera.insert(DistanceFog {
+                color: rgba(fog.color),
+                directional_light_color: rgba(fog.directional_light_color),
+                directional_light_exponent: fog.directional_light_exponent,
+                falloff: match fog.falloff {
+                    EngineFogFalloff::Linear { start, end } => FogFalloff::Linear { start, end },
+                    EngineFogFalloff::Exponential { density } => {
+                        FogFalloff::Exponential { density }
+                    }
+                    EngineFogFalloff::ExponentialSquared { density } => {
+                        FogFalloff::ExponentialSquared { density }
+                    }
+                    EngineFogFalloff::Atmospheric {
+                        extinction,
+                        inscattering,
+                    } => FogFalloff::Atmospheric {
+                        extinction: v3(extinction),
+                        inscattering: v3(inscattering),
+                    },
+                },
+            });
+        }
+        let disk = |d: render_engine::scene::SunDisk| SunDisk {
+            angular_size: d.angular_size,
+            intensity: d.intensity,
+        };
+        if let Some(sky) = scene.sky {
+            camera.insert(AtmosphereSettings::default());
+            if let Some(intensity) = sky.environment_intensity {
+                camera.insert(AtmosphereEnvironmentMapLight {
+                    intensity,
+                    ..default()
+                });
+            }
+            // Bevy's Earth atmosphere, placed by its hook 6 360 km below the origin.
+            commands.spawn(Atmosphere {
+                ground_albedo: v3(sky.ground_albedo),
+                ..Atmosphere::earth(media.add(ScatteringMedium::earth(256, 256)))
+            });
+        }
+        if let Some(sun) = scene.sun {
+            let mut light = commands.spawn((
+                DirectionalLight {
+                    color: linear(sun.color),
+                    illuminance: sun.illuminance,
+                    shadow_maps_enabled: sun.shadows.is_some(),
+                    ..default()
+                },
+                Transform::default().looking_to(v3(sun.direction), Vec3::Y),
+            ));
+            if let Some(sky) = scene.sky {
+                light.insert(disk(sky.sun_disk));
+            }
+            if let Some(s) = sun.shadows {
+                light.insert((CascadeShadowConfigBuilder {
+                    num_cascades: s.num_cascades,
+                    minimum_distance: s.min_distance,
+                    maximum_distance: s.max_distance,
+                    first_cascade_far_bound: s.first_cascade_far_bound,
+                    overlap_proportion: s.overlap_proportion,
+                }
+                .build(),));
+                light.entry::<DirectionalLight>().and_modify(move |mut l| {
+                    l.shadow_depth_bias = s.depth_bias;
+                    l.shadow_normal_bias = s.normal_bias;
+                });
+            }
+        }
+        // Spawned after the sun: Bevy orders unshadowed directional lights first, then by
+        // entity.
+        if let Some(moon) = scene.moon {
+            let mut light = commands.spawn((
+                DirectionalLight {
+                    color: linear(moon.color),
+                    illuminance: moon.illuminance,
+                    shadow_maps_enabled: false,
+                    ..default()
+                },
+                Transform::default().looking_to(v3(moon.direction), Vec3::Y),
+            ));
+            if let Some(sky) = scene.sky {
+                light.insert(disk(sky.moon_disk));
+            }
+        }
+        // Shadow settings default to Bevy's for lights without shadows.
+        let shadows = |s: Option<LightShadows>, default: LightShadows| s.unwrap_or(default);
+        for l in &scene.point_lights {
+            let s = shadows(l.shadows, LightShadows::POINT);
+            commands.spawn((
+                PointLight {
+                    color: linear(l.color),
+                    intensity: l.intensity,
+                    range: l.range,
+                    radius: l.radius,
+                    shadow_maps_enabled: l.shadows.is_some(),
+                    shadow_depth_bias: s.depth_bias,
+                    shadow_normal_bias: s.normal_bias,
+                    shadow_map_near_z: s.near_z,
+                    soft_shadows_enabled: s.soft,
+                    ..default()
+                },
+                Transform::from_translation(v3(l.position)),
+            ));
+        }
+        for l in &scene.spot_lights {
+            let s = shadows(l.shadows, LightShadows::SPOT);
+            commands.spawn((
+                SpotLight {
+                    color: linear(l.color),
+                    intensity: l.intensity,
+                    range: l.range,
+                    radius: l.radius,
+                    inner_angle: l.inner_angle,
+                    outer_angle: l.outer_angle,
+                    shadow_maps_enabled: l.shadows.is_some(),
+                    shadow_depth_bias: s.depth_bias,
+                    shadow_normal_bias: s.normal_bias,
+                    shadow_map_near_z: s.near_z,
+                    soft_shadows_enabled: s.soft,
+                    ..default()
+                },
+                Transform::from_translation(v3(l.position)).with_rotation(Quat::from_rotation_arc(
+                    Vec3::NEG_Z,
+                    v3(l.direction).normalize(),
+                )),
+            ));
+        }
+        let mesh_handles: Vec<Handle<Mesh>> =
+            assets.meshes.iter().map(|m| meshes.add(mesh(m))).collect();
+        let image_handles: Vec<Handle<Image>> = assets
+            .textures
+            .iter()
+            .map(|t| images.add(texture_image(t)))
+            .collect();
+        // Shapes and materials are shared between objects, as a game shares its handles.
+        let mut shapes = std::collections::HashMap::new();
+        let mut shared_materials = std::collections::HashMap::new();
+        for m in objects {
+            let mesh = match m.geometry {
+                Geometry::Mesh(i) => mesh_handles[i].clone(),
+                Geometry::Shape(shape) => shapes
+                    .entry(format!("{shape:?}"))
+                    .or_insert_with(|| match shape {
+                        Shape::Cuboid(size) => meshes.add(Cuboid::new(size.x, size.y, size.z)),
+                        Shape::Plane(size) => {
+                            meshes.add(Plane3d::default().mesh().size(size.x, size.y))
+                        }
+                        Shape::Sphere {
+                            radius,
+                            sectors,
+                            stacks,
+                        } => meshes.add(Sphere::new(radius).mesh().uv(sectors, stacks)),
+                    })
+                    .clone(),
+            };
+            let mat = m.material;
+            let texture = |i: Option<usize>| i.map(|i| image_handles[i].clone());
+            let c = mat.base_color;
+            let material = shared_materials
+                .entry(format!("{mat:?}"))
+                .or_insert_with(|| {
+                    materials.add(StandardMaterial {
+                        base_color: Color::linear_rgba(c.x, c.y, c.z, mat.alpha),
+                        base_color_texture: texture(mat.base_color_texture),
+                        emissive: LinearRgba::rgb(mat.emissive.x, mat.emissive.y, mat.emissive.z),
+                        emissive_texture: texture(mat.emissive_texture),
+                        metallic: mat.metallic,
+                        perceptual_roughness: mat.perceptual_roughness,
+                        metallic_roughness_texture: texture(mat.metallic_roughness_texture),
+                        reflectance: mat.reflectance,
+                        normal_map_texture: texture(mat.normal_map_texture),
+                        occlusion_texture: texture(mat.occlusion_texture),
+                        alpha_mode: match mat.alpha_mode {
+                            EngineAlphaMode::Opaque => AlphaMode::Opaque,
+                            EngineAlphaMode::Mask(cutoff) => AlphaMode::Mask(cutoff),
+                            EngineAlphaMode::Blend => AlphaMode::Blend,
+                        },
+                        double_sided: mat.double_sided,
+                        // What Bevy's glTF loader sets for `doubleSided`.
+                        cull_mode: (!mat.double_sided).then_some(Face::Back),
+                        unlit: mat.unlit,
+                        ..default()
+                    })
+                })
+                .clone();
+            let transform = Transform {
+                translation: v3(m.translation),
+                rotation: Quat::from_array(m.rotation.to_array()),
+                scale: v3(m.scale),
+            };
+            let mut entity = commands.spawn((Mesh3d(mesh), MeshMaterial3d(material), transform));
+            if let Some(skin) = m.skin {
+                // Bevy's joints are world-space entities: the figure's transform times each
+                // joint's pose, without a hierarchy. The skinned model matrix replaces the
+                // mesh entity's; that one only places the bounds, so culling is off.
+                let skin = &assets.skins[skin];
+                let world_from_local = m.transform();
+                let joints = skin
+                    .model_from_joint
+                    .iter()
+                    .map(|j| {
+                        entity
+                            .commands()
+                            .spawn(Transform::from_matrix(mat4(world_from_local * *j)))
+                            .id()
+                    })
+                    .collect();
+                let inverse_bindposes = bindposes.add(SkinnedMeshInverseBindposes::from(
+                    skin.inverse_bindposes
+                        .iter()
+                        .map(|m| mat4(*m))
+                        .collect::<Vec<_>>(),
+                ));
+                entity.insert((
+                    SkinnedMesh {
+                        inverse_bindposes,
+                        joints,
+                    },
+                    NoFrustumCulling,
+                ));
+            }
+        }
+        image_handles
+    }
 }
 
 #[derive(Resource)]
@@ -874,22 +899,37 @@ fn effect_asset(e: &Emitter, seed: u32, gravity_scale: f32) -> hanabi::EffectAss
     let init_age = SetAttributeModifier::new(Attribute::AGE, w.lit(0.0f32).expr());
     let init_lifetime = SetAttributeModifier::new(Attribute::LIFETIME, w.lit(e.lifetime).expr());
     let gravity = hanabi::AccelModifier::new(w.lit(v3(e.gravity * gravity_scale)).expr());
-    let round = hanabi::RoundModifier {
+    let round = e.round.then(|| hanabi::RoundModifier {
         roundness: w.lit(1.0f32).expr(),
-    };
+    });
+    // The flipbook's sprite over life, set in the update pass after the age.
+    let sprite = e.texture.and_then(|t| t.flipbook).map(|f| {
+        let index = (w.attr(Attribute::AGE) / w.attr(Attribute::LIFETIME) * w.lit(f.frames as f32))
+            .cast(hanabi::ScalarType::Int);
+        (
+            SetAttributeModifier::new(Attribute::SPRITE_INDEX, index.expr()),
+            hanabi::FlipbookModifier {
+                sprite_grid_size: UVec2::new(f.grid.x, f.grid.y),
+            },
+        )
+    });
     let mut color = hanabi::Gradient::new();
     for &(t, c) in &e.color {
         color.add_key(t, Vec4::from_array(c.to_array()));
     }
     let mut size = hanabi::Gradient::new();
     for &(t, s) in &e.size {
-        size.add_key(t, Vec3::splat(s));
+        size.add_key(t, Vec3::new(s.x, s.y, 1.0));
     }
     let spawner = match e.spawn {
         Spawn::Burst { count } => hanabi::SpawnerSettings::once((count as f32).into()),
         Spawn::Rate { per_second } => hanabi::SpawnerSettings::rate(per_second.into()),
     };
-    let mut asset = hanabi::EffectAsset::new(e.capacity, spawner, w.finish())
+    let mut module = w.finish();
+    if e.texture.is_some() {
+        module.add_texture_slot("texture", hanabi::SlotDimension::D2);
+    }
+    let mut asset = hanabi::EffectAsset::new(e.capacity, spawner, module)
         .with_name(e.name)
         .with_alpha_mode(match e.blend {
             ParticleBlend::Add => hanabi::AlphaMode::Add,
@@ -902,13 +942,15 @@ fn effect_asset(e: &Emitter, seed: u32, gravity_scale: f32) -> hanabi::EffectAss
         InitVelocity::Jitter(m) => asset.init(m),
     };
     asset.prng_seed = seed;
-    asset
-        .init(init_age)
-        .init(init_lifetime)
-        .update(gravity)
-        .render(hanabi::OrientModifier::new(
-            hanabi::OrientMode::ParallelCameraDepthPlane,
-        ))
+    asset = asset.init(init_age).init(init_lifetime).update(gravity);
+    if let Some((index, _)) = &sprite {
+        asset = asset.update(*index);
+    }
+    asset = asset
+        .render(hanabi::OrientModifier::new(match e.orient {
+            Orient::CameraPlane => hanabi::OrientMode::ParallelCameraDepthPlane,
+            Orient::AlongVelocity => hanabi::OrientMode::AlongVelocity,
+        }))
         .render(hanabi::ColorOverLifetimeModifier {
             gradient: color,
             blend: hanabi::ColorBlendMode::Overwrite,
@@ -917,8 +959,26 @@ fn effect_asset(e: &Emitter, seed: u32, gravity_scale: f32) -> hanabi::EffectAss
         .render(hanabi::SizeOverLifetimeModifier {
             gradient: size,
             screen_space_size: false,
-        })
-        .render(round)
+        });
+    if let Some(t) = e.texture {
+        asset = asset.render(hanabi::ParticleTextureModifier {
+            texture_slot: 0,
+            sample_mapping: match t.mapping {
+                TextureMapping::Modulate => hanabi::ImageSampleMapping::Modulate,
+                TextureMapping::ModulateRgb => hanabi::ImageSampleMapping::ModulateRGB,
+                TextureMapping::ModulateOpacityFromR => {
+                    hanabi::ImageSampleMapping::ModulateOpacityFromR
+                }
+            },
+        });
+    }
+    if let Some((_, flipbook)) = sprite {
+        asset = asset.render(flipbook);
+    }
+    if let Some(round) = round {
+        asset = asset.render(round);
+    }
+    asset
 }
 
 /// Renders a particle scenario on Bevy + bevy_hanabi at the fixed timestep `particles::DT`.
@@ -954,52 +1014,31 @@ pub fn run_particles(
             emitters: scenario.emitters.len(),
             timed_frames,
         });
+    insert_scene_resources(&mut app, &scenario.scene);
     let seed = variant.seed.unwrap_or(scenario.seed);
     app.add_systems(
         Startup,
-        move |mut commands: Commands,
-              mut images: ResMut<Assets<Image>>,
-              mut effects: ResMut<Assets<hanabi::EffectAsset>>| {
-            let target = images.add(Image::new_target_texture(
-                width,
-                height,
-                TextureFormat::Rgba8UnormSrgb,
-                None,
-            ));
-            commands.insert_resource(TargetImage(target.clone()));
-            let cam = scenario.camera;
-            commands.spawn((
-                Camera3d::default(),
-                Camera {
-                    clear_color: ClearColorConfig::Custom(linear(scenario.clear_color)),
-                    ..default()
-                },
-                RenderTarget::Image(target.into()),
-                Projection::Perspective(PerspectiveProjection {
-                    fov: cam.fov_y,
-                    near: cam.near,
-                    ..default()
-                }),
-                Exposure { ev100: cam.ev100 },
-                Hdr,
-                match cam.tonemapping {
-                    EngineTonemapping::AcesFitted => Tonemapping::AcesFitted,
-                    EngineTonemapping::TonyMcMapface => Tonemapping::TonyMcMapface,
-                    EngineTonemapping::AgX => Tonemapping::AgX,
-                },
-                DebandDither::Disabled,
-                Msaa::Sample4,
-                Transform::from_translation(v3(cam.eye)).looking_at(v3(cam.target), Vec3::Y),
-            ));
+        move |mut set: SceneSet, mut effects: ResMut<Assets<hanabi::EffectAsset>>| {
+            let images = set.spawn(
+                (width, height),
+                &scenario.scene,
+                &scenario.objects,
+                &scenario.assets,
+            );
             for (i, e) in scenario.emitters.iter().enumerate() {
                 let asset = effect_asset(e, seed.wrapping_add(i as u32), variant.gravity_scale);
                 let spawner = hanabi::EffectSpawner::new(&asset.spawner).with_active(false);
-                commands.spawn((
+                let mut effect = set.commands.spawn((
                     hanabi::ParticleEffect::new(effects.add(asset)),
                     spawner,
                     EmitterIndex(i),
                     Transform::from_translation(v3(e.translation)),
                 ));
+                if let Some(t) = e.texture {
+                    effect.insert(hanabi::EffectMaterial {
+                        images: vec![images[t.texture].clone()],
+                    });
+                }
             }
         },
     )

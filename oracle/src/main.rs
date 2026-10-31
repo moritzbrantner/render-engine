@@ -231,6 +231,7 @@ struct EngineParticles {
     alive: Vec<Vec<u32>>,
     /// The state after the last capture, for GPU timing.
     world: render_engine::world::World,
+    instances: Vec<render_engine::world::Instance>,
     viewport: Viewport,
 }
 
@@ -242,13 +243,13 @@ fn run_engine_particles(
     s: &particles::ParticleScenario,
     first_spawn_update: u32,
 ) -> Result<EngineParticles, String> {
-    let mut world = render_engine::world::World::new(gpu.renderer());
+    let (mut world, instances, textures) = content::upload(gpu.renderer(), &s.assets, &s.objects);
     let emitters: Vec<_> = s
         .emitters
         .iter()
         .enumerate()
         .map(|(i, e)| {
-            let desc = e.engine(s.seed.wrapping_add(i as u32));
+            let desc = e.engine(s.seed.wrapping_add(i as u32), &textures);
             let id = world.add_emitter(&desc);
             world.set_emitter_transform(
                 id,
@@ -257,10 +258,10 @@ fn run_engine_particles(
             (id, desc)
         })
         .collect();
-    let scene = s.scene();
+    let scene = &s.scene;
     let mut viewport = Viewport::new(gpu.renderer(), s.width, s.height);
     let plate = gpu
-        .render(&mut viewport, &world, &scene, &[])
+        .render(&mut viewport, &world, scene, &instances)
         .map_err(|e| e.to_string())?
         .rgba;
     let step = |world: &mut render_engine::world::World| {
@@ -287,6 +288,7 @@ fn run_engine_particles(
         spawn_counts: vec![Vec::new(); emitters.len()],
         alive: vec![Vec::new(); emitters.len()],
         world,
+        instances,
         viewport,
     };
     for frame in 1..=last {
@@ -299,7 +301,7 @@ fn run_engine_particles(
         }
         if s.captures.iter().any(|c| c.frame == frame) {
             let f = gpu
-                .render(&mut out.viewport, &out.world, &scene, &[])
+                .render(&mut out.viewport, &out.world, scene, &out.instances)
                 .map_err(|e| e.to_string())?;
             out.captures.push((frame, f.rgba));
         }
@@ -382,8 +384,8 @@ fn particle_scenarios(
                 gpu.gpu_frame_times(
                     &mut ours.viewport,
                     &mut ours.world,
-                    &s.scene(),
-                    &[],
+                    &s.scene,
+                    &ours.instances,
                     o.frames as usize,
                     Some(particles::DT),
                 )
@@ -769,7 +771,7 @@ fn main() -> ExitCode {
                 continue;
             }
         };
-        let (mut world, instances) = content::upload(gpu.renderer(), &s.assets, &s.objects);
+        let (mut world, instances, _) = content::upload(gpu.renderer(), &s.assets, &s.objects);
         let mut viewport = Viewport::new(gpu.renderer(), s.width, s.height);
         let ours = match gpu.render(&mut viewport, &world, &s.scene, &instances) {
             Ok(f) => f,

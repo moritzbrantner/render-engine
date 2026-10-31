@@ -257,7 +257,9 @@ Each capture is judged by one of two tiers:
   changes from run to run: a Bevy rerun of `particles_alpha` scores FLIP p99 0.037–0.065 and
   colour 0.007 against itself. Alpha-blended scenarios are therefore judged by the statistical
   tier at every capture (#14). Between effects, Bevy's transparent phase sorts hanabi's
-  effects back to front by their transform; render-engine does the same.
+  effects back to front by their transform, additive and alpha-blended alike (hanabi queues
+  both into `Transparent3d`); render-engine does the same (#15; before it drew the additive
+  emitters first, which only `smoke_and_sparks`, sparks in front of smoke, tells apart).
 - **Statistics** (`ImageStats`, both images against their own plate): *alpha coverage* is the
   share of pixels where some channel changed by more than 2/255, compared as the relative
   difference. The *spatial histogram* adds up, per cell of a 16 × 9 grid, each pixel's largest
@@ -282,6 +284,12 @@ Each capture is judged by one of two tiers:
   0.006 / 0.022 / 0.018; gravity × 1.25 scores 0.072 / 0.173 / 0.134. `particles_alpha`: seed
   noise over both captures reaches 0.042 / 0.046 / 0.064, so the gate is 0.065 / 0.07 / 0.095;
   buoyancy × 1.25 scores coverage 0.087 at 1.0 s and 0.139 / spatial 0.087 at 3.0 s.
+  `particles_textured` (#15): seed noise at 2.5 s reaches 0.061 / 0.068 / 0.074, so the gate is
+  0.092 / 0.10 / 0.11. Gravity × 1.25 scores 0.028 / 0.064 / 0.022 there, inside seed noise (the
+  sparks' arcs move by a few pixels), so here the exact capture is what rejects it (FLIP mean
+  0.0155, p99 0.53; other seeds ≥ 0.019 / 0.57). `smoke_and_sparks` (#15): seed noise over both
+  captures reaches 0.061 / 0.090 / 0.061, so the gate is 0.09 / 0.135 / 0.09; gravity and
+  buoyancy × 1.25 score spatial 0.160 at 1.0 s.
 - **Engine side.** `render_engine::particles` replays hanabi step by step. On the CPU
   (`World::step_particles`): `EffectSpawner::tick` for the spawn count, and the effect seed set
   to `prng_seed` when the emitter is added and advanced by `StdRng::seed_from_u64(seed).random()`
@@ -293,16 +301,40 @@ Each capture is judged by one of two tiers:
   arguments; `update`, one thread per alive particle, ages, reaps, does `v += a·dt` and
   `p += v·dt` (the particles just spawned included), returns a dead slot at the decremented
   alive count through an atomic and appends a survivor to the next alive list through another,
-  writing its quad (size and colour over life) for the render pass. Each emitter is one
+  writing its quad (size and colour over life, the flipbook's sprite index, the velocity) for
+  the render pass. Each emitter is one
   indirect draw. Like hanabi, which slot a recycled spawn takes then depends on the atomics.
   hanabi compiles an effect, and sets its seed, on app update 1, so the Bevy side reports the
   update on which its spawners started (`first_spawn_update`). The engine side adds its emitters
   inactive and steps them `first_spawn_update − 1` times before activating them, so both seed
   chains are at the same link on the first spawn. With the chain off by one step,
   `particles_fountain@t0500` scores FLIP mean 0.024 and p99 0.94, so the gate checks the chain.
-  Particles are drawn in the main pass after the blended instances, as hanabi's quads
-  (`ParallelCameraDepthPlane`, the unit quad, `RoundModifier`'s mask, 4× MSAA, depth tested
-  but not written), additive emitters first, then alpha-blended emitters back to front.
+  Particles are drawn in the main pass after the blended instances, as hanabi's quads (the
+  unit quad, 4× MSAA, depth tested but not written), all emitters back to front. The render
+  modifiers follow hanabi's generated code: `OrientModifier` (`ParallelCameraDepthPlane`, or
+  `AlongVelocity`: x along the velocity, y = view ray × x), the size over life as an (x, y)
+  pair, `FlipbookModifier`'s uv offset (`(ij + uv) · 1/grid`, the scale computed on the CPU),
+  then in the fragment stage `ParticleTextureModifier` (its three sample mappings, the
+  texture's own sampler) and `RoundModifier`'s mask. hanabi leaves the sprite index to the
+  effect; render-engine's flipbook runs once over the particle's life, `i32(age / lifetime ·
+  frames)` after the age step, which the oracle gives hanabi as a `SetAttributeModifier
+  (SPRITE_INDEX)` in the update pass.
+- **Lighting, fog and soft particles: out of scope** (#15). At the pinned `d277555d4a`,
+  hanabi's render pass (`vfx_render.wesl`) binds only the view, the simulation parameters, the
+  particle buffers and the effect's own material textures. It reads no light, shadow,
+  environment or fog data, and no built-in modifier shades a particle: `RenderContext::
+  needs_normal` exists ("for lighting effects") but nothing sets it, and the README's feature list
+  has no lighting entry. Bevy's `DistanceFog` lives in `bevy_pbr`'s mesh shaders, which hanabi
+  does not use, so particles are not fogged, and Bevy's exposure (applied in those shaders) does
+  not scale them either. There is no soft-particle (depth fade) modifier: the pass cannot reach
+  the view's depth or prepass textures (a material slot takes an asset `Image`, and the
+  fragment stage has no frag-coord expression), so particles meet geometry with the hard edge of
+  the depth test (`smoke_and_sparks` shows it where the smoke meets the ground and the box).
+  Collision with the depth buffer is unchecked on the README's roadmap. render-engine therefore
+  renders particles unlit, unfogged and without depth fade, like its oracle; the lit set around
+  `particles_textured` and `smoke_and_sparks` (sun with a shadow cascade, ambient light, a point
+  light) lights the geometry only. Lit or soft particles would need another oracle or a hanabi
+  version that has them; they are not built without one.
 - **Recycling in practice.** On the RTX 3060 Ti and on lavapipe, both sides' atomics happen to
   recycle slots in the same order for `particles_fountain` and `particles_100k`, so their late
   captures also match nearly exactly (FLIP mean ≤ 0.0002, statistics 0.000). The statistical

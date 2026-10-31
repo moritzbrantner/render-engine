@@ -354,6 +354,8 @@ fn gpu_particles_spawn_age_die_and_draw() {
         accel: Vec3::ZERO,
         size_over_life: None,
         color_over_life: None,
+        orient: Orient::CameraPlane,
+        texture: None,
         roundness: 0.0,
         blend: ParticleBlend::Add,
         active: true,
