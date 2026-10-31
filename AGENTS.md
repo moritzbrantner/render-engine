@@ -26,7 +26,7 @@ never depends on Bevy outside `oracle/`.
 | --- | --- |
 | `src/` | The `render-engine` crate: `world` (consumer meshes/textures/materials behind handles), `mesh`, `material`, `scene` (camera, lights and sky per frame), `renderer` (wgpu passes, `Viewport`), `sky` (Bevy's atmosphere LUTs, sky pass and runtime environment filter), `headless` (offscreen + GPU timing) |
 | `src/shaders/` | WGSL shaders |
-| `oracle/` | Bevy oracle (own manifest/lockfile): each scenario on Bevy and render-engine, FLIP + GPU-time gates |
+| `oracle/` | Bevy oracle (own manifest/lockfile): each scenario on Bevy and render-engine, FLIP + GPU-time gates; particle scenarios on Bevy + `bevy_hanabi` (`particles.rs`, decision D9) |
 | `assets/ibl/` | CC0 HDRI and its prefiltered environment cube maps (`oracle/src/bin/bake_ibl.rs`; provenance in its README) |
 | `assets/props/` | CC0 glTF props for `textured_props` (provenance in its README) |
 | `docs/consumer-integration.md` | How a consumer (the mmorpg native client) drives the engine |
@@ -41,6 +41,7 @@ cargo test --locked                                   # includes a headless rend
 cargo run --release --locked --manifest-path oracle/Cargo.toml                    # GPU: image + GPU-time gates
 cargo run --release --locked --manifest-path oracle/Cargo.toml -- --only sun_shadows --no-timing   # debugging; --list
 WGPU_FORCE_FALLBACK_ADAPTER=1 cargo run --release --locked --manifest-path oracle/Cargo.toml       # as CI: lavapipe
+cargo run --release --locked --manifest-path oracle/Cargo.toml -- --calibrate   # particle gates: Bevy vs itself (D9)
 bash scripts/build-pages.sh
 ```
 
@@ -58,8 +59,9 @@ table into the PR.
 
 - **One task = one branch = one PR**, targeting `main`, closing its issue (`Closes #n`). A task is one eligible issue. Deliver its
   scope, its oracle scenario and the docs it changes on that branch.
-- **Bevy oracle.** Every parity PR adds its scenario to `oracle/src/scenarios.rs` and its Bevy
-  translation to `oracle/src/bevy_side.rs`. Do not add other ratchets, evidence packaging or
+- **Bevy oracle.** Every parity PR adds its scenario to `oracle/src/scenarios.rs` (particles:
+  `oracle/src/particles.rs`, with thresholds from `--calibrate`) and its Bevy translation to
+  `oracle/src/bevy_side.rs`. Do not add other ratchets, evidence packaging or
   attestation.
 - **Experimental API.** Pick the cleanest API for the consumers; no deprecation windows, shims or
   back-compat layers.

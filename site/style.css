@@ -123,6 +123,22 @@ img { display: block; max-width: 100%; height: auto; }
 .status.fail { color: var(--fail); }
 .row { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 
+/* Particle scenarios: Bevy captures and the alive-count chart */
+.status.gap { color: var(--muted); }
+.particle { padding: 8px 0 18px; }
+.particle > header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; }
+.particle > header h3 { margin: 0; font-size: 20px; font-weight: 700; }
+.particle > .cap { margin: 4px 0 14px; font-size: 14px; color: var(--muted); }
+figure.card { margin: 0; }
+.card .tier { font-size: 13px; color: var(--muted); }
+.alive { margin: 16px 0 0; max-width: 640px; }
+.alive svg { width: 100%; height: auto; display: block; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-l); }
+.alive .series { fill: none; stroke-width: 1.5; }
+.alive .s0, .alive .key.s0 { stroke: var(--accent); color: var(--accent); }
+.alive .s1, .alive .key.s1 { stroke: var(--pass); color: var(--pass); }
+.alive .mark { stroke: var(--muted); stroke-dasharray: 3 3; stroke-width: 1; }
+.alive figcaption { margin-top: 6px; font-size: 13px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 14px; }
+
 /* FLIP scale: where a value sits on the magma ramp, with the gate as a tick */
 .scale { display: grid; grid-template-columns: 4.2em 1fr 4.6em; gap: 8px; align-items: center; font-size: 13px; }
 .scale .k { color: var(--muted); }
