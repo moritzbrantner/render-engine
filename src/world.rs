@@ -475,6 +475,21 @@ impl World {
         &self.particles
     }
 
+    /// A particle texture's view and sampler; white for none.
+    pub(crate) fn particle_texture(
+        &self,
+        id: Option<TextureId>,
+    ) -> (&wgpu::TextureView, &wgpu::Sampler) {
+        let t = match id {
+            Some(id) => self
+                .textures
+                .get(id.0)
+                .expect("emitter uses a removed texture"),
+            None => &self.white,
+        };
+        (&t.view, &t.sampler)
+    }
+
     pub(crate) fn mesh(&self, id: MeshId) -> &GpuMesh {
         self.meshes.get(id.0).expect("instance uses a removed mesh")
     }

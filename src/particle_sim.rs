@@ -15,7 +15,7 @@ use crate::{
     renderer::FrameTimestamps,
 };
 use bytemuck::{Pod, Zeroable};
-use glam::{Mat4, Vec3, Vec4};
+use glam::{Mat4, Vec2, Vec3, Vec4};
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -36,7 +36,7 @@ struct GpuEmitterStep {
     color_t: [f32; MAX_GRADIENT_KEYS],
     color_v: [Vec4; MAX_GRADIENT_KEYS],
     size_t: [f32; MAX_GRADIENT_KEYS],
-    size_v: [f32; MAX_GRADIENT_KEYS],
+    size_v: [Vec2; MAX_GRADIENT_KEYS],
     id: u32,
     base: u32,
     capacity: u32,
@@ -47,7 +47,9 @@ struct GpuEmitterStep {
     color_blend: u32,
     n_color: u32,
     n_size: u32,
-    _pad: [u32; 2],
+    /// Flipbook frames over life (0: no flipbook, the sprite index stays 0).
+    sprite_frames: u32,
+    _pad: u32,
     mods: [GpuModifier; MAX_INIT_MODIFIERS],
 }
 
@@ -63,7 +65,7 @@ struct StepHeader {
 /// `Particle` in `particle_sim.wgsl`.
 const PARTICLE_BYTES: u64 = 64;
 /// `Quad`: what the render pass reads per instance (`particle_pass`).
-pub(crate) const QUAD_BYTES: u64 = 32;
+pub(crate) const QUAD_BYTES: u64 = 64;
 /// `Counters`: draw arguments (`wgpu::util::DrawIndirectArgs`), alive count, padding.
 pub(crate) const COUNTER_BYTES: u64 = 32;
 
@@ -169,6 +171,7 @@ fn emitter_step(
             s.size_v[i] = v;
         }
     }
+    s.sprite_frames = d.texture.and_then(|t| t.flipbook).map_or(0, |f| f.frames);
     s.color_blend = 3;
     if let Some(c) = &d.color_over_life
         && !c.gradient.keys.is_empty()

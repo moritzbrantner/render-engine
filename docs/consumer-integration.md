@@ -220,8 +220,8 @@ frame.present();
 
 Emitters live in the `World` next to the meshes, under `EmitterId` handles; their particles live
 on the GPU. The game steps them at its simulation rate by recording compute passes into its
-encoder; every frame then draws all alive particles as camera-facing quads in the main pass,
-after the blended instances.
+encoder; every frame then draws all alive particles as quads in the main pass, after the
+blended instances.
 
 ```rust
 use render_engine::particles::*;
@@ -237,12 +237,20 @@ let sparks = world.add_emitter(&Emitter {
         InitModifier::Lifetime(Value::Const(1.5)),
     ],
     accel: Vec3::new(0.0, -9.81, 0.0),
-    size_over_life: Some(Gradient::new(vec![(0.0, 0.12), (1.0, 0.04)])),
+    // (x, y) in metres; with `Orient::AlongVelocity`, x is the streak's length.
+    size_over_life: Some(Gradient::new(vec![(0.0, Vec2::new(0.24, 0.03)), (1.0, Vec2::new(0.08, 0.02))])),
     color_over_life: Some(ColorOverLife {
         gradient: Gradient::new(vec![(0.0, Vec4::new(1.5, 2.5, 4.0, 1.0)), (1.0, Vec4::new(0.1, 0.3, 0.8, 0.0))]),
         blend: ColorBlend::Overwrite,
     }),
-    roundness: 1.0,                          // 0 = square quads, 1 = discs
+    orient: Orient::AlongVelocity,           // or Orient::CameraPlane
+    // A texture in the same world, optionally a flipbook run once over each particle's life.
+    texture: Some(ParticleTexture {
+        texture: spark_texture,
+        mapping: TextureMapping::Modulate,
+        flipbook: None,                      // Some(Flipbook { grid: UVec2::new(2, 2), frames: 4 })
+    }),
+    roundness: 0.0,                          // 0 = square quads, 1 = discs
     blend: ParticleBlend::Add,               // or ParticleBlend::Alpha (emitters back to front)
     active: true,
 });
@@ -266,9 +274,13 @@ world.step_particles(&mut encoder, dt, None);
 - **Limits.** At most 8 init modifiers per emitter and 8 keys per gradient.
 - **Simulation space.** Particles live in world space: moving the emitter moves where new ones
   spawn, not the ones already alive.
-- **Alpha blending.** Alpha-blended emitters are drawn after the additive ones, back to front
-  by their transform's position (as Bevy sorts hanabi effects); inside an emitter the order is
-  the GPU's alive-list order, as in hanabi.
+- **Draw order.** Emitters are drawn back to front by their transform's position, additive and
+  alpha-blended alike (as Bevy sorts hanabi effects); inside an emitter the order is the GPU's
+  alive-list order, as in hanabi.
+- **Unlit, unfogged, hard edges.** Particles are not lit by the scene's lights, fog does not
+  apply to them, and they are cut hard where they meet geometry (depth tested, no depth fade):
+  bevy_hanabi renders them this way, and it is the oracle (technical decisions D9). Tint an
+  emitter's colours yourself for the time of day.
 - **Cost.** `particles_100k` (about 100k alive in one fountain plus 50 small effects) runs on
   the GPU; see the oracle report for its timings against hanabi.
 

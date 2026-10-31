@@ -38,10 +38,11 @@ and GPU frame time. See [technical decisions](docs/technical-decisions.md).
   slower than Bevy's.
 - **Particles:** `render_engine::particles` emitters (burst and rate spawners; position,
   velocity, lifetime, size and colour init modifiers; acceleration; size and colour over life;
-  additive or alpha blending) live in the `World`, are stepped by the game and drawn as
-  camera-facing quads in the main pass. The simulation runs in compute shaders (100k particles in
-  `particles_100k`) and replays `bevy_hanabi`'s spawner, seed
-  chain, per-particle random stream and slot allocation.
+  textures and flipbooks; camera-facing or velocity-aligned quads; additive or alpha blending)
+  live in the `World`, are stepped by the game and drawn in the main pass, depth tested against
+  the scene. The simulation runs in compute shaders (100k particles in `particles_100k`) and
+  replays `bevy_hanabi`'s spawner, seed chain, per-particle random stream and slot allocation.
+  Like hanabi's, particles are unlit, unfogged and have no depth fade (soft particles).
 - **Particle oracle:** particle scenarios run on Bevy with `bevy_hanabi` and on render-engine at a
   fixed timestep and seed. Captures before any particle dies need an exact image match (FLIP).
   Later captures need matching coverage, spatial and colour statistics, and spawn and alive

@@ -3,11 +3,14 @@
 //! An [`Emitter`] describes an effect: a [`Spawner`], the [`InitModifier`]s that set each new
 //! particle's attributes (applied in order, drawing from the particle's random stream in that
 //! order), a constant acceleration, the render modifiers (size and colour over the particle's
-//! life, a round mask) and how it blends. The consumer adds emitters to the
-//! [`World`](crate::world::World), advances them with
+//! life, a round mask, a texture with an optional flipbook, the quad's orientation) and how it
+//! blends. The consumer adds emitters to the [`World`](crate::world::World), advances them with
 //! [`World::step_particles`](crate::world::World::step_particles) at its simulation rate (it
 //! records the step's compute passes), and the renderer draws every live particle in the main
-//! pass as a camera-facing quad.
+//! pass as a quad facing the camera.
+//!
+//! Particles are unlit and unfogged, and their edges are hard against the scene's depth: that is
+//! what bevy_hanabi renders (technical decisions D9, "Lighting, fog and soft particles").
 //!
 //! The simulation replays hanabi's. On the CPU: the spawner's per-frame count
 //! (`EffectSpawner::tick`) and the effect's per-frame seed chain
@@ -20,7 +23,8 @@
 //! An emitter takes at most [`MAX_INIT_MODIFIERS`] init modifiers and gradients of at most
 //! [`MAX_GRADIENT_KEYS`] keys.
 
-use glam::{Mat4, Vec3, Vec4};
+use crate::world::TextureId;
+use glam::{Mat4, UVec2, Vec2, Vec3, Vec4};
 use rand::{RngExt as _, SeedableRng as _};
 
 /// How many particles an emitter spawns and when (hanabi `SpawnerSettings`, constant values).
@@ -161,16 +165,62 @@ pub struct ColorOverLife {
     pub blend: ColorBlend,
 }
 
-/// How a particle's colour reaches the HDR target. Neither writes depth; both test it.
+/// How a particle's colour reaches the HDR target. Neither writes depth; both test it. Like
+/// Bevy's transparent phase, the renderer draws all emitters back to front by their transform's
+/// position, whatever their blending; within an emitter, particles are drawn in alive-list
+/// order, as hanabi draws them, which the GPU's atomics decide.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ParticleBlend {
-    /// `dst += rgb · a` (hanabi `AlphaMode::Add`); order-independent.
+    /// `dst += rgb · a` (hanabi `AlphaMode::Add`); order-independent among additive emitters.
     Add,
-    /// `dst = rgb · a + dst · (1 − a)` (hanabi `AlphaMode::Blend`). Like Bevy's transparent
-    /// phase, the renderer draws these emitters back to front by their transform's position,
-    /// after the additive ones; within an emitter, particles are drawn in alive-list order, as
-    /// hanabi draws them, which the GPU's atomics decide.
+    /// `dst = rgb · a + dst · (1 − a)` (hanabi `AlphaMode::Blend`).
     Alpha,
+}
+
+/// How a particle's quad is oriented (hanabi `OrientMode`, without a rotation). The quad's x
+/// axis carries the size's x, its y axis the size's y.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Orient {
+    /// Parallel to the camera's image plane: x along the camera's right, y along its up
+    /// (`ParallelCameraDepthPlane`).
+    #[default]
+    CameraPlane,
+    /// x along the velocity, y across it and the view ray, so the quad turns about its velocity
+    /// to face the camera (`AlongVelocity`): a spark's streak.
+    AlongVelocity,
+}
+
+/// How a particle texture's sample combines with the particle's colour (hanabi
+/// `ImageSampleMapping`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TextureMapping {
+    /// `colour · sample`.
+    #[default]
+    Modulate,
+    /// `colour.rgb · sample.rgb`, alpha kept.
+    ModulateRgb,
+    /// `colour.a · sample.r`, colour kept.
+    ModulateOpacityFromR,
+}
+
+/// A texture over each particle's quad (hanabi `ParticleTextureModifier`), applied before the
+/// round mask. The texture comes from the same [`World`](crate::world::World) and is sampled
+/// with its own sampler and implicit derivatives, as hanabi samples it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ParticleTexture {
+    pub texture: TextureId,
+    pub mapping: TextureMapping,
+    pub flipbook: Option<Flipbook>,
+}
+
+/// A sprite sheet of `grid.x × grid.y` cells, read row by row from the top left (hanabi
+/// `FlipbookModifier`). The sprite index runs once over the particle's life: `i32(age /
+/// lifetime · frames)` after each update step, as hanabi's `SetAttributeModifier(SPRITE_INDEX)`
+/// with that expression computes it in its update pass.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Flipbook {
+    pub grid: UVec2,
+    pub frames: u32,
 }
 
 /// An effect: what spawns, how each particle starts, moves and looks.
@@ -184,9 +234,11 @@ pub struct Emitter {
     pub init: Vec<InitModifier>,
     /// Constant acceleration, m/s² (hanabi `AccelModifier`), e.g. gravity.
     pub accel: Vec3,
-    /// Quad size over life, metres; replaces the size attribute.
-    pub size_over_life: Option<Gradient<f32>>,
+    /// Quad size over life (x, y), metres; replaces the size attribute.
+    pub size_over_life: Option<Gradient<Vec2>>,
     pub color_over_life: Option<ColorOverLife>,
+    pub orient: Orient,
+    pub texture: Option<ParticleTexture>,
     /// Round mask (hanabi `RoundModifier`): 0 square, 1 a disc; the quad's corners are cut where
     /// `|2u − 1|^(2/r) + |2v − 1|^(2/r) > 1`.
     pub roundness: f32,
