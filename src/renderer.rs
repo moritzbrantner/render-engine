@@ -1,8 +1,8 @@
-//! The wgpu renderer: one sun shadow pass and one forward PBR pass with 4× MSAA.
+//! The wgpu renderer: one shadow pass per sun cascade and one forward PBR pass with 4× MSAA.
 
 use crate::{
     mesh::{Geometry, Vertex},
-    scene::{Scene, SunShadows},
+    scene::{MAX_CASCADES, Scene, ShadowFilter},
 };
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat3, Mat4, Vec3, Vec4};
@@ -11,18 +11,25 @@ use wgpu::util::DeviceExt;
 /// MSAA sample count of the main pass (Bevy's default `Msaa::Sample4`).
 pub const SAMPLE_COUNT: u32 = 4;
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+/// Stride of the per-cascade shadow-view uniforms (dynamic-offset alignment).
+const CASCADE_STRIDE: u64 = 256;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct FrameUniform {
     clip_from_world: Mat4,
     view_from_world: Mat4,
-    light_clip_from_world: Mat4,
+    cascade_clip_from_world: [Mat4; MAX_CASCADES],
+    /// Per cascade: x far bound (m), y texel size (m).
+    cascade_params: [Vec4; MAX_CASCADES],
     eye: Vec4,
     direction_to_light: Vec4,
     sun_color: Vec4,
     ambient_color: Vec4,
+    /// x depth bias (m), y normal bias (texels), z overlap proportion, w cascade count.
     shadow: Vec4,
+    /// x exposure, y 1 when the sun casts shadows, z 1 when there is a sun, w 1 for Gaussian
+    /// filtering.
     flags: Vec4,
 }
 
@@ -40,6 +47,7 @@ struct InstanceData {
 pub struct Renderer {
     color_format: wgpu::TextureFormat,
     frame_layout: wgpu::BindGroupLayout,
+    cascade_layout: wgpu::BindGroupLayout,
     shadow_layout: wgpu::BindGroupLayout,
     shadow_pipeline: wgpu::RenderPipeline,
     lit_pipeline: wgpu::RenderPipeline,
@@ -53,7 +61,9 @@ pub struct PreparedScene {
     clear_color: wgpu::Color,
     frame_group: wgpu::BindGroup,
     shadow_group: wgpu::BindGroup,
-    shadow_view: Option<wgpu::TextureView>,
+    cascade_group: wgpu::BindGroup,
+    /// One depth view per cascade (render attachments); empty without sun shadows.
+    cascade_views: Vec<wgpu::TextureView>,
     vertices: wgpu::Buffer,
     indices: wgpu::Buffer,
     /// (first index, index count, base vertex) per instance, in instance order.
@@ -104,7 +114,7 @@ impl Renderer {
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Depth,
-                        view_dimension: wgpu::TextureViewDimension::D2,
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
                         multisampled: false,
                     },
                     count: None,
@@ -116,6 +126,20 @@ impl Renderer {
                     count: None,
                 },
             ],
+        });
+        // The shadow pass picks its cascade's matrix through a dynamic offset.
+        let cascade_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("shadow cascade"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: true,
+                    min_binding_size: wgpu::BufferSize::new(64),
+                },
+                count: None,
+            }],
         });
         let vertex_layout = wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Vertex>() as u64,
@@ -138,7 +162,7 @@ impl Renderer {
         let shadow_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("sun shadow"),
-                bind_group_layouts: &[Some(&frame_layout)],
+                bind_group_layouts: &[Some(&frame_layout), Some(&cascade_layout)],
                 immediate_size: 0,
             });
         let shadow_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -188,7 +212,7 @@ impl Renderer {
             cache: None,
         });
 
-        // Hardware 2×2 PCF (Bevy `ShadowFilteringMethod::Hardware2x2`).
+        // Hardware 2×2 PCF; the Gaussian filter combines 9 of these taps.
         let shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("sun shadow"),
             mag_filter: wgpu::FilterMode::Linear,
@@ -200,6 +224,7 @@ impl Renderer {
         Self {
             color_format,
             frame_layout,
+            cascade_layout,
             shadow_layout,
             shadow_pipeline,
             lit_pipeline,
@@ -221,39 +246,55 @@ impl Renderer {
         let clip_from_view = perspective_infinite_reverse(cam.fov_y, aspect, cam.near);
 
         let shadows = scene.sun.and_then(|s| s.shadows.map(|cfg| (s, cfg)));
-        let cascade = shadows.map(|(sun, cfg)| {
-            Cascade::fit(
-                cfg,
-                sun.direction,
-                cam.fov_y,
-                aspect,
-                view_from_world.inverse(),
-            )
+        let world_from_view = view_from_world.inverse();
+        let cascades: Vec<(f32, Cascade)> = shadows.map_or_else(Vec::new, |(sun, cfg)| {
+            cfg.cascade_ranges()
+                .into_iter()
+                .map(|(near, far)| {
+                    let c = Cascade::fit(
+                        near,
+                        far,
+                        cfg.map_size,
+                        sun.direction,
+                        cam.fov_y,
+                        aspect,
+                        world_from_view,
+                    );
+                    (far, c)
+                })
+                .collect()
         });
+        let mut cascade_clip_from_world = [Mat4::IDENTITY; MAX_CASCADES];
+        let mut cascade_params = [Vec4::ZERO; MAX_CASCADES];
+        for (i, (far, c)) in cascades.iter().enumerate() {
+            cascade_clip_from_world[i] = c.clip_from_world;
+            cascade_params[i] = Vec4::new(*far, c.texel_size, 0.0, 0.0);
+        }
 
         let sun = scene.sun;
         let frame = FrameUniform {
             clip_from_world: clip_from_view * view_from_world,
             view_from_world,
-            light_clip_from_world: cascade.map_or(Mat4::IDENTITY, |c| c.clip_from_world),
+            cascade_clip_from_world,
+            cascade_params,
             eye: cam.eye.extend(1.0),
             direction_to_light: sun.map_or(Vec4::ZERO, |s| (-s.direction.normalize()).extend(0.0)),
             sun_color: sun.map_or(Vec4::ZERO, |s| (s.color * s.illuminance).extend(1.0)),
             ambient_color: (scene.ambient.color * scene.ambient.brightness).extend(1.0),
-            shadow: match (shadows, cascade) {
-                (Some((_, cfg)), Some(c)) => Vec4::new(
+            shadow: shadows.map_or(Vec4::ZERO, |(_, cfg)| {
+                Vec4::new(
                     cfg.depth_bias,
-                    cfg.normal_bias,
-                    c.texel_size,
-                    cfg.max_distance,
-                ),
-                _ => Vec4::ZERO,
-            },
+                    // Bevy scales the normal bias by √2 for the worst-case diagonal texel offset.
+                    cfg.normal_bias * std::f32::consts::SQRT_2,
+                    cfg.overlap_proportion,
+                    cascades.len() as f32,
+                )
+            }),
             flags: Vec4::new(
                 cam.exposure(),
                 f32::from(u8::from(shadows.is_some())),
                 f32::from(u8::from(sun.is_some())),
-                0.0,
+                f32::from(u8::from(cam.shadow_filter == ShadowFilter::Gaussian)),
             ),
         };
 
@@ -315,12 +356,13 @@ impl Renderer {
         });
 
         let shadow_size = shadows.map_or(1, |(_, cfg)| cfg.map_size);
+        let layers = cascades.len().max(1) as u32;
         let shadow_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("sun shadow map"),
+            label: Some("sun shadow maps"),
             size: wgpu::Extent3d {
                 width: shadow_size,
                 height: shadow_size,
-                depth_or_array_layers: 1,
+                depth_or_array_layers: layers,
             },
             mip_level_count: 1,
             sample_count: 1,
@@ -329,7 +371,42 @@ impl Renderer {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
-        let shadow_view = shadow_texture.create_view(&Default::default());
+        let shadow_view = shadow_texture.create_view(&wgpu::TextureViewDescriptor {
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            ..Default::default()
+        });
+        let cascade_views = (0..cascades.len() as u32)
+            .map(|layer| {
+                shadow_texture.create_view(&wgpu::TextureViewDescriptor {
+                    dimension: Some(wgpu::TextureViewDimension::D2),
+                    base_array_layer: layer,
+                    array_layer_count: Some(1),
+                    ..Default::default()
+                })
+            })
+            .collect();
+        let mut cascade_bytes = vec![0u8; CASCADE_STRIDE as usize * MAX_CASCADES];
+        for (i, m) in cascade_clip_from_world.iter().enumerate() {
+            let at = i * CASCADE_STRIDE as usize;
+            cascade_bytes[at..at + 64].copy_from_slice(bytemuck::bytes_of(m));
+        }
+        let cascade_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("shadow cascades"),
+            contents: &cascade_bytes,
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        let cascade_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("shadow cascade"),
+            layout: &self.cascade_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &cascade_buffer,
+                    offset: 0,
+                    size: wgpu::BufferSize::new(64),
+                }),
+            }],
+        });
         let shadow_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("sun shadow"),
             layout: &self.shadow_layout,
@@ -376,7 +453,8 @@ impl Renderer {
             },
             frame_group,
             shadow_group,
-            shadow_view: shadows.is_some().then_some(shadow_view),
+            cascade_group,
+            cascade_views,
             vertices: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("vertices"),
                 contents: bytemuck::cast_slice(&vertices),
@@ -413,9 +491,9 @@ impl Renderer {
         };
         let query_set = timestamps.map(|t| t.query_set);
 
-        if let Some(shadow_view) = &scene.shadow_view {
+        for (i, shadow_view) in scene.cascade_views.iter().enumerate() {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("sun shadow"),
+                label: Some("sun shadow cascade"),
                 color_attachments: &[],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: shadow_view,
@@ -425,15 +503,19 @@ impl Renderer {
                     }),
                     stencil_ops: None,
                 }),
-                timestamp_writes: query_set.map(|query_set| wgpu::RenderPassTimestampWrites {
-                    query_set,
-                    beginning_of_pass_write_index: Some(0),
-                    end_of_pass_write_index: None,
+                // The frame starts at the first cascade's pass.
+                timestamp_writes: query_set.filter(|_| i == 0).map(|query_set| {
+                    wgpu::RenderPassTimestampWrites {
+                        query_set,
+                        beginning_of_pass_write_index: Some(0),
+                        end_of_pass_write_index: None,
+                    }
                 }),
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
             pass.set_pipeline(&self.shadow_pipeline);
+            pass.set_bind_group(1, &scene.cascade_group, &[i as u32 * CASCADE_STRIDE as u32]);
             draw(&mut pass);
         }
 
@@ -458,7 +540,7 @@ impl Renderer {
             }),
             timestamp_writes: query_set.map(|query_set| wgpu::RenderPassTimestampWrites {
                 query_set,
-                beginning_of_pass_write_index: scene.shadow_view.is_none().then_some(0),
+                beginning_of_pass_write_index: scene.cascade_views.is_empty().then_some(0),
                 end_of_pass_write_index: Some(1),
             }),
             occlusion_query_set: None,
@@ -501,8 +583,9 @@ fn perspective_infinite_reverse(fov_y: f32, aspect: f32, near: f32) -> Mat4 {
     )
 }
 
-/// The sun's single shadow cascade, fitted to the camera frustum slice exactly like Bevy's
-/// `calculate_cascade` (diameter rounded up to whole metres, centre snapped to texels).
+/// One sun shadow cascade, fitted to the camera frustum slice `near..far` (view distances)
+/// exactly like Bevy's `calculate_cascade` (diameter rounded up to whole metres, centre snapped
+/// to texels).
 #[derive(Clone, Copy, Debug)]
 pub struct Cascade {
     pub clip_from_world: Mat4,
@@ -511,7 +594,9 @@ pub struct Cascade {
 
 impl Cascade {
     pub fn fit(
-        cfg: SunShadows,
+        near: f32,
+        far: f32,
+        map_size: u32,
         sun_direction: Vec3,
         fov_y: f32,
         aspect: f32,
@@ -525,7 +610,7 @@ impl Cascade {
         let light_from_view = world_from_light.transpose() * world_from_view;
 
         let t = (fov_y * 0.5).tan();
-        let corners = [-cfg.min_distance, -cfg.max_distance].map(|z| {
+        let corners = [-near, -far].map(|z| {
             let a = z.abs() * t;
             [
                 Vec3::new(a * aspect, -a, z),
@@ -544,7 +629,7 @@ impl Cascade {
         let body = (corners[0] - corners[6]).length_squared();
         let far = (corners[4] - corners[6]).length_squared();
         let diameter = body.max(far).sqrt().ceil();
-        let texel_size = diameter / cfg.map_size as f32;
+        let texel_size = diameter / map_size as f32;
         let centre = Vec3::new(
             (0.5 * (min.x + max.x) / texel_size).floor() * texel_size,
             (0.5 * (min.y + max.y) / texel_size).floor() * texel_size,
@@ -573,11 +658,12 @@ mod tests {
 
     #[test]
     fn cascade_covers_the_view_slice() {
-        let cfg = SunShadows::default();
         let eye = Vec3::new(6.0, 5.0, 8.0);
         let world_from_view = look_at(eye, Vec3::ZERO).inverse();
         let c = Cascade::fit(
-            cfg,
+            0.1,
+            30.0,
+            2048,
             Vec3::new(-0.4, -1.0, -0.3),
             45f32.to_radians(),
             16.0 / 9.0,
@@ -590,5 +676,18 @@ mod tests {
             "{p}"
         );
         assert!(c.texel_size > 0.0 && c.texel_size < 0.05);
+    }
+
+    #[test]
+    fn default_cascades_follow_bevy_spacing() {
+        let ranges = crate::scene::SunShadows::default().cascade_ranges();
+        let expected = [(0.1, 10.0), (8.0, 24.662), (19.73, 60.822), (48.66, 150.0)];
+        assert_eq!(ranges.len(), expected.len());
+        for ((near, far), (en, ef)) in ranges.into_iter().zip(expected) {
+            assert!(
+                (near - en).abs() < 0.01 && (far - ef).abs() < 0.01,
+                "{near}..{far}"
+            );
+        }
     }
 }

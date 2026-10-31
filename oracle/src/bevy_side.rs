@@ -27,7 +27,7 @@ use bevy::{
     },
     window::ExitCondition,
 };
-use render_engine::scene::Shape;
+use render_engine::scene::{ShadowFilter, Shape};
 use std::{
     path::PathBuf,
     sync::{Arc, Mutex},
@@ -140,7 +140,10 @@ pub fn run(scenario: Scenario, timed_frames: u32) -> BevyRun {
                 Tonemapping::AcesFitted,
                 DebandDither::Disabled,
                 Msaa::Sample4,
-                ShadowFilteringMethod::Hardware2x2,
+                match cam.shadow_filter {
+                    ShadowFilter::Hardware2x2 => ShadowFilteringMethod::Hardware2x2,
+                    ShadowFilter::Gaussian => ShadowFilteringMethod::Gaussian,
+                },
                 Transform::from_translation(v3(cam.eye)).looking_at(v3(cam.target), Vec3::Y),
             ));
             if let Some(sun) = scene.sun {
@@ -155,11 +158,11 @@ pub fn run(scenario: Scenario, timed_frames: u32) -> BevyRun {
                 ));
                 if let Some(s) = sun.shadows {
                     light.insert((CascadeShadowConfigBuilder {
-                        num_cascades: 1,
+                        num_cascades: s.num_cascades,
                         minimum_distance: s.min_distance,
                         maximum_distance: s.max_distance,
-                        first_cascade_far_bound: s.max_distance,
-                        ..default()
+                        first_cascade_far_bound: s.first_cascade_far_bound,
+                        overlap_proportion: s.overlap_proportion,
                     }
                     .build(),));
                     light.entry::<DirectionalLight>().and_modify(move |mut l| {

@@ -14,7 +14,8 @@ and GPU frame time. See [technical decisions](docs/technical-decisions.md).
 - **Scene in physical units:** `render_engine::scene` describes camera, sun, ambient light and
   PBR meshes in Bevy's units (lux, cd/m², EV100, linear colour), so each scenario has an exact
   Bevy counterpart.
-- **wgpu renderer:** a sun shadow pass (single fitted cascade, hardware 2×2 PCF) and a forward
+- **wgpu renderer:** cascaded sun shadows (Bevy's cascade fitting and defaults: up to 4
+  cascades with blended overlap, Gaussian 13-tap or hardware 2×2 PCF filtering) and a forward
   PBR pass (Filament/Bevy BRDF, 4× MSAA, ACES-fitted tone mapping). Same wgpu major as the mmorpg
   native client.
 - **Bevy as oracle:** `oracle/` renders every parity scenario on Bevy (`bevy_pbr`) and on
@@ -32,7 +33,7 @@ use glam::{Vec2, Vec3};
 use render_engine::{headless::Headless, scene::*};
 
 let scene = Scene {
-    camera: Camera { eye: Vec3::new(6.0, 5.0, 8.0), target: Vec3::ZERO, fov_y: 0.785, near: 0.1, ev100: 10.5 },
+    camera: Camera { eye: Vec3::new(6.0, 5.0, 8.0), target: Vec3::ZERO, fov_y: 0.785, near: 0.1, ev100: 10.5, shadow_filter: ShadowFilter::Gaussian },
     clear_color: Vec3::new(0.3, 0.5, 0.8),
     sun: Some(Sun {
         direction: Vec3::new(0.75, -1.0, 0.25).normalize(),
@@ -55,7 +56,8 @@ let frame = gpu.render(&gpu.prepare(&scene, 1280, 720))?;
 
 | Scenario | Covers | FLIP mean / p99 | GPU ms (engine / Bevy), RTX 3060 Ti | lavapipe ms (advisory) |
 | --- | --- | --- | --- | --- |
-| `sun_shadows` | ground, PBR boxes (dielectric, metallic), sun + shadow, ambient | 0.0005 / 0.0008 | 0.060 / 0.185 (0.33×) | 8.3 / 13.3 |
+| `sun_shadows` | ground, PBR boxes (dielectric, metallic), sun + one-cascade 2×2 PCF shadow, ambient | 0.0000 / 0.0000 | 0.069 / 0.196 (0.35×) | 10.7 / 15.2 |
+| `sun_cascades` | 200 m corridor, 4 cascades (Bevy defaults) with overlap blending, Gaussian filter | 0.0004 / 0.0029 | 0.112 / 0.238 (0.47×) | 23.2 / 22.6 |
 
 ## Development
 

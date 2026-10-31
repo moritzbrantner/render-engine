@@ -6,7 +6,7 @@
 //! use glam::{Vec2, Vec3};
 //!
 //! let scene = Scene {
-//!     camera: Camera { eye: Vec3::new(6.0, 5.0, 8.0), target: Vec3::ZERO, fov_y: 0.785, near: 0.1, ev100: 9.7 },
+//!     camera: Camera { eye: Vec3::new(6.0, 5.0, 8.0), target: Vec3::ZERO, fov_y: 0.785, near: 0.1, ev100: 9.7, shadow_filter: ShadowFilter::Gaussian },
 //!     clear_color: Vec3::new(0.3, 0.5, 0.8),
 //!     sun: Some(Sun { direction: Vec3::new(-0.4, -1.0, -0.3), color: Vec3::ONE, illuminance: 10_000.0, shadows: Some(SunShadows::default()) }),
 //!     ambient: Ambient { color: Vec3::ONE, brightness: 500.0 },

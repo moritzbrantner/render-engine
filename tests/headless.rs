@@ -12,6 +12,7 @@ fn scene(shadows: bool) -> Scene {
             fov_y: 45f32.to_radians(),
             near: 0.1,
             ev100: 10.5,
+            shadow_filter: ShadowFilter::Gaussian,
         },
         clear_color: Vec3::new(0.0, 0.0, 1.0),
         sun: Some(Sun {
