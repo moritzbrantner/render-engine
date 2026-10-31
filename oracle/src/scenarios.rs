@@ -6,8 +6,9 @@ use render_engine::glam::{Quat, Vec2, Vec3, Vec4};
 use render_engine::material::AlphaMode;
 use render_engine::mesh::Shape;
 use render_engine::scene::{
-    Ambient, Camera, Cubemap, EnvironmentMap, Fog, FogFalloff, LightShadows, PointLight, Scene,
-    ShadowFilter, ShadowMapSizes, SpotLight, Sun, SunShadows, Tonemapping,
+    Ambient, Camera, Cubemap, DayCycle, EnvironmentMap, Fog, FogFalloff, LightShadows, Moon,
+    PointLight, RAW_SUNLIGHT, Scene, ShadowFilter, ShadowMapSizes, Sky, SpotLight, Sun, SunShadows,
+    Tonemapping,
 };
 use std::{path::Path, sync::Arc};
 
@@ -30,7 +31,94 @@ pub fn all() -> Vec<Scenario> {
     all.extend(fog_modes());
     all.extend(point_spot());
     all.push(textured_props());
+    all.extend(sky_day_cycle());
     all
+}
+
+/// `sky_day_cycle`: the `sun_shadows` ground and boxes on a wide plain under Bevy's atmosphere
+/// (Hillaire LUTs, aerial perspective, sun disc) with its environment-map light as the only
+/// ambient light, at four times of one `DayCycle` (noon at 60°): noon, golden hour (sun at 15°),
+/// dusk (2°, the disc touching the horizon) and night (sun 10° below the horizon, a moon
+/// trailing it by two hours at about 16°). The camera looks west into the sunset; the sun's
+/// raw illuminance is `RAW_SUNLIGHT` throughout, so the atmosphere alone dims and reddens it.
+fn sky_day_cycle() -> [Scenario; 4] {
+    let cycle = DayCycle {
+        noon_elevation: 60f32.to_radians(),
+        moon_lag_hours: 2.0,
+    };
+    let base = sun_shadows();
+    let mut objects = base.objects;
+    objects[0] = MeshInstance::new(
+        Shape::Plane(Vec2::splat(400.0)),
+        Vec3::ZERO,
+        Material {
+            base_color: rgb(0.20, 0.24, 0.14),
+            perceptual_roughness: 0.9,
+            ..Material::default()
+        },
+    );
+    let views = [
+        ("sky_day_cycle_noon", 12.0, false, 14.5),
+        (
+            "sky_day_cycle_golden",
+            cycle.afternoon_hour(15f32.to_radians()),
+            false,
+            13.5,
+        ),
+        (
+            "sky_day_cycle_dusk",
+            cycle.afternoon_hour(2f32.to_radians()),
+            false,
+            11.0,
+        ),
+        (
+            "sky_day_cycle_night",
+            cycle.afternoon_hour(-10f32.to_radians()),
+            true,
+            3.5,
+        ),
+    ];
+    views.map(|(name, hours, moon, ev100)| Scenario {
+        name,
+        capability: "time-of-day sky (atmosphere)",
+        width: 1280,
+        height: 720,
+        objects: objects.clone(),
+        assets: Default::default(),
+        scene: Scene {
+            camera: Camera {
+                eye: Vec3::new(6.0, 1.8, -1.0),
+                target: Vec3::new(0.0, 1.4, 0.6),
+                fov_y: 45f32.to_radians(),
+                near: 0.1,
+                ev100,
+                shadow_filter: ShadowFilter::Gaussian,
+                tonemapping: Tonemapping::TonyMcMapface,
+            },
+            clear_color: Vec3::ZERO,
+            sun: Some(Sun {
+                direction: -cycle.to_sun(hours),
+                color: Vec3::ONE,
+                illuminance: RAW_SUNLIGHT,
+                shadows: Some(SunShadows::default()),
+            }),
+            moon: moon.then(|| Moon {
+                direction: -cycle.to_moon(hours),
+                color: rgb(0.80, 0.85, 1.0),
+                illuminance: 0.3,
+            }),
+            sky: Some(Sky::default()),
+            ambient: Ambient {
+                color: Vec3::ONE,
+                brightness: 0.0,
+            },
+            point_lights: Vec::new(),
+            spot_lights: Vec::new(),
+            shadow_maps: ShadowMapSizes::default(),
+            environment: None,
+            fog: None,
+        },
+    })
 }
 
 /// CC0 glTF props (Quaternius, `assets/props/`) with base-colour, normal and
@@ -144,6 +232,8 @@ fn textured_props() -> Scenario {
         shadow_maps: ShadowMapSizes::default(),
         environment: Some(tiergarten(IBL_INTENSITY)),
         fog: None,
+        moon: None,
+        sky: None,
     };
     Scenario {
         name: "textured_props",
@@ -296,6 +386,8 @@ fn point_spot() -> [Scenario; 3] {
         },
         environment: None,
         fog: None,
+        moon: None,
+        sky: None,
     };
     // Coarse maps, so the 2×2 filter's texel steps cover enough pixels to gate.
     let mut hardware = scene.clone();
@@ -411,6 +503,8 @@ fn fog_modes() -> Vec<Scenario> {
         shadow_maps: ShadowMapSizes::default(),
         environment: None,
         fog: None,
+        moon: None,
+        sky: None,
     };
     let falloffs = [
         (
@@ -543,6 +637,8 @@ fn ibl_materials() -> [Scenario; 2] {
         shadow_maps: ShadowMapSizes::default(),
         environment: Some(tiergarten(IBL_INTENSITY)),
         fog: None,
+        moon: None,
+        sky: None,
     };
     let mut sunlit = scene.clone();
     sunlit.sun = Some(Sun {
@@ -675,6 +771,8 @@ fn sun_shadows() -> Scenario {
             shadow_maps: ShadowMapSizes::default(),
             environment: None,
             fog: None,
+            moon: None,
+            sky: None,
         },
     }
 }
@@ -764,6 +862,8 @@ fn sun_cascades() -> Scenario {
             shadow_maps: ShadowMapSizes::default(),
             environment: None,
             fog: None,
+            moon: None,
+            sky: None,
         },
     }
 }

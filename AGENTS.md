@@ -24,7 +24,7 @@ never depends on Bevy outside `oracle/`.
 
 | Path | Role |
 | --- | --- |
-| `src/` | The `render-engine` crate: `world` (consumer meshes/textures/materials behind handles), `mesh`, `material`, `scene` (camera + lights per frame), `renderer` (wgpu passes, `Viewport`), `headless` (offscreen + GPU timing) |
+| `src/` | The `render-engine` crate: `world` (consumer meshes/textures/materials behind handles), `mesh`, `material`, `scene` (camera, lights and sky per frame), `renderer` (wgpu passes, `Viewport`), `sky` (Bevy's atmosphere LUTs, sky pass and runtime environment filter), `headless` (offscreen + GPU timing) |
 | `src/shaders/` | WGSL shaders |
 | `oracle/` | Bevy oracle (own manifest/lockfile): each scenario on Bevy and render-engine, FLIP + GPU-time gates |
 | `assets/ibl/` | CC0 HDRI and its prefiltered environment cube maps (`oracle/src/bin/bake_ibl.rs`; provenance in its README) |

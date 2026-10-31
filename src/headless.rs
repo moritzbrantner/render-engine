@@ -76,9 +76,13 @@ impl Headless {
         let timestamps = adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY);
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("render-engine headless"),
-            // Unclipped shadow-map depth (see `Renderer::new`) where the adapter has it.
+            // Unclipped shadow-map depth, the sky's dual-source blend and filterable float
+            // LUTs (see `Renderer::new`) where the adapter has them, as Bevy enables them.
             required_features: adapter.features()
-                & (wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::DEPTH_CLIP_CONTROL),
+                & (wgpu::Features::TIMESTAMP_QUERY
+                    | wgpu::Features::DEPTH_CLIP_CONTROL
+                    | wgpu::Features::DUAL_SOURCE_BLENDING
+                    | wgpu::Features::FLOAT32_FILTERABLE),
             ..Default::default()
         }))
         .map_err(Error::Device)?;
