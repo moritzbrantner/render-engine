@@ -26,6 +26,9 @@ fn scene(shadows: bool, tonemapping: Tonemapping) -> Scene {
             color: Vec3::ONE,
             brightness: 0.0,
         },
+        point_lights: Vec::new(),
+        spot_lights: Vec::new(),
+        shadow_maps: ShadowMapSizes::default(),
         environment: None,
         fog: None,
         meshes: vec![

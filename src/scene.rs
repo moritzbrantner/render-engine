@@ -2,7 +2,7 @@
 //! renderer, so every field here has a direct Bevy counterpart (listed per field).
 //!
 //! Units follow Bevy's physical conventions: lengths in metres, directional illuminance in lux,
-//! ambient and environment-map brightness in cd/m², exposure as EV100. Colours are linear RGB.
+//! point and spot light power in lumens, ambient and environment-map brightness in cd/m², exposure as EV100. Colours are linear RGB.
 
 use glam::{Quat, Vec2, Vec3, Vec4};
 use std::sync::Arc;
@@ -15,6 +15,11 @@ pub struct Scene {
     /// `ClearColorConfig::Custom`). Tone mapped with the frame but not exposed, as in Bevy.
     pub clear_color: Vec3,
     pub sun: Option<Sun>,
+    /// Point and spot lights are shaded in list order, shadow-casting lights first (Bevy sorts
+    /// its clustered lights the same way). Every shadow-casting light renders its own maps.
+    pub point_lights: Vec<PointLight>,
+    pub spot_lights: Vec<SpotLight>,
+    pub shadow_maps: ShadowMapSizes,
     pub ambient: Ambient,
     /// Image-based ambient light, added to `ambient` (Bevy `EnvironmentMapLight` on the camera).
     pub environment: Option<EnvironmentMap>,
@@ -160,15 +165,138 @@ pub struct Sun {
     pub shadows: Option<SunShadows>,
 }
 
+/// Shadow-map resolutions shared by every light of a kind (Bevy's `DirectionalLightShadowMap`
+/// and `PointLightShadowMap` resources). The defaults are Bevy's.
+#[derive(Clone, Copy, Debug)]
+pub struct ShadowMapSizes {
+    /// Texels per side of each sun cascade and each spot-light map (Bevy
+    /// `DirectionalLightShadowMap::size`; Bevy keeps spot maps beside the cascades).
+    pub directional: u32,
+    /// Texels per side of each point-light cube face (Bevy `PointLightShadowMap::size`).
+    pub point: u32,
+}
+
+impl Default for ShadowMapSizes {
+    fn default() -> Self {
+        Self {
+            directional: 2048,
+            point: 1024,
+        }
+    }
+}
+
+/// An omnidirectional light (Bevy `PointLight`).
+#[derive(Clone, Copy, Debug)]
+pub struct PointLight {
+    pub position: Vec3,
+    pub color: Vec3,
+    /// Luminous power in lumens.
+    pub intensity: f32,
+    /// Distance where the light has faded out completely (Bevy's smooth window over `1/d²`).
+    pub range: f32,
+    /// Radius of the light's sphere: widens specular highlights and, with soft shadows, the
+    /// penumbra.
+    pub radius: f32,
+    /// Cube-map shadows; `None` casts none.
+    pub shadows: Option<LightShadows>,
+}
+
+impl Default for PointLight {
+    /// Bevy's `PointLight` defaults (a 1 000 000 lm cinema light, 20 m range).
+    fn default() -> Self {
+        Self {
+            position: Vec3::ZERO,
+            color: Vec3::ONE,
+            intensity: 1_000_000.0,
+            range: 20.0,
+            radius: 0.0,
+            shadows: None,
+        }
+    }
+}
+
+/// A cone light (Bevy `SpotLight`): a point light that fades from `inner_angle` to `outer_angle`
+/// off its axis.
+#[derive(Clone, Copy, Debug)]
+pub struct SpotLight {
+    pub position: Vec3,
+    /// Direction the light points (Bevy: the light transform's forward).
+    pub direction: Vec3,
+    pub color: Vec3,
+    /// Luminous power in lumens as if spread over a full sphere, like a point light's (Bevy
+    /// divides by 4π for spot lights too).
+    pub intensity: f32,
+    pub range: f32,
+    pub radius: f32,
+    /// Radians off the axis where the falloff starts.
+    pub inner_angle: f32,
+    /// Radians off the axis where the light ends; below π/2.
+    pub outer_angle: f32,
+    /// A perspective shadow map; `None` casts none.
+    pub shadows: Option<LightShadows>,
+}
+
+impl Default for SpotLight {
+    /// Bevy's `SpotLight` defaults, pointing down.
+    fn default() -> Self {
+        Self {
+            position: Vec3::ZERO,
+            direction: Vec3::NEG_Y,
+            color: Vec3::ONE,
+            intensity: 1_000_000.0,
+            range: 20.0,
+            radius: 0.0,
+            inner_angle: 0.0,
+            outer_angle: std::f32::consts::FRAC_PI_4,
+            shadows: None,
+        }
+    }
+}
+
+/// Shadow settings of a point or spot light (Bevy `shadow_depth_bias`, `shadow_normal_bias`,
+/// `shadow_map_near_z`, `soft_shadows_enabled`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LightShadows {
+    /// World-space offset towards the light.
+    pub depth_bias: f32,
+    /// Offset along the surface normal in shadow texels.
+    pub normal_bias: f32,
+    /// Near plane of the shadow projection; casters closer to the light cast nothing.
+    pub near_z: f32,
+    /// Percentage-closer soft shadows with a penumbra from the light's `radius` (Bevy's
+    /// `experimental_pbr_pcss`). Otherwise the camera's [`ShadowFilter`] applies.
+    pub soft: bool,
+}
+
+impl LightShadows {
+    /// Bevy's `PointLight` shadow defaults.
+    pub const POINT: Self = Self {
+        depth_bias: 0.08,
+        normal_bias: 0.6,
+        near_z: 0.1,
+        soft: false,
+    };
+    /// Bevy's `SpotLight` shadow defaults.
+    pub const SPOT: Self = Self {
+        depth_bias: 0.02,
+        normal_bias: 1.8,
+        near_z: 0.1,
+        soft: false,
+    };
+
+    /// The same settings with soft shadows.
+    pub fn soft(self) -> Self {
+        Self { soft: true, ..self }
+    }
+}
+
 /// Most cascades a sun can have (Bevy `MAX_CASCADES_PER_LIGHT`).
 pub const MAX_CASCADES: usize = 4;
 
-/// Cascaded directional shadow maps (Bevy `CascadeShadowConfigBuilder`,
-/// `DirectionalLightShadowMap`, the light's shadow biases). The defaults are Bevy's.
+/// Cascaded directional shadow maps (Bevy `CascadeShadowConfigBuilder`, the light's shadow
+/// biases; the map size is [`ShadowMapSizes::directional`]). The defaults are Bevy's.
 #[derive(Clone, Copy, Debug)]
 pub struct SunShadows {
-    /// Texels per side of every cascade's map (Bevy `DirectionalLightShadowMap::size`).
-    pub map_size: u32,
     /// 1 to [`MAX_CASCADES`] (Bevy `num_cascades`).
     pub num_cascades: usize,
     /// View distance where shadows start (Bevy `minimum_distance`).
@@ -190,7 +318,6 @@ pub struct SunShadows {
 impl Default for SunShadows {
     fn default() -> Self {
         Self {
-            map_size: 2048,
             num_cascades: 4,
             min_distance: 0.1,
             first_cascade_far_bound: 10.0,

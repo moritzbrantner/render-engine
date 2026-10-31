@@ -1,4 +1,4 @@
-// Forward PBR pass and sun shadow-map pass.
+// Forward PBR pass and the shadow-map passes (sun cascades, spot maps, point-light cube faces).
 //
 // The BRDF follows Bevy 0.20 `bevy_pbr` (itself Filament): Burley diffuse, GGX distribution,
 // height-correlated Smith visibility, Schlick Fresnel with the f90 specular-occlusion trick, the
@@ -39,7 +39,31 @@ struct Frame {
     fog_directional_light_color: vec4<f32>,
     fog_be: vec4<f32>,
     fog_bi: vec4<f32>,
+    // x: point lights, y: spot lights (after the point lights in `lights`).
+    light_counts: vec4<u32>,
 }
+
+// A point or spot light, laid out like Bevy's `ClusteredLight`.
+struct Light {
+    // Point: the cube-face projection's lower-right 2×2 terms. Spot: direction x and z, spot
+    // scale, spot offset.
+    light_custom_data: vec4<f32>,
+    // rgb: colour × intensity / 4π, w: 1 / range².
+    color_inverse_square_range: vec4<f32>,
+    position_radius: vec4<f32>,
+    flags: u32,
+    shadow_depth_bias: f32,
+    shadow_normal_bias: f32,
+    shadow_map_near_z: f32,
+    spot_light_tan_angle: f32,
+    soft_shadow_size: f32,
+    // Point: cube index. Spot: layer of `shadow_maps`.
+    shadow_index: u32,
+    _pad: u32,
+}
+
+const LIGHT_SHADOWS: u32 = 1u;
+const LIGHT_SPOT_Y_NEGATIVE: u32 = 2u;
 
 struct Instance {
     world_from_local: mat4x4<f32>,
@@ -57,6 +81,10 @@ struct Instance {
 @group(1) @binding(3) var diffuse_environment_map: texture_cube<f32>;
 @group(1) @binding(4) var specular_environment_map: texture_cube<f32>;
 @group(1) @binding(5) var environment_map_sampler: sampler;
+@group(1) @binding(6) var<storage, read> lights: array<Light>;
+@group(1) @binding(7) var point_shadow_maps: texture_depth_cube_array;
+// Non-comparison sampler for the soft-shadow blocker search.
+@group(1) @binding(8) var shadow_linear_sampler: sampler;
 // Shadow pass only: the cascade being rendered (dynamic offset).
 @group(1) @binding(2) var<uniform> cascade_clip_from_world: mat4x4<f32>;
 
@@ -243,6 +271,294 @@ fn sun_shadow(world: vec3<f32>, normal: vec3<f32>) -> f32 {
     return shadow;
 }
 
+// ---------------------------------------------------------------- point and spot lights
+
+// Bevy's `shadow_sampling.wesl` constants ("determined by trial and error").
+const SPOT_SHADOW_TEXEL_SIZE: f32 = 0.0134277345;
+const POINT_SHADOW_SCALE: f32 = 0.003;
+const POINT_SHADOW_TEMPORAL_OFFSET_SCALE: f32 = 0.5;
+
+// The D3D 8× MSAA sample positions and a unit Gaussian's weights at them.
+const D3D_SAMPLE_POINT_POSITIONS: array<vec2<f32>, 8> = array(
+    vec2( 0.125, -0.375),
+    vec2(-0.125,  0.375),
+    vec2( 0.625,  0.125),
+    vec2(-0.375, -0.625),
+    vec2(-0.625,  0.625),
+    vec2(-0.875, -0.125),
+    vec2( 0.375,  0.875),
+    vec2( 0.875, -0.875),
+);
+const D3D_SAMPLE_POINT_COEFFS: array<f32, 8> = array(
+    0.157112, 0.157112, 0.138651, 0.130251, 0.114946, 0.114946, 0.107982, 0.079001,
+);
+// Jimenez 2014 spiral (Bevy `utils::SPIRAL_OFFSET_*`).
+const SPIRAL_OFFSETS: array<vec2<f32>, 8> = array(
+    vec2(-0.7071,  0.7071),
+    vec2(-0.0000, -0.8750),
+    vec2( 0.5303,  0.5303),
+    vec2(-0.6250, -0.0000),
+    vec2( 0.3536, -0.3536),
+    vec2(-0.0000,  0.3750),
+    vec2(-0.1768, -0.1768),
+    vec2( 0.1250,  0.0000),
+);
+
+// Bevy `maths::orthonormalize`.
+fn orthonormalize(z_basis: vec3<f32>) -> mat3x3<f32> {
+    let sign = select(-1.0, 1.0, z_basis.z >= 0.0);
+    let a = -1.0 / (sign + z_basis.z);
+    let b = z_basis.x * z_basis.y * a;
+    let x_basis = vec3(1.0 + sign * z_basis.x * z_basis.x * a, sign * b, -sign * z_basis.x);
+    let y_basis = vec3(b, sign + z_basis.y * z_basis.y * a, -z_basis.y);
+    return mat3x3(x_basis, y_basis, z_basis);
+}
+
+// Bevy `interleaved_gradient_noise`.
+fn interleaved_gradient_noise(pixel_coordinates: vec2<f32>, frame_index: u32) -> f32 {
+    let xy = pixel_coordinates + 5.588238 * f32(frame_index % 64u);
+    return fract(52.9829189 * fract(0.06711056 * xy.x + 0.00583715 * xy.y));
+}
+
+// Bevy `random_rotation_matrix`, non-temporal (frame 1).
+fn random_rotation_matrix(scale: vec2<f32>) -> mat2x2<f32> {
+    let random_angle = 2.0 * PI * interleaved_gradient_noise(scale, 1u);
+    let m = vec2(sin(random_angle), cos(random_angle));
+    return mat2x2(m.y, -m.x, m.x, m.y);
+}
+
+// Bevy `getDistanceAttenuation`: inverse square with a smooth window at the light's range.
+fn get_distance_attenuation(distance_square: f32, inverse_range_squared: f32) -> f32 {
+    let factor = distance_square * inverse_range_squared;
+    let smooth_factor = saturate(1.0 - factor * factor);
+    return smooth_factor * smooth_factor * 1.0 / max(distance_square, 0.0001);
+}
+
+fn specular_fix_remap(a: f32) -> f32 {
+    let inv_a_sq = (1.0 - a) * (1.0 - a);
+    return 1.0 - inv_a_sq * inv_a_sq;
+}
+
+struct Surface {
+    P: vec3<f32>,
+    N: vec3<f32>,
+    V: vec3<f32>,
+    R: vec3<f32>,
+    NdotV: f32,
+    roughness: f32,
+    diffuse_color: vec3<f32>,
+    F0: vec3<f32>,
+    f_ab: vec2<f32>,
+}
+
+// Bevy `point_light` (no clearcoat, anisotropy or light textures): Karis's representative-point
+// sphere light for specular, Burley diffuse towards the centre.
+fn point_light(light: Light, s: Surface) -> vec3<f32> {
+    let light_to_frag = light.position_radius.xyz - s.P;
+    let L = normalize(light_to_frag);
+    let distance_square = dot(light_to_frag, light_to_frag);
+    let distance = sqrt(distance_square);
+    let range_attenuation =
+        get_distance_attenuation(distance_square, light.color_inverse_square_range.w);
+    let radius = light.position_radius.w;
+    let a = s.roughness;
+
+    // `compute_specular_layer_values_for_point_light`.
+    let LtFdotR = max(0.0001, dot(light_to_frag, s.R));
+    let center_to_ray = LtFdotR * s.R - light_to_frag;
+    let closest_point = light_to_frag
+        + center_to_ray * saturate(radius * inverseSqrt(dot(center_to_ray, center_to_ray)));
+    let L_spec = closest_point * inverseSqrt(dot(closest_point, closest_point));
+    let a_prime = saturate(a + radius / (2.0 * distance));
+
+    let H_spec = normalize(L_spec + s.V);
+    let NdotL_spec = saturate(dot(s.N, L_spec));
+    let NdotH_spec = saturate(dot(s.N, H_spec));
+    let LdotH_spec = saturate(dot(L_spec, H_spec));
+    let normalization_factor = a / a_prime;
+    let specular_intensity = normalization_factor * normalization_factor;
+    let brdf_roughness = mix(a, a_prime, specular_fix_remap(a));
+
+    let D = D_GGX(brdf_roughness, NdotH_spec);
+    let Vis = V_SmithGGXCorrelated(brdf_roughness, s.NdotV, NdotL_spec);
+    let F = fresnel(s.F0, LdotH_spec);
+    var specular_light = (specular_intensity * D * Vis) * F;
+    specular_light *= 1.0 + s.F0 * (1.0 / (s.f_ab.x + s.f_ab.y) - 1.0);
+    // Sphere-light visibility (solid-angle attenuation).
+    if (radius > 0.0) {
+        let solid_angle = radius * radius / (distance * distance);
+        specular_light *= saturate(NdotL_spec / max(NdotL_spec + solid_angle, 1e-4));
+    }
+
+    let H = normalize(L + s.V);
+    let NdotL = saturate(dot(s.N, L));
+    let LdotH = saturate(dot(L, H));
+    let f90 = 0.5 + 2.0 * s.roughness * LdotH * LdotH;
+    let fd = F_Schlick(1.0, f90, NdotL) * F_Schlick(1.0, f90, s.NdotV) * (1.0 / PI);
+    let diffuse = s.diffuse_color * fd;
+
+    let color_times_NdotL = diffuse * NdotL + specular_light * NdotL_spec;
+    return color_times_NdotL * light.color_inverse_square_range.rgb * range_attenuation;
+}
+
+// The spot axis, rebuilt from x, z and the sign of y like Bevy.
+fn spot_direction(light: Light) -> vec3<f32> {
+    var spot_dir = vec3(light.light_custom_data.x, 0.0, light.light_custom_data.y);
+    spot_dir.y = sqrt(max(0.0, 1.0 - spot_dir.x * spot_dir.x - spot_dir.z * spot_dir.z));
+    if ((light.flags & LIGHT_SPOT_Y_NEGATIVE) != 0u) {
+        spot_dir.y = -spot_dir.y;
+    }
+    return spot_dir;
+}
+
+// Bevy `spot_light`: the point light times Filament's smooth cone falloff.
+fn spot_light(light: Light, s: Surface) -> vec3<f32> {
+    let point = point_light(light, s);
+    let light_to_frag = light.position_radius.xyz - s.P;
+    let cd = dot(-spot_direction(light), normalize(light_to_frag));
+    let attenuation = saturate(cd * light.light_custom_data.z + light.light_custom_data.w);
+    return point * (attenuation * attenuation);
+}
+
+fn sample_cube_hardware(light_local: vec3<f32>, depth: f32, cube: u32) -> f32 {
+    return textureSampleCompareLevel(point_shadow_maps, shadow_sampler, light_local, cube, depth);
+}
+
+// Bevy `sample_shadow_cubemap_gaussian`: a Gaussian over the D3D pattern on the plane facing the
+// light.
+fn sample_cube_gaussian(light_local: vec3<f32>, depth: f32, scale: f32, distance_to_light: f32, cube: u32) -> f32 {
+    let basis = orthonormalize(normalize(light_local)) * scale * distance_to_light;
+    var sum = 0.0;
+    for (var i = 0u; i < 8u; i++) {
+        let p = D3D_SAMPLE_POINT_POSITIONS[i];
+        sum += sample_cube_hardware(light_local + p.x * basis[0] + p.y * basis[1], depth, cube)
+            * D3D_SAMPLE_POINT_COEFFS[i];
+    }
+    return sum;
+}
+
+// Bevy `sample_shadow_cubemap_jittered` (non-temporal): the spiral, rotated per pixel.
+fn sample_cube_jittered(light_local: vec3<f32>, depth: f32, frag_coord_xy: vec2<f32>, scale: f32, distance_to_light: f32, cube: u32) -> f32 {
+    let rotation = random_rotation_matrix(frag_coord_xy);
+    let basis = orthonormalize(normalize(light_local)) * scale * distance_to_light;
+    var sum = 0.0;
+    for (var i = 0u; i < 8u; i++) {
+        let p = rotation * SPIRAL_OFFSETS[i] * POINT_SHADOW_TEMPORAL_OFFSET_SCALE;
+        sum += sample_cube_hardware(light_local + p.x * basis[0] + p.y * basis[1], depth, cube)
+            * 0.125;
+    }
+    return sum;
+}
+
+// Bevy `search_for_blockers_in_shadow_cubemap`: mean depth of the occluding texels.
+fn search_cube_blockers(light_local: vec3<f32>, depth: f32, scale: f32, distance_to_light: f32, cube: u32) -> f32 {
+    let basis = orthonormalize(normalize(light_local)) * scale * distance_to_light;
+    var sum = vec2(0.0);
+    for (var i = 0u; i < 8u; i++) {
+        let p = D3D_SAMPLE_POINT_POSITIONS[i];
+        let sampled_depth = textureSampleLevel(
+            point_shadow_maps, shadow_linear_sampler, light_local + p.x * basis[0] + p.y * basis[1], cube, 0);
+        sum += select(vec2(0.0), vec2(sampled_depth, 1.0), sampled_depth >= depth);
+    }
+    if (sum.y == 0.0) {
+        return 0.0;
+    }
+    return sum.x / sum.y;
+}
+
+// Bevy `fetch_point_shadow`.
+fn fetch_point_shadow(light: Light, P: vec3<f32>, N: vec3<f32>, frag_coord_xy: vec2<f32>) -> f32 {
+    let surface_to_light = light.position_radius.xyz - P;
+    let surface_to_light_abs = abs(surface_to_light);
+    let distance_to_light = max(surface_to_light_abs.x, max(surface_to_light_abs.y, surface_to_light_abs.z));
+
+    // The normal bias is per texel at 1 m; texels grow with the distance to the light.
+    let normal_offset = light.shadow_normal_bias * distance_to_light * N;
+    let depth_offset = light.shadow_depth_bias * normalize(surface_to_light);
+    let offset_position = P + normal_offset + depth_offset;
+
+    let frag_ls = offset_position - light.position_radius.xyz;
+    let abs_position_ls = abs(frag_ls);
+    let major_axis_magnitude = max(abs_position_ls.x, max(abs_position_ls.y, abs_position_ls.z));
+    let zw = -major_axis_magnitude * light.light_custom_data.xy + light.light_custom_data.zw;
+    let depth = zw.x / zw.y;
+
+    // Cube maps are left-handed: z is flipped for the lookup.
+    let light_local = frag_ls * vec3(1.0, 1.0, -1.0);
+    let cube = light.shadow_index;
+    if (light.soft_shadow_size > 0.0) {
+        let light_size = light.soft_shadow_size;
+        let z_blocker = search_cube_blockers(light_local, depth, light_size, distance_to_light, cube);
+        let blur_size = max((z_blocker - depth) * light_size / depth, 0.5);
+        return sample_cube_jittered(
+            light_local, depth, frag_coord_xy, POINT_SHADOW_SCALE * blur_size, distance_to_light, cube);
+    }
+    if (frame.flags.w > 0.5) {
+        return sample_cube_gaussian(light_local, depth, POINT_SHADOW_SCALE, distance_to_light, cube);
+    }
+    return sample_cube_hardware(light_local, depth, cube);
+}
+
+// Bevy `sample_shadow_map_jimenez_fourteen` (non-temporal).
+fn sample_jimenez(light_local: vec2<f32>, depth: f32, layer: u32, frag_coord_xy: vec2<f32>, texel_size: f32, blur_size: f32) -> f32 {
+    let rotation = random_rotation_matrix(frag_coord_xy);
+    let size = vec2<f32>(textureDimensions(shadow_maps));
+    // Bevy's fudge factor (`map(0.00390625, 0.022949219, 0.015, 0.035, texel_size)`).
+    let f = 0.015 + (texel_size - 0.00390625) * (0.035 - 0.015) / (0.022949219 - 0.00390625);
+    let uv_offset_scale = f * blur_size / (texel_size * size);
+    var sum = 0.0;
+    for (var i = 0u; i < 8u; i++) {
+        sum += sample_hardware(light_local + (rotation * SPIRAL_OFFSETS[i]) * uv_offset_scale, depth, layer);
+    }
+    return sum / 8.0;
+}
+
+// Bevy `search_for_blockers_in_shadow_map`.
+fn search_blockers(light_local: vec2<f32>, depth: f32, layer: u32, texel_size: f32, search_size: f32) -> f32 {
+    let size = vec2<f32>(textureDimensions(shadow_maps));
+    let uv_offset_scale = search_size / (texel_size * size);
+    var sum = vec2(0.0);
+    for (var i = 0u; i < 8u; i++) {
+        let sampled_depth = textureSampleLevel(
+            shadow_maps, shadow_linear_sampler, light_local + D3D_SAMPLE_POINT_POSITIONS[i] * uv_offset_scale, layer, 0);
+        sum += select(vec2(0.0), vec2(sampled_depth, 1.0), sampled_depth >= depth);
+    }
+    if (sum.y == 0.0) {
+        return 0.0;
+    }
+    return sum.x / sum.y;
+}
+
+// Bevy `fetch_spot_shadow`.
+fn fetch_spot_shadow(light: Light, P: vec3<f32>, N: vec3<f32>, frag_coord_xy: vec2<f32>) -> f32 {
+    let surface_to_light = light.position_radius.xyz - P;
+    // The view's z axis is the reverse of the spot direction.
+    let fwd = -spot_direction(light);
+    let distance_to_light = dot(fwd, surface_to_light);
+    let offset_position = -surface_to_light
+        + (light.shadow_depth_bias * normalize(surface_to_light))
+        + (N * light.shadow_normal_bias) * distance_to_light;
+    // A rotation: multiplying from the left by the vector applies its transpose (inverse).
+    let projected_position = offset_position * orthonormalize(fwd);
+    let f_div_minus_z = 1.0 / (light.spot_light_tan_angle * -projected_position.z);
+    let shadow_uv = projected_position.xy * f_div_minus_z * vec2(0.5, -0.5) + vec2(0.5, 0.5);
+    let depth = light.shadow_map_near_z / -projected_position.z;
+
+    let layer = light.shadow_index;
+    if (light.soft_shadow_size > 0.0) {
+        let light_size = light.soft_shadow_size;
+        let z_blocker = search_blockers(shadow_uv, depth, layer, SPOT_SHADOW_TEXEL_SIZE, light_size);
+        let blur_size = max((z_blocker - depth) * light_size / depth, 0.5);
+        return sample_jimenez(shadow_uv, depth, layer, frag_coord_xy, SPOT_SHADOW_TEXEL_SIZE, blur_size);
+    }
+    if (frame.flags.w > 0.5) {
+        return sample_gaussian(shadow_uv, depth, layer);
+    }
+    return sample_hardware(shadow_uv, depth, layer);
+}
+
+// ---------------------------------------------------------------- image-based light
+
 // Bevy `radiance_sample_direction` ("Moving Frostbite to PBR 3.0", listing 22).
 fn radiance_sample_direction(N: vec3<f32>, R: vec3<f32>, roughness: f32) -> vec3<f32> {
     let smoothness = saturate(1.0 - roughness);
@@ -332,7 +648,35 @@ fn lit_fs(in: VertexOut) -> @location(0) vec4<f32> {
     let F0 = mix(f0_dielectric, base, metallic);
     let f_ab = F_AB(perceptual_roughness, NdotV);
 
+    // Bevy's order: point lights, spot lights, then the sun.
     var direct = vec3(0.0);
+    var surface: Surface;
+    surface.P = in.world;
+    surface.N = N;
+    surface.V = V;
+    surface.R = reflect(-V, N);
+    surface.NdotV = NdotV;
+    surface.roughness = roughness;
+    surface.diffuse_color = diffuse_color;
+    surface.F0 = F0;
+    surface.f_ab = f_ab;
+    let point_count = frame.light_counts.x;
+    for (var i = 0u; i < point_count; i++) {
+        let light = lights[i];
+        var shadow = 1.0;
+        if ((light.flags & LIGHT_SHADOWS) != 0u) {
+            shadow = fetch_point_shadow(light, in.world, N, in.clip.xy);
+        }
+        direct += point_light(light, surface) * shadow;
+    }
+    for (var i = point_count; i < point_count + frame.light_counts.y; i++) {
+        let light = lights[i];
+        var shadow = 1.0;
+        if ((light.flags & LIGHT_SHADOWS) != 0u) {
+            shadow = fetch_spot_shadow(light, in.world, N, in.clip.xy);
+        }
+        direct += spot_light(light, surface) * shadow;
+    }
     if (frame.flags.z > 0.5) {
         let L = frame.direction_to_light.xyz;
         let H = normalize(L + V);
@@ -354,7 +698,7 @@ fn lit_fs(in: VertexOut) -> @location(0) vec4<f32> {
         if (frame.flags.y > 0.5) {
             shadow = sun_shadow(in.world, N);
         }
-        direct = (diffuse + specular) * NdotL * frame.sun_color.rgb * shadow;
+        direct += (diffuse + specular) * NdotL * frame.sun_color.rgb * shadow;
     }
 
     let diffuse_ambient = env_brdf_approx(diffuse_color, F_AB(1.0, NdotV));

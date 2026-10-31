@@ -1,13 +1,13 @@
-//! The wgpu renderer: one shadow pass per sun cascade, one forward PBR pass with 4× MSAA into an
-//! HDR target, a tone-mapping pass into an Rgba16Float target and a blit into the output (Bevy's
+//! The wgpu renderer: one shadow pass per sun cascade, spot light and point-light cube face, one
+//! forward PBR pass with 4× MSAA into an HDR target, a tone-mapping pass into an Rgba16Float target and a blit into the output (Bevy's
 //! tonemapping and upscaling nodes).
 
 use crate::{
     mesh::{Geometry, Vertex},
-    scene::{Cubemap, FogFalloff, MAX_CASCADES, Scene, ShadowFilter, Tonemapping},
+    scene::{Cubemap, FogFalloff, LightShadows, MAX_CASCADES, Scene, ShadowFilter, Tonemapping},
 };
 use bytemuck::{Pod, Zeroable};
-use glam::{Mat3, Mat4, Vec3, Vec4};
+use glam::{Mat3, Mat4, UVec4, Vec3, Vec4};
 use wgpu::util::DeviceExt;
 
 /// MSAA sample count of the main pass (Bevy's default `Msaa::Sample4`).
@@ -17,8 +17,21 @@ pub const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const TONY_MC_MAPFACE_LUT: &[u8] = include_bytes!("luts/tony_mc_mapface.ktx2");
 const AGX_LUT: &[u8] = include_bytes!("luts/AgX-default_contrast.ktx2");
-/// Stride of the per-cascade shadow-view uniforms (dynamic-offset alignment).
-const CASCADE_STRIDE: u64 = 256;
+/// Stride of the per-view shadow uniforms (dynamic-offset alignment).
+const SHADOW_VIEW_STRIDE: u64 = 256;
+/// `GpuLight::flags`: the light samples its shadow map.
+const LIGHT_SHADOWS: u32 = 1;
+/// `GpuLight::flags`: the spot light points downwards (Bevy `SPOT_LIGHT_Y_NEGATIVE`).
+const LIGHT_SPOT_Y_NEGATIVE: u32 = 2;
+/// Bevy's point-light cube faces (`CUBE_MAP_FACES`): look target and up per cube layer.
+const CUBE_FACES: [(Vec3, Vec3); 6] = [
+    (Vec3::X, Vec3::Y),
+    (Vec3::NEG_X, Vec3::Y),
+    (Vec3::Y, Vec3::Z),
+    (Vec3::NEG_Y, Vec3::NEG_Z),
+    (Vec3::NEG_Z, Vec3::Y),
+    (Vec3::Z, Vec3::Y),
+];
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -50,6 +63,31 @@ struct FrameUniform {
     /// xyz: Bevy `bi` (atmospheric inscattering), w: mode (0 off, 1 linear, 2 exponential,
     /// 3 exponential squared, 4 atmospheric).
     fog_bi: Vec4,
+    /// x point lights, y spot lights (the spot lights follow the point lights in the list).
+    light_counts: UVec4,
+}
+
+/// One point or spot light, laid out like Bevy's `GpuClusteredLight`.
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct GpuLight {
+    /// Point: the cube-face projection's lower-right 2×2 terms. Spot: direction x and z, spot
+    /// scale, spot offset.
+    light_custom_data: Vec4,
+    /// rgb colour × intensity / 4π, w 1 / range².
+    color_inverse_square_range: Vec4,
+    position_radius: Vec4,
+    flags: u32,
+    shadow_depth_bias: f32,
+    /// Premultiplied by the shadow texel size at 1 m and √2, like Bevy.
+    shadow_normal_bias: f32,
+    shadow_map_near_z: f32,
+    spot_light_tan_angle: f32,
+    /// The light radius with soft shadows, else 0.
+    soft_shadow_size: f32,
+    /// Point: cube index in the cube array. Spot: layer in the directional shadow array.
+    shadow_index: u32,
+    _pad: u32,
 }
 
 #[repr(C)]
@@ -65,17 +103,22 @@ struct InstanceData {
 /// Fixed GPU state: pipelines, layouts and samplers.
 pub struct Renderer {
     frame_layout: wgpu::BindGroupLayout,
-    cascade_layout: wgpu::BindGroupLayout,
+    shadow_view_layout: wgpu::BindGroupLayout,
     lighting_layout: wgpu::BindGroupLayout,
     tonemap_layout: wgpu::BindGroupLayout,
     blit_layout: wgpu::BindGroupLayout,
     /// Copies the tone-mapped Rgba16Float frame into the output (Bevy's upscaling blit).
     blit_pipeline: wgpu::RenderPipeline,
+    /// Sun cascades: orthographic, unclipped depth.
     shadow_pipeline: wgpu::RenderPipeline,
+    /// Spot maps and point-light cube faces: perspective, clipped depth (as in Bevy).
+    local_shadow_pipeline: wgpu::RenderPipeline,
     lit_pipeline: wgpu::RenderPipeline,
     /// Indexed by [`tonemap_index`].
     tonemap_pipelines: [wgpu::RenderPipeline; 3],
     shadow_sampler: wgpu::Sampler,
+    /// Bevy's non-comparison shadow sampler for the soft-shadow blocker search.
+    shadow_linear_sampler: wgpu::Sampler,
     /// Bevy's default image sampler (trilinear, clamped), which Bevy uses for environment maps.
     environment_sampler: wgpu::Sampler,
     /// A black 1² cube bound when the scene has no environment map.
@@ -101,9 +144,9 @@ pub struct PreparedScene {
     clear_color: wgpu::Color,
     frame_group: wgpu::BindGroup,
     lighting_group: wgpu::BindGroup,
-    cascade_group: wgpu::BindGroup,
-    /// One depth view per cascade (render attachments); empty without sun shadows.
-    cascade_views: Vec<wgpu::TextureView>,
+    shadow_view_group: wgpu::BindGroup,
+    /// Every shadow pass in order: sun cascades, spot maps, point-light cube faces.
+    shadow_passes: Vec<ShadowPass>,
     vertices: wgpu::Buffer,
     indices: wgpu::Buffer,
     /// (first index, index count, base vertex) per instance, in instance order.
@@ -117,6 +160,15 @@ pub struct PreparedScene {
     /// The tone-mapped frame (Rgba16Float, like Bevy's main texture), read by the blit pass.
     post_view: wgpu::TextureView,
     blit_group: wgpu::BindGroup,
+}
+
+/// One depth-only pass into a shadow-map layer.
+struct ShadowPass {
+    target: wgpu::TextureView,
+    /// Index of the view's matrix in the shadow-view buffer.
+    view: u32,
+    /// A spot or point-light view (perspective, clipped depth) rather than a sun cascade.
+    local: bool,
 }
 
 /// Where a frame writes GPU timestamps: index 0 at the start of the first pass, index 1 at the
@@ -169,12 +221,38 @@ impl Renderer {
             },
             count: None,
         };
-        // Main pass: sun shadow maps and the environment map.
+        // Main pass: lights, shadow maps and the environment map.
         let lighting_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("lighting"),
             entries: &[
                 cube(3),
                 cube(4),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 7,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Depth,
+                        view_dimension: wgpu::TextureViewDimension::CubeArray,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 8,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
                 wgpu::BindGroupLayoutEntry {
                     binding: 5,
                     visibility: wgpu::ShaderStages::FRAGMENT,
@@ -199,20 +277,21 @@ impl Renderer {
                 },
             ],
         });
-        // The shadow pass picks its cascade's matrix through a dynamic offset.
-        let cascade_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("shadow cascade"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 2,
-                visibility: wgpu::ShaderStages::VERTEX,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: true,
-                    min_binding_size: wgpu::BufferSize::new(64),
-                },
-                count: None,
-            }],
-        });
+        // A shadow pass picks its view's matrix through a dynamic offset.
+        let shadow_view_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("shadow view"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: true,
+                        min_binding_size: wgpu::BufferSize::new(64),
+                    },
+                    count: None,
+                }],
+            });
         let vertex_layout = wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Vertex>() as u64,
             step_mode: wgpu::VertexStepMode::Vertex,
@@ -234,8 +313,25 @@ impl Renderer {
         let shadow_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("sun shadow"),
-                bind_group_layouts: &[Some(&frame_layout), Some(&cascade_layout)],
+                bind_group_layouts: &[Some(&frame_layout), Some(&shadow_view_layout)],
                 immediate_size: 0,
+            });
+        let local_shadow_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("local shadow"),
+                layout: Some(&shadow_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("shadow_vs"),
+                    compilation_options: Default::default(),
+                    buffers: &[Some(vertex_layout.clone())],
+                },
+                primitive,
+                depth_stencil: Some(depth(DEPTH_FORMAT)),
+                multisample: wgpu::MultisampleState::default(),
+                fragment: None,
+                multiview_mask: None,
+                cache: None,
             });
         // Unclipped depth like Bevy's directional shadow views: natively where the device has
         // `DEPTH_CLIP_CONTROL`, else clamped in a fragment shader (see `lit.wgsl`).
@@ -424,6 +520,12 @@ impl Renderer {
             compare: Some(wgpu::CompareFunction::GreaterEqual),
             ..Default::default()
         });
+        let shadow_linear_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("shadow linear"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
 
         // Bevy `ImageSamplerDescriptor::linear()`.
         let environment_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -445,15 +547,17 @@ impl Renderer {
 
         Self {
             frame_layout,
-            cascade_layout,
+            shadow_view_layout,
             lighting_layout,
             tonemap_layout,
             blit_layout,
             blit_pipeline,
             shadow_pipeline,
+            local_shadow_pipeline,
             lit_pipeline,
             tonemap_pipelines,
             shadow_sampler,
+            shadow_linear_sampler,
             environment_sampler,
             no_environment,
             tony_mc_mapface_lut: load_lut(device, queue, TONY_MC_MAPFACE_LUT),
@@ -485,7 +589,7 @@ impl Renderer {
                     let c = Cascade::fit(
                         near,
                         far,
-                        cfg.map_size,
+                        scene.shadow_maps.directional,
                         sun.direction,
                         cam.fov_y,
                         aspect,
@@ -501,6 +605,8 @@ impl Renderer {
             cascade_clip_from_world[i] = c.clip_from_world;
             cascade_params[i] = Vec4::new(*far, c.texel_size, 0.0, 0.0);
         }
+
+        let lights = LocalLights::new(scene, cascades.len());
 
         let sun = scene.sun;
         let frame = FrameUniform {
@@ -549,6 +655,7 @@ impl Renderer {
                 FogFalloff::ExponentialSquared { .. } => Vec4::new(0.0, 0.0, 0.0, 3.0),
                 FogFalloff::Atmospheric { inscattering, .. } => inscattering.extend(4.0),
             }),
+            light_counts: UVec4::new(lights.point_count, lights.spot_count, 0, 0),
         };
 
         let mut vertices = Vec::new();
@@ -608,57 +715,99 @@ impl Renderer {
             ],
         });
 
-        let shadow_size = shadows.map_or(1, |(_, cfg)| cfg.map_size);
-        let layers = cascades.len().max(1) as u32;
-        let shadow_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("sun shadow maps"),
-            size: wgpu::Extent3d {
-                width: shadow_size,
-                height: shadow_size,
-                depth_or_array_layers: layers,
+        // Like Bevy, spot maps share the sun's array (and its size), after the cascades.
+        let directional_layers = cascades.len() + lights.spot_views.len();
+        let shadow_texture = shadow_maps(
+            device,
+            "directional shadow maps",
+            if directional_layers > 0 {
+                scene.shadow_maps.directional
+            } else {
+                1
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: DEPTH_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
+            directional_layers.max(1) as u32,
+        );
         let shadow_view = shadow_texture.create_view(&wgpu::TextureViewDescriptor {
             dimension: Some(wgpu::TextureViewDimension::D2Array),
             ..Default::default()
         });
-        let cascade_views = (0..cascades.len() as u32)
-            .map(|layer| {
-                shadow_texture.create_view(&wgpu::TextureViewDescriptor {
-                    dimension: Some(wgpu::TextureViewDimension::D2),
-                    base_array_layer: layer,
-                    array_layer_count: Some(1),
-                    ..Default::default()
-                })
+        let cube_count = lights.point_views.len() / 6;
+        let point_texture = shadow_maps(
+            device,
+            "point shadow maps",
+            if cube_count > 0 {
+                scene.shadow_maps.point
+            } else {
+                1
+            },
+            6 * cube_count.max(1) as u32,
+        );
+        let point_view = point_texture.create_view(&wgpu::TextureViewDescriptor {
+            dimension: Some(wgpu::TextureViewDimension::CubeArray),
+            ..Default::default()
+        });
+
+        // Shadow views: sun cascades, then spot maps, then point-light faces.
+        let layer_view = |texture: &wgpu::Texture, layer: usize| {
+            texture.create_view(&wgpu::TextureViewDescriptor {
+                dimension: Some(wgpu::TextureViewDimension::D2),
+                base_array_layer: layer as u32,
+                array_layer_count: Some(1),
+                ..Default::default()
             })
-            .collect();
-        let mut cascade_bytes = vec![0u8; CASCADE_STRIDE as usize * MAX_CASCADES];
-        for (i, m) in cascade_clip_from_world.iter().enumerate() {
-            let at = i * CASCADE_STRIDE as usize;
-            cascade_bytes[at..at + 64].copy_from_slice(bytemuck::bytes_of(m));
+        };
+        let mut view_matrices = Vec::new();
+        let mut shadow_passes = Vec::new();
+        for (i, (_, c)) in cascades.iter().enumerate() {
+            shadow_passes.push(ShadowPass {
+                target: layer_view(&shadow_texture, i),
+                view: view_matrices.len() as u32,
+                local: false,
+            });
+            view_matrices.push(c.clip_from_world);
         }
-        let cascade_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("shadow cascades"),
-            contents: &cascade_bytes,
+        for (i, m) in lights.spot_views.iter().enumerate() {
+            shadow_passes.push(ShadowPass {
+                target: layer_view(&shadow_texture, cascades.len() + i),
+                view: view_matrices.len() as u32,
+                local: true,
+            });
+            view_matrices.push(*m);
+        }
+        for (i, m) in lights.point_views.iter().enumerate() {
+            shadow_passes.push(ShadowPass {
+                target: layer_view(&point_texture, i),
+                view: view_matrices.len() as u32,
+                local: true,
+            });
+            view_matrices.push(*m);
+        }
+        let mut view_bytes = vec![0u8; SHADOW_VIEW_STRIDE as usize * view_matrices.len().max(1)];
+        for (i, m) in view_matrices.iter().enumerate() {
+            let at = i * SHADOW_VIEW_STRIDE as usize;
+            view_bytes[at..at + 64].copy_from_slice(bytemuck::bytes_of(m));
+        }
+        let view_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("shadow views"),
+            contents: &view_bytes,
             usage: wgpu::BufferUsages::UNIFORM,
         });
-        let cascade_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("shadow cascade"),
-            layout: &self.cascade_layout,
+        let shadow_view_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("shadow view"),
+            layout: &self.shadow_view_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 2,
                 resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &cascade_buffer,
+                    buffer: &view_buffer,
                     offset: 0,
                     size: wgpu::BufferSize::new(64),
                 }),
             }],
+        });
+        let light_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("lights"),
+            contents: bytemuck::cast_slice(&lights.gpu),
+            usage: wgpu::BufferUsages::STORAGE,
         });
         let environment = scene.environment.as_ref().map(|e| {
             (
@@ -694,6 +843,18 @@ impl Renderer {
                 wgpu::BindGroupEntry {
                     binding: 1,
                     resource: wgpu::BindingResource::Sampler(&self.shadow_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: light_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: wgpu::BindingResource::TextureView(&point_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 8,
+                    resource: wgpu::BindingResource::Sampler(&self.shadow_linear_sampler),
                 },
             ],
         });
@@ -782,8 +943,8 @@ impl Renderer {
             },
             frame_group,
             lighting_group,
-            cascade_group,
-            cascade_views,
+            shadow_view_group,
+            shadow_passes,
             vertices: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("vertices"),
                 contents: bytemuck::cast_slice(&vertices),
@@ -825,19 +986,19 @@ impl Renderer {
         };
         let query_set = timestamps.map(|t| t.query_set);
 
-        for (i, shadow_view) in scene.cascade_views.iter().enumerate() {
+        for (i, shadow) in scene.shadow_passes.iter().enumerate() {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("sun shadow cascade"),
+                label: Some("shadow"),
                 color_attachments: &[],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: shadow_view,
+                    view: &shadow.target,
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Clear(0.0),
                         store: wgpu::StoreOp::Store,
                     }),
                     stencil_ops: None,
                 }),
-                // The frame starts at the first cascade's pass.
+                // The frame starts at the first shadow pass.
                 timestamp_writes: query_set.filter(|_| i == 0).map(|query_set| {
                     wgpu::RenderPassTimestampWrites {
                         query_set,
@@ -848,8 +1009,16 @@ impl Renderer {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            pass.set_pipeline(&self.shadow_pipeline);
-            pass.set_bind_group(1, &scene.cascade_group, &[i as u32 * CASCADE_STRIDE as u32]);
+            pass.set_pipeline(if shadow.local {
+                &self.local_shadow_pipeline
+            } else {
+                &self.shadow_pipeline
+            });
+            pass.set_bind_group(
+                1,
+                &scene.shadow_view_group,
+                &[shadow.view * SHADOW_VIEW_STRIDE as u32],
+            );
             draw(&mut pass);
         }
 
@@ -872,7 +1041,7 @@ impl Renderer {
                 }),
                 stencil_ops: None,
             }),
-            timestamp_writes: query_set.filter(|_| scene.cascade_views.is_empty()).map(
+            timestamp_writes: query_set.filter(|_| scene.shadow_passes.is_empty()).map(
                 |query_set| wgpu::RenderPassTimestampWrites {
                     query_set,
                     beginning_of_pass_write_index: Some(0),
@@ -993,18 +1162,156 @@ fn upload_cube(device: &wgpu::Device, queue: &wgpu::Queue, cube: &Cubemap) -> wg
     })
 }
 
+/// A depth texture array for shadow maps.
+fn shadow_maps(device: &wgpu::Device, label: &str, size: u32, layers: u32) -> wgpu::Texture {
+    device.create_texture(&wgpu::TextureDescriptor {
+        label: Some(label),
+        size: wgpu::Extent3d {
+            width: size,
+            height: size,
+            depth_or_array_layers: layers,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: DEPTH_FORMAT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    })
+}
+
+/// The scene's point and spot lights as the shader reads them, with their shadow views.
+struct LocalLights {
+    /// Point lights, then spot lights, each with the shadow casters first (Bevy's clustered
+    /// light order). Never empty: a zeroed light stands in for none.
+    gpu: Vec<GpuLight>,
+    point_count: u32,
+    spot_count: u32,
+    /// `clip_from_world` per spot shadow map, in layer order after the sun cascades.
+    spot_views: Vec<Mat4>,
+    /// `clip_from_world` per point-light cube face, six per shadow-casting point light.
+    point_views: Vec<Mat4>,
+}
+
+impl LocalLights {
+    /// Bevy's `extract_lights` and `prepare_lights` for point and spot lights. `cascades` is the
+    /// number of sun cascade layers ahead of the spot maps.
+    fn new(scene: &Scene, cascades: usize) -> Self {
+        use std::f32::consts::{FRAC_PI_2, PI, SQRT_2};
+        let sizes = scene.shadow_maps;
+        let base = |position: Vec3, color: Vec3, intensity: f32, range: f32, radius: f32| {
+            GpuLight {
+                // Luminous power to luminous intensity (lm/sr), for spot lights too.
+                color_inverse_square_range: (color * (intensity / (4.0 * PI)))
+                    .extend(1.0 / (range * range)),
+                position_radius: position.extend(radius),
+                ..GpuLight::zeroed()
+            }
+        };
+        let shadowed = |light: &mut GpuLight, s: LightShadows, texel_size: f32, radius: f32| {
+            light.flags |= LIGHT_SHADOWS;
+            light.shadow_depth_bias = s.depth_bias;
+            // √2 for the worst-case diagonal texel offset, as in Bevy.
+            light.shadow_normal_bias = s.normal_bias * texel_size * SQRT_2;
+            light.shadow_map_near_z = s.near_z;
+            light.soft_shadow_size = if s.soft { radius } else { 0.0 };
+        };
+
+        let mut gpu = Vec::new();
+        let mut point_views = Vec::new();
+        let mut spot_views = Vec::new();
+        let mut points: Vec<_> = scene.point_lights.iter().collect();
+        points.sort_by_key(|l| l.shadows.is_none());
+        for l in points {
+            let mut light = base(l.position, l.color, l.intensity, l.range, l.radius);
+            let near_z = l.shadows.map_or(LightShadows::POINT.near_z, |s| s.near_z);
+            let projection = perspective_infinite_reverse(FRAC_PI_2, 1.0, near_z);
+            light.light_custom_data = Vec4::new(
+                projection.z_axis.z,
+                projection.z_axis.w,
+                projection.w_axis.z,
+                projection.w_axis.w,
+            );
+            if let Some(s) = l.shadows {
+                shadowed(&mut light, s, 2.0 / sizes.point as f32, l.radius);
+                light.shadow_index = (point_views.len() / 6) as u32;
+                // Axis-aligned faces: the light's translation only.
+                for (target, up) in CUBE_FACES {
+                    let world_from_view = Mat4::from_translation(l.position)
+                        * Mat4::from_mat3(looking_to(target, up));
+                    point_views.push(projection * world_from_view.inverse());
+                }
+            }
+            gpu.push(light);
+        }
+        let point_count = gpu.len() as u32;
+
+        let mut spots: Vec<_> = scene.spot_lights.iter().collect();
+        spots.sort_by_key(|l| l.shadows.is_none());
+        for l in spots {
+            let mut light = base(l.position, l.color, l.intensity, l.range, l.radius);
+            let outer = l.outer_angle.min(FRAC_PI_2 - 1e-4);
+            let inner = l.inner_angle.min(outer);
+            let direction = l.direction.normalize();
+            if direction.y.is_sign_negative() {
+                light.flags |= LIGHT_SPOT_Y_NEGATIVE;
+            }
+            let cos_outer = outer.cos();
+            let spot_scale = 1.0 / (inner.cos() - cos_outer).max(1e-4);
+            light.light_custom_data = Vec4::new(
+                direction.x,
+                direction.z,
+                spot_scale,
+                -cos_outer * spot_scale,
+            );
+            light.spot_light_tan_angle = outer.tan();
+            if let Some(s) = l.shadows {
+                let texel_size = 2.0 * outer.tan() / sizes.directional as f32;
+                shadowed(&mut light, s, texel_size, l.radius);
+                light.shadow_index = (cascades + spot_views.len()) as u32;
+                // Bevy `spot_light_world_from_view` / `spot_light_clip_from_view`.
+                let world_from_view = Mat4::from_translation(l.position)
+                    * Mat4::from_mat3(orthonormalize(-direction));
+                let clip_from_view = perspective_infinite_reverse(2.0 * outer, 1.0, s.near_z);
+                spot_views.push(clip_from_view * world_from_view.inverse());
+            }
+            gpu.push(light);
+        }
+        let spot_count = gpu.len() as u32 - point_count;
+        if gpu.is_empty() {
+            gpu.push(GpuLight::zeroed());
+        }
+        Self {
+            gpu,
+            point_count,
+            spot_count,
+            spot_views,
+            point_views,
+        }
+    }
+}
+
+/// Bevy's `orthonormalize`: a right-handed basis whose z axis is `z` (the shaders rebuild the
+/// same basis from the spot direction).
+fn orthonormalize(z: Vec3) -> Mat3 {
+    let sign = 1f32.copysign(z.z);
+    let a = -1.0 / (sign + z.z);
+    let b = z.x * z.y * a;
+    let x = Vec3::new(1.0 + sign * z.x * z.x * a, sign * b, -sign * z.x);
+    let y = Vec3::new(b, sign + z.y * z.y * a, -z.y);
+    Mat3::from_cols(x, y, z)
+}
+
+/// The rotation of Bevy `Transform::looking_to(direction, up)`.
+fn looking_to(direction: Vec3, up: Vec3) -> Mat3 {
+    let back = -direction.normalize();
+    let right = up.cross(back).normalize();
+    Mat3::from_cols(right, back.cross(right), back)
+}
+
 /// Right-handed view matrix with +Y up (the inverse of Bevy `Transform::looking_at(target, Y)`).
 pub fn look_at(eye: Vec3, target: Vec3) -> Mat4 {
-    let back = (eye - target).normalize();
-    let right = Vec3::Y.cross(back).normalize();
-    let up = back.cross(right);
-    Mat4::from_cols(
-        right.extend(0.0),
-        up.extend(0.0),
-        back.extend(0.0),
-        eye.extend(1.0),
-    )
-    .inverse()
+    (Mat4::from_translation(eye) * Mat4::from_mat3(looking_to(target - eye, Vec3::Y))).inverse()
 }
 
 /// Bevy's right-handed infinite reverse-Z perspective projection.

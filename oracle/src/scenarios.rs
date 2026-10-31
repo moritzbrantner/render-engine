@@ -3,8 +3,9 @@
 
 use render_engine::glam::{Quat, Vec2, Vec3, Vec4};
 use render_engine::scene::{
-    Ambient, Camera, Cubemap, EnvironmentMap, Fog, FogFalloff, Material, MeshInstance, Scene,
-    ShadowFilter, Shape, Sun, SunShadows, Tonemapping,
+    Ambient, Camera, Cubemap, EnvironmentMap, Fog, FogFalloff, LightShadows, Material,
+    MeshInstance, PointLight, Scene, ShadowFilter, ShadowMapSizes, Shape, SpotLight, Sun,
+    SunShadows, Tonemapping,
 };
 use std::sync::Arc;
 
@@ -22,7 +23,199 @@ pub fn all() -> Vec<Scenario> {
     all.extend(tonemap_range());
     all.extend(ibl_materials());
     all.extend(fog_modes());
+    all.extend(point_spot());
     all
+}
+
+/// A dusk courtyard under low ambient light: a shadow-casting lantern hanging among PBR boxes, a
+/// wall torch, a short-range ground light whose range ends inside the view, a shadow-casting
+/// spot light from above and an unshadowed uplight washing a wall (a spot pointing upwards).
+/// Rendered with the Gaussian filter, with 2×2 PCF on smaller maps, and with soft shadows (PCSS)
+/// from both shadow-casting lights grown to 0.4 m spheres.
+fn point_spot() -> [Scenario; 3] {
+    let dielectric = |base_color, perceptual_roughness| Material {
+        base_color,
+        perceptual_roughness,
+        ..Material::default()
+    };
+    let stone = dielectric(rgb(0.55, 0.52, 0.47), 0.85);
+    let meshes = vec![
+        MeshInstance::new(
+            Shape::Plane(Vec2::splat(14.0)),
+            Vec3::ZERO,
+            dielectric(rgb(0.40, 0.38, 0.34), 0.8),
+        ),
+        // North and west walls.
+        MeshInstance::new(
+            Shape::Cuboid(Vec3::new(14.0, 3.0, 0.5)),
+            Vec3::new(0.0, 1.5, -6.75),
+            stone,
+        ),
+        MeshInstance::new(
+            Shape::Cuboid(Vec3::new(0.5, 3.0, 13.0)),
+            Vec3::new(-6.75, 1.5, -0.25),
+            stone,
+        ),
+        // Boxes around the lantern.
+        MeshInstance::new(
+            Shape::Cuboid(Vec3::ONE),
+            Vec3::new(-1.8, 0.5, 0.9),
+            dielectric(rgb(0.70, 0.08, 0.06), 0.45),
+        ),
+        MeshInstance::new(
+            Shape::Cuboid(Vec3::splat(1.2)),
+            Vec3::new(1.6, 0.6, -1.2),
+            Material {
+                base_color: rgb(1.0, 0.71, 0.29),
+                metallic: 1.0,
+                perceptual_roughness: 0.3,
+                ..Material::default()
+            },
+        ),
+        MeshInstance::new(
+            Shape::Cuboid(Vec3::new(0.7, 2.4, 0.7)),
+            Vec3::new(-0.6, 1.2, -2.6),
+            dielectric(rgb(0.10, 0.25, 0.65), 0.6),
+        )
+        .rotated(Quat::from_rotation_y(30f32.to_radians())),
+        MeshInstance::new(
+            Shape::Cuboid(Vec3::new(1.8, 0.4, 0.6)),
+            Vec3::new(0.6, 0.2, 2.0),
+            dielectric(rgb(0.85, 0.85, 0.82), 0.2),
+        )
+        .rotated(Quat::from_rotation_y(-20f32.to_radians())),
+        MeshInstance::new(
+            Shape::Sphere {
+                radius: 0.5,
+                sectors: 48,
+                stacks: 24,
+            },
+            Vec3::new(2.8, 0.5, 1.4),
+            dielectric(rgb(0.20, 0.55, 0.25), 0.35),
+        ),
+    ];
+    let scene = Scene {
+        camera: Camera {
+            eye: Vec3::new(7.0, 6.0, 9.0),
+            target: Vec3::new(-0.5, 0.5, -1.0),
+            fov_y: 45f32.to_radians(),
+            near: 0.1,
+            ev100: 4.0,
+            shadow_filter: ShadowFilter::Gaussian,
+            tonemapping: Tonemapping::TonyMcMapface,
+        },
+        clear_color: rgb(0.03, 0.04, 0.08),
+        sun: None,
+        point_lights: vec![
+            // Wall torch.
+            PointLight {
+                position: Vec3::new(-6.2, 2.0, -2.5),
+                color: rgb(1.0, 0.6, 0.3),
+                intensity: 3000.0,
+                range: 7.0,
+                radius: 0.1,
+                shadows: None,
+            },
+            // Hanging lantern; listed second, shaded first (shadow casters lead, as in Bevy).
+            PointLight {
+                position: Vec3::new(0.0, 2.2, 0.0),
+                color: rgb(1.0, 0.82, 0.6),
+                intensity: 8000.0,
+                range: 12.0,
+                radius: 0.08,
+                shadows: Some(LightShadows::POINT),
+            },
+            // A ground light whose 2.5 m range ends in plain view.
+            PointLight {
+                position: Vec3::new(4.0, 0.3, 3.5),
+                color: rgb(0.5, 0.7, 1.0),
+                intensity: 1500.0,
+                range: 2.5,
+                radius: 0.0,
+                shadows: None,
+            },
+        ],
+        spot_lights: vec![
+            // Uplight on the north wall: points upwards (the spot direction's y sign).
+            SpotLight {
+                position: Vec3::new(3.5, 0.1, -5.8),
+                direction: Vec3::new(0.0, 1.0, -0.35),
+                color: rgb(0.7, 0.8, 1.0),
+                intensity: 20_000.0,
+                range: 6.0,
+                radius: 0.0,
+                inner_angle: 10f32.to_radians(),
+                outer_angle: 30f32.to_radians(),
+                shadows: None,
+            },
+            SpotLight {
+                position: Vec3::new(4.5, 5.0, -3.5),
+                direction: Vec3::new(-0.5, 0.0, 0.2) - Vec3::new(4.5, 5.0, -3.5),
+                color: rgb(1.0, 0.95, 0.85),
+                intensity: 60_000.0,
+                range: 15.0,
+                radius: 0.1,
+                inner_angle: 20f32.to_radians(),
+                outer_angle: 32f32.to_radians(),
+                shadows: Some(LightShadows::SPOT),
+            },
+        ],
+        shadow_maps: ShadowMapSizes::default(),
+        ambient: Ambient {
+            color: rgb(0.45, 0.55, 0.85),
+            brightness: 4.0,
+        },
+        environment: None,
+        fog: None,
+        meshes,
+    };
+    // Coarse maps, so the 2×2 filter's texel steps cover enough pixels to gate.
+    let mut hardware = scene.clone();
+    hardware.camera.shadow_filter = ShadowFilter::Hardware2x2;
+    hardware.shadow_maps = ShadowMapSizes {
+        directional: 512,
+        point: 256,
+    };
+    // Bevy's penumbrae stay narrow even from large lights, so the camera moves in on the
+    // sphere's and the gold box's shadows.
+    let mut soft = scene.clone();
+    soft.camera.eye = Vec3::new(5.5, 2.2, 4.5);
+    soft.camera.target = Vec3::new(3.0, 0.0, 0.0);
+    for l in &mut soft.point_lights {
+        if l.shadows.is_some() {
+            l.radius = 0.5;
+            l.shadows = l.shadows.map(LightShadows::soft);
+        }
+    }
+    for l in &mut soft.spot_lights {
+        if l.shadows.is_some() {
+            l.radius = 0.5;
+            l.shadows = l.shadows.map(LightShadows::soft);
+        }
+    }
+    [
+        Scenario {
+            name: "point_spot",
+            capability: "point + spot lights, cube + spot shadows (Gaussian)",
+            width: 1280,
+            height: 720,
+            scene,
+        },
+        Scenario {
+            name: "point_spot_hardware",
+            capability: "point + spot lights, cube + spot shadows (2×2 PCF)",
+            width: 1280,
+            height: 720,
+            scene: hardware,
+        },
+        Scenario {
+            name: "point_spot_soft",
+            capability: "point + spot lights, soft shadows (PCSS)",
+            width: 1280,
+            height: 720,
+            scene: soft,
+        },
+    ]
 }
 
 /// A long receding double row of pillars towards a low sun, under each `FogFalloff`, once
@@ -79,6 +272,9 @@ fn fog_modes() -> Vec<Scenario> {
             color: rgb(0.75, 0.85, 1.0),
             brightness: 1500.0,
         },
+        point_lights: Vec::new(),
+        spot_lights: Vec::new(),
+        shadow_maps: ShadowMapSizes::default(),
         environment: None,
         fog: None,
         meshes,
@@ -205,6 +401,9 @@ fn ibl_materials() -> [Scenario; 2] {
             color: Vec3::ONE,
             brightness: 0.0,
         },
+        point_lights: Vec::new(),
+        spot_lights: Vec::new(),
+        shadow_maps: ShadowMapSizes::default(),
         environment: Some(tiergarten(IBL_INTENSITY)),
         fog: None,
         meshes,
@@ -329,6 +528,9 @@ fn sun_shadows() -> Scenario {
                 color: rgb(0.75, 0.85, 1.0),
                 brightness: 1500.0,
             },
+            point_lights: Vec::new(),
+            spot_lights: Vec::new(),
+            shadow_maps: ShadowMapSizes::default(),
             environment: None,
             fog: None,
             meshes,
@@ -414,6 +616,9 @@ fn sun_cascades() -> Scenario {
                 color: rgb(0.75, 0.85, 1.0),
                 brightness: 1500.0,
             },
+            point_lights: Vec::new(),
+            spot_lights: Vec::new(),
+            shadow_maps: ShadowMapSizes::default(),
             environment: None,
             fog: None,
             meshes,

@@ -11,16 +11,18 @@ and GPU frame time. See [technical decisions](docs/technical-decisions.md).
 
 ## Shape of the engine
 
-- **Scene in physical units:** `render_engine::scene` describes camera, sun, ambient light and
-  PBR meshes in Bevy's units (lux, cd/m², EV100, linear colour), so each scenario has an exact
-  Bevy counterpart.
+- **Scene in physical units:** `render_engine::scene` describes camera, sun, point and spot
+  lights, ambient light and PBR meshes in Bevy's units (lux, lumens, cd/m², EV100, linear
+  colour), so each scenario has an exact Bevy counterpart.
 - **wgpu renderer:** cascaded sun shadows (Bevy's cascade fitting and defaults: up to 4
   cascades with blended overlap, Gaussian 13-tap or hardware 2×2 PCF filtering) and a forward
   PBR pass (Filament/Bevy BRDF, 4× MSAA) into an `Rgba16Float` HDR target, then a tone-mapping
   pass with Bevy's operators and LUTs (Tony McMapface by default, AgX, ACES fitted). Image-based
   ambient light from prefiltered cube maps and Bevy's distance fog (linear, exponential,
-  exponential squared, atmospheric, with shadowed sun inscattering). Same wgpu major as the
-  mmorpg native client.
+  exponential squared, atmospheric, with shadowed sun inscattering). Point and spot lights
+  (Bevy's range window, sphere-light specular and cone falloff) in a plain forward loop, with
+  cube-map shadows for point lights and perspective maps for spot lights, filtered like the
+  sun's or with soft shadows (PCSS). Same wgpu major as the mmorpg native client.
 - **Bevy as oracle:** `oracle/` renders every parity scenario on Bevy (`bevy_pbr`) and on
   render-engine, headless. It fails when mean FLIP > 0.005 or p99 FLIP > 0.05, or — on a GPU —
   when render-engine's median GPU frame time is more than 10% slower than Bevy's.
@@ -64,6 +66,7 @@ let frame = gpu.render(&gpu.prepare(&scene, 1280, 720))?;
 | `sun_shadows` | ground, PBR boxes (dielectric, metallic), sun + one-cascade 2×2 PCF shadow, ambient | 0.0000 / 0.0000 | 0.069 / 0.196 (0.35×) | 10.7 / 15.2 |
 | `sun_cascades` | 200 m corridor, 4 cascades (Bevy defaults) with overlap blending, Gaussian filter | 0.0001 / 0.0023 | 0.183 / 0.263 (0.70×) | 35.7 / 18.0 |
 | `fog_modes` (8 views) | 180 m double row of pillars towards a low sun; linear, exponential, exponential squared and atmospheric fog, each without and with shadowed sun inscattering | ≤ 0.0000 / 0.0007 | 0.16–0.25 / 0.25–0.30 (≤ 0.89×) | 22–30 / 16–33 |
+| `point_spot` (3 views) | dusk courtyard: 3 point lights (one with cube shadows, one whose range ends in view), 2 spot lights (one shadowed from above, one pointing up a wall); Gaussian, 2×2 PCF on 512/256 maps, and soft shadows (PCSS) close up | ≤ 0.0000 / 0.0009 | 0.23–0.42 / 0.74–0.92 (≤ 0.45×) | 23–48 / 26–53 |
 
 ## Development
 
