@@ -27,6 +27,7 @@ fn scene(shadows: bool, tonemapping: Tonemapping) -> Scene {
             brightness: 0.0,
         },
         environment: None,
+        fog: None,
         meshes: vec![
             MeshInstance::new(
                 Shape::Plane(Vec2::splat(20.0)),

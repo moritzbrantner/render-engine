@@ -17,8 +17,10 @@ and GPU frame time. See [technical decisions](docs/technical-decisions.md).
 - **wgpu renderer:** cascaded sun shadows (Bevy's cascade fitting and defaults: up to 4
   cascades with blended overlap, Gaussian 13-tap or hardware 2×2 PCF filtering) and a forward
   PBR pass (Filament/Bevy BRDF, 4× MSAA) into an `Rgba16Float` HDR target, then a tone-mapping
-  pass with Bevy's operators and LUTs (Tony McMapface by default, AgX, ACES fitted). Same wgpu major as the mmorpg
-  native client.
+  pass with Bevy's operators and LUTs (Tony McMapface by default, AgX, ACES fitted). Image-based
+  ambient light from prefiltered cube maps and Bevy's distance fog (linear, exponential,
+  exponential squared, atmospheric, with shadowed sun inscattering). Same wgpu major as the
+  mmorpg native client.
 - **Bevy as oracle:** `oracle/` renders every parity scenario on Bevy (`bevy_pbr`) and on
   render-engine, headless. It fails when mean FLIP > 0.005 or p99 FLIP > 0.05, or — on a GPU —
   when render-engine's median GPU frame time is more than 10% slower than Bevy's.
@@ -30,11 +32,11 @@ and GPU frame time. See [technical decisions](docs/technical-decisions.md).
 ## Example
 
 ```rust,no_run
-use glam::{Vec2, Vec3};
+use glam::{Vec2, Vec3, Vec4};
 use render_engine::{headless::Headless, scene::*};
 
 let scene = Scene {
-    camera: Camera { eye: Vec3::new(6.0, 5.0, 8.0), target: Vec3::ZERO, fov_y: 0.785, near: 0.1, ev100: 10.5, shadow_filter: ShadowFilter::Gaussian },
+    camera: Camera { eye: Vec3::new(6.0, 5.0, 8.0), target: Vec3::ZERO, fov_y: 0.785, near: 0.1, ev100: 10.5, shadow_filter: ShadowFilter::Gaussian, tonemapping: Tonemapping::TonyMcMapface },
     clear_color: Vec3::new(0.3, 0.5, 0.8),
     sun: Some(Sun {
         direction: Vec3::new(0.75, -1.0, 0.25).normalize(),
@@ -43,6 +45,8 @@ let scene = Scene {
         shadows: Some(SunShadows::default()),
     }),
     ambient: Ambient { color: Vec3::ONE, brightness: 1500.0 },
+    environment: None,
+    fog: Some(Fog { color: Vec4::new(0.3, 0.5, 0.8, 1.0), falloff: FogFalloff::from_visibility(60.0), ..Fog::default() }),
     meshes: vec![
         MeshInstance::new(Shape::Plane(Vec2::splat(20.0)), Vec3::ZERO, Material::default()),
         MeshInstance::new(Shape::Cuboid(Vec3::ONE), Vec3::new(0.0, 0.5, 0.0), Material::default()),
@@ -58,7 +62,8 @@ let frame = gpu.render(&gpu.prepare(&scene, 1280, 720))?;
 | Scenario | Covers | FLIP mean / p99 | GPU ms (engine / Bevy), RTX 3060 Ti | lavapipe ms (advisory) |
 | --- | --- | --- | --- | --- |
 | `sun_shadows` | ground, PBR boxes (dielectric, metallic), sun + one-cascade 2×2 PCF shadow, ambient | 0.0000 / 0.0000 | 0.069 / 0.196 (0.35×) | 10.7 / 15.2 |
-| `sun_cascades` | 200 m corridor, 4 cascades (Bevy defaults) with overlap blending, Gaussian filter | 0.0004 / 0.0029 | 0.112 / 0.238 (0.47×) | 23.2 / 22.6 |
+| `sun_cascades` | 200 m corridor, 4 cascades (Bevy defaults) with overlap blending, Gaussian filter | 0.0001 / 0.0023 | 0.183 / 0.263 (0.70×) | 35.7 / 18.0 |
+| `fog_modes` (8 views) | 180 m double row of pillars towards a low sun; linear, exponential, exponential squared and atmospheric fog, each without and with shadowed sun inscattering | ≤ 0.0000 / 0.0007 | 0.16–0.25 / 0.25–0.30 (≤ 0.89×) | 22–30 / 16–33 |
 
 ## Development
 

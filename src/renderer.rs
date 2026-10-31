@@ -3,7 +3,7 @@
 
 use crate::{
     mesh::{Geometry, Vertex},
-    scene::{Cubemap, MAX_CASCADES, Scene, ShadowFilter, Tonemapping},
+    scene::{Cubemap, FogFalloff, MAX_CASCADES, Scene, ShadowFilter, Tonemapping},
 };
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat3, Mat4, Vec3, Vec4};
@@ -39,6 +39,16 @@ struct FrameUniform {
     /// x environment-map intensity (cd/m²), y smallest specular mip level, z 1 when there is an
     /// environment map.
     environment: Vec4,
+    /// Distance fog (Bevy `GpuFog`): linear RGBA colour.
+    fog_color: Vec4,
+    /// Sun inscattering colour, alpha = strength (0 = off).
+    fog_directional_light_color: Vec4,
+    /// xyz: Bevy `be` (linear: start, end; exponential: density; atmospheric: extinction),
+    /// w: directional-light exponent.
+    fog_be: Vec4,
+    /// xyz: Bevy `bi` (atmospheric inscattering), w: mode (0 off, 1 linear, 2 exponential,
+    /// 3 exponential squared, 4 atmospheric).
+    fog_bi: Vec4,
 }
 
 #[repr(C)]
@@ -220,19 +230,36 @@ impl Renderer {
                 bind_group_layouts: &[Some(&frame_layout), Some(&cascade_layout)],
                 immediate_size: 0,
             });
+        // Unclipped depth like Bevy's directional shadow views: natively where the device has
+        // `DEPTH_CLIP_CONTROL`, else clamped in a fragment shader (see `lit.wgsl`).
+        let unclipped_depth = device
+            .features()
+            .contains(wgpu::Features::DEPTH_CLIP_CONTROL);
         let shadow_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("sun shadow"),
             layout: Some(&shadow_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: Some("shadow_vs"),
+                entry_point: Some(if unclipped_depth {
+                    "shadow_vs"
+                } else {
+                    "shadow_emulated_vs"
+                }),
                 compilation_options: Default::default(),
                 buffers: &[Some(vertex_layout.clone())],
             },
-            primitive,
+            primitive: wgpu::PrimitiveState {
+                unclipped_depth,
+                ..primitive
+            },
             depth_stencil: Some(depth(DEPTH_FORMAT)),
             multisample: wgpu::MultisampleState::default(),
-            fragment: None,
+            fragment: (!unclipped_depth).then(|| wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("shadow_emulated_fs"),
+                compilation_options: Default::default(),
+                targets: &[],
+            }),
             multiview_mask: None,
             cache: None,
         });
@@ -453,6 +480,25 @@ impl Renderer {
             ),
             environment: scene.environment.as_ref().map_or(Vec4::ZERO, |e| {
                 Vec4::new(e.intensity, (e.specular.levels.len() - 1) as f32, 1.0, 0.0)
+            }),
+            fog_color: scene.fog.map_or(Vec4::ZERO, |f| f.color),
+            fog_directional_light_color: scene
+                .fog
+                .map_or(Vec4::ZERO, |f| f.directional_light_color),
+            fog_be: scene.fog.map_or(Vec4::ZERO, |f| {
+                let be = match f.falloff {
+                    FogFalloff::Linear { start, end } => Vec3::new(start, end, 0.0),
+                    FogFalloff::Exponential { density }
+                    | FogFalloff::ExponentialSquared { density } => Vec3::new(density, 0.0, 0.0),
+                    FogFalloff::Atmospheric { extinction, .. } => extinction,
+                };
+                be.extend(f.directional_light_exponent)
+            }),
+            fog_bi: scene.fog.map_or(Vec4::ZERO, |f| match f.falloff {
+                FogFalloff::Linear { .. } => Vec4::new(0.0, 0.0, 0.0, 1.0),
+                FogFalloff::Exponential { .. } => Vec4::new(0.0, 0.0, 0.0, 2.0),
+                FogFalloff::ExponentialSquared { .. } => Vec4::new(0.0, 0.0, 0.0, 3.0),
+                FogFalloff::Atmospheric { inscattering, .. } => inscattering.extend(4.0),
             }),
         };
 

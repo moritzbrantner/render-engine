@@ -32,6 +32,13 @@ struct Frame {
     // x: environment-map intensity (cd/m²), y: smallest specular mip level, z: 1 when there is an
     // environment map.
     environment: vec4<f32>,
+    // Distance fog, laid out like Bevy's `Fog`: colour, sun inscattering colour (a = strength),
+    // be.xyz + directional-light exponent, bi.xyz + mode (0 off, 1 linear, 2 exponential,
+    // 3 exponential squared, 4 atmospheric).
+    fog_color: vec4<f32>,
+    fog_directional_light_color: vec4<f32>,
+    fog_be: vec4<f32>,
+    fog_bi: vec4<f32>,
 }
 
 struct Instance {
@@ -61,14 +68,35 @@ struct VertexIn {
 
 // ---------------------------------------------------------------- shadow pass
 
+// Shadow pancaking, as in Bevy: casters between the sun and the cascade's near plane clamp onto
+// it per fragment (reverse Z, orthographic, so w == 1). With `DEPTH_CLIP_CONTROL` the pipeline
+// leaves depth unclipped and the rasterizer clamps; otherwise `shadow_emulated_*` clamp in the
+// fragment shader. Clamping per vertex instead would bend the depth of large triangles that
+// reach past the near plane (a ground plane stretching towards a low sun).
 @vertex
 fn shadow_vs(in: VertexIn) -> @builtin(position) vec4<f32> {
     let world = instances[in.instance].world_from_local * vec4(in.position, 1.0);
-    var clip = cascade_clip_from_world * world;
-    // Shadow pancaking: casters between the sun and the cascade's near plane clamp onto it
-    // (reverse Z, orthographic, so w == 1).
-    clip.z = min(clip.z, 1.0);
-    return clip;
+    return cascade_clip_from_world * world;
+}
+
+struct ShadowEmulatedOut {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) unclipped_depth: f32,
+}
+
+@vertex
+fn shadow_emulated_vs(in: VertexIn) -> ShadowEmulatedOut {
+    let world = instances[in.instance].world_from_local * vec4(in.position, 1.0);
+    var out: ShadowEmulatedOut;
+    out.clip = cascade_clip_from_world * world;
+    out.unclipped_depth = out.clip.z;
+    out.clip.z = min(out.clip.z, 1.0);
+    return out;
+}
+
+@fragment
+fn shadow_emulated_fs(in: ShadowEmulatedOut) -> @builtin(frag_depth) f32 {
+    return min(in.unclipped_depth, 1.0);
 }
 
 // ---------------------------------------------------------------- main pass
@@ -342,5 +370,60 @@ fn lit_fs(in: VertexOut) -> @location(0) vec4<f32> {
     }
     indirect += (diffuse_ambient + specular_ambient * specular_occlusion) * frame.ambient_color.rgb;
 
-    return vec4(frame.flags.x * (direct + indirect), 1.0);
+    let color = frame.flags.x * (direct + indirect);
+    if (frame.fog_bi.w > 0.5) {
+        return vec4(apply_fog(color, in.world), 1.0);
+    }
+    return vec4(color, 1.0);
+}
+
+// ---------------------------------------------------------------- distance fog
+
+// Bevy `scattering_adjusted_fog_color`.
+fn scattering_adjusted_fog_color(scattering: vec3<f32>) -> vec4<f32> {
+    let glow = frame.fog_directional_light_color;
+    if (glow.a > 0.0) {
+        return vec4(frame.fog_color.rgb + scattering * glow.rgb * glow.a, frame.fog_color.a);
+    }
+    return frame.fog_color;
+}
+
+// Bevy `apply_fog` (one directional light) and the falloffs of `fog.wesl`, on the exposed colour.
+fn apply_fog(input: vec3<f32>, world: vec3<f32>) -> vec3<f32> {
+    let view_to_world = world - frame.eye.xyz;
+    let distance = length(view_to_world);
+
+    var scattering = vec3(0.0);
+    if (frame.fog_directional_light_color.a > 0.0 && frame.flags.z > 0.5) {
+        let contribution = pow(
+            max(dot(view_to_world / distance, frame.direction_to_light.xyz), 0.0),
+            frame.fog_be.w,
+        ) * frame.sun_color.rgb * frame.flags.x;
+        var shadow = 1.0;
+        if (frame.flags.y > 0.5) {
+            // Bevy approximates the surface normal by the direction to the camera here.
+            shadow = sun_shadow(world, normalize(-view_to_world));
+        }
+        scattering += contribution * shadow;
+    }
+
+    var fog_color = scattering_adjusted_fog_color(scattering);
+    let mode = u32(frame.fog_bi.w + 0.5);
+    if (mode == 1u) {
+        let start = frame.fog_be.x;
+        let end = frame.fog_be.y;
+        fog_color.a *= 1.0 - clamp((end - distance) / (end - start), 0.0, 1.0);
+        return mix(input, fog_color.rgb, fog_color.a);
+    } else if (mode == 2u) {
+        fog_color.a *= 1.0 - 1.0 / exp(distance * frame.fog_be.x);
+        return mix(input, fog_color.rgb, fog_color.a);
+    } else if (mode == 3u) {
+        let distance_times_density = distance * frame.fog_be.x;
+        fog_color.a *= 1.0 - 1.0 / exp(distance_times_density * distance_times_density);
+        return mix(input, fog_color.rgb, fog_color.a);
+    }
+    let extinction_factor = 1.0 - 1.0 / exp(distance * frame.fog_be.xyz);
+    let inscattering_factor = 1.0 - 1.0 / exp(distance * frame.fog_bi.xyz);
+    return input * (1.0 - extinction_factor * fog_color.a)
+        + fog_color.rgb * inscattering_factor * fog_color.a;
 }

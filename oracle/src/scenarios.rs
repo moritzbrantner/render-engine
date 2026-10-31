@@ -1,10 +1,10 @@
 //! Parity scenarios. Each one is a `render_engine::scene::Scene`; the Bevy side translates it
 //! field by field (see `bevy_side.rs`).
 
-use render_engine::glam::{Quat, Vec2, Vec3};
+use render_engine::glam::{Quat, Vec2, Vec3, Vec4};
 use render_engine::scene::{
-    Ambient, Camera, Cubemap, EnvironmentMap, Material, MeshInstance, Scene, ShadowFilter, Shape,
-    Sun, SunShadows, Tonemapping,
+    Ambient, Camera, Cubemap, EnvironmentMap, Fog, FogFalloff, Material, MeshInstance, Scene,
+    ShadowFilter, Shape, Sun, SunShadows, Tonemapping,
 };
 use std::sync::Arc;
 
@@ -21,7 +21,126 @@ pub fn all() -> Vec<Scenario> {
     let mut all = vec![sun_shadows(), sun_cascades()];
     all.extend(tonemap_range());
     all.extend(ibl_materials());
+    all.extend(fog_modes());
     all
+}
+
+/// A long receding double row of pillars towards a low sun, under each `FogFalloff`, once
+/// without and once with sun inscattering (whose glow the pillars' shadows break up).
+fn fog_modes() -> Vec<Scenario> {
+    let stone = Material {
+        base_color: rgb(0.62, 0.58, 0.52),
+        perceptual_roughness: 0.8,
+        ..Material::default()
+    };
+    let mut meshes = vec![MeshInstance::new(
+        Shape::Plane(Vec2::new(60.0, 300.0)),
+        Vec3::new(0.0, 0.0, -120.0),
+        Material {
+            base_color: rgb(0.24, 0.26, 0.20),
+            perceptual_roughness: 0.9,
+            ..Material::default()
+        },
+    )];
+    for i in 0..30 {
+        for x in [-3.5, 3.5] {
+            meshes.push(MeshInstance::new(
+                Shape::Cuboid(Vec3::new(0.8, 5.0, 0.8)),
+                Vec3::new(x, 2.5, -6.0 * i as f32),
+                stone,
+            ));
+        }
+    }
+    let (elevation, azimuth) = (10f32.to_radians(), 12f32.to_radians());
+    let haze = Vec4::new(0.40, 0.48, 0.58, 1.0);
+    let base = Scene {
+        camera: Camera {
+            eye: Vec3::new(0.0, 2.5, 8.0),
+            target: Vec3::new(0.0, 2.0, -30.0),
+            fov_y: 45f32.to_radians(),
+            near: 0.1,
+            ev100: 10.5,
+            shadow_filter: ShadowFilter::Gaussian,
+            tonemapping: Tonemapping::TonyMcMapface,
+        },
+        clear_color: haze.truncate(),
+        // Travelling towards the camera, so the glow sits behind the pillars.
+        sun: Some(Sun {
+            direction: Vec3::new(
+                -elevation.cos() * azimuth.sin(),
+                -elevation.sin(),
+                elevation.cos() * azimuth.cos(),
+            ),
+            color: rgb(1.0, 0.92, 0.80),
+            illuminance: 10_000.0,
+            shadows: Some(SunShadows::default()),
+        }),
+        ambient: Ambient {
+            color: rgb(0.75, 0.85, 1.0),
+            brightness: 1500.0,
+        },
+        environment: None,
+        fog: None,
+        meshes,
+    };
+    let falloffs = [
+        (
+            "fog_linear",
+            FogFalloff::Linear {
+                start: 5.0,
+                end: 90.0,
+            },
+        ),
+        ("fog_exponential", FogFalloff::from_visibility(120.0)),
+        (
+            "fog_exponential_squared",
+            FogFalloff::from_visibility_squared(100.0),
+        ),
+        (
+            "fog_atmospheric",
+            FogFalloff::from_visibility_colors(
+                150.0,
+                Vec4::new(0.35, 0.5, 0.66, 1.0),
+                Vec4::new(0.8, 0.844, 1.0, 1.0),
+            ),
+        ),
+    ];
+    let names_sun = [
+        "fog_linear_sun",
+        "fog_exponential_sun",
+        "fog_exponential_squared_sun",
+        "fog_atmospheric_sun",
+    ];
+    let mut out = Vec::new();
+    for ((name, falloff), name_sun) in falloffs.into_iter().zip(names_sun) {
+        let fog = Fog {
+            color: haze,
+            falloff,
+            ..Fog::default()
+        };
+        let mut scene = base.clone();
+        scene.fog = Some(fog);
+        out.push(Scenario {
+            name,
+            capability: "distance fog",
+            width: 1280,
+            height: 720,
+            scene: scene.clone(),
+        });
+        scene.fog = Some(Fog {
+            directional_light_color: Vec4::new(1.0, 0.85, 0.6, 0.5),
+            directional_light_exponent: 20.0,
+            ..fog
+        });
+        out.push(Scenario {
+            name: name_sun,
+            capability: "distance fog + sun inscattering",
+            width: 1280,
+            height: 720,
+            scene,
+        });
+    }
+    out
 }
 
 /// Poly Haven's CC0 "Tiergarten" HDRI (overcast park), prefiltered by `bake_ibl` (see
@@ -87,6 +206,7 @@ fn ibl_materials() -> [Scenario; 2] {
             brightness: 0.0,
         },
         environment: Some(tiergarten(IBL_INTENSITY)),
+        fog: None,
         meshes,
     };
     let mut sunlit = scene.clone();
@@ -210,6 +330,7 @@ fn sun_shadows() -> Scenario {
                 brightness: 1500.0,
             },
             environment: None,
+            fog: None,
             meshes,
         },
     }
@@ -294,6 +415,7 @@ fn sun_cascades() -> Scenario {
                 brightness: 1500.0,
             },
             environment: None,
+            fog: None,
             meshes,
         },
     }
