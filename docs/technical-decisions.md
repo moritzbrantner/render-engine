@@ -69,13 +69,14 @@ sets `WGPU_FORCE_FALLBACK_ADAPTER=1`; Bevy and render-engine both honour that va
 - On a hardware adapter (the owner's RTX 3060 Ti) **both gates are enforced**. Run the oracle
   locally before merging work that touches render passes or shaders, and put its table in the
   PR.
-- The images agree across devices within the gate. Since the HDR target (#4) the frame passes
-  through two `Rgba16Float` roundings, so tiny float differences on lavapipe flip about 5% of
-  pixels by one 8-bit step: `sun_shadows` scores mean 0.0024 / p99 0.038 on lavapipe and
-  0.0001 / 0.0007 on the RTX 3060 Ti; `sun_cascades` 0.0026 / 0.025 and 0.0005 / 0.0086;
-  `ibl_materials` 0.0005 / 0.0081 and 0.0000 / 0.0000; `ibl_materials_sun` 0.0022 / 0.031 and
-  0.0000 / 0.0001; the `fog_*` views at most 0.0028 / 0.045 (`fog_exponential_squared`) and
-  0.0000 / 0.0007.
+- The images agree across devices with the same gate; there is no per-device rule. Every f16
+  rounding happens at the same stage as on Bevy, in the device's own `Rgba16Float` store
+  (main pass, tone-mapping target, then a blit into the output). Emulating the tone-mapped f16
+  store with `pack2x16float` instead (until #22) rounded to nearest where lavapipe's store does
+  not: about 5% of pixels came out exactly one 8-bit step brighter than Bevy, never darker, for
+  p99 up to 0.045 on lavapipe against 0.0007 on the RTX 3060 Ti. Since #22 every scenario
+  scores mean 0.0000 and p99 ≤ 0.0005 on lavapipe and ≤ 0.0007 on the RTX 3060 Ti, and a fog
+  density 10% off still fails on lavapipe (mean 0.021–0.026, p99 0.062–0.077).
 
 ## D5 — Pinned Bevy configuration per scenario
 
@@ -86,7 +87,8 @@ upgrade that changes a default shows up as a deliberate scenario change:
   `TonyMcMapface` and `AgX` with Bevy's `tonemapping_luts` in `tonemap_range`),
   `DebandDither::Disabled`, `Msaa::Sample4`, default `ColorGrading`, an `Rgba8UnormSrgb` image
   target. render-engine embeds Bevy's own LUT files (`src/luts/`, licences kept there) and
-  rounds the tone-mapped colour through f16 like Bevy's post-process chain;
+  tone maps into an `Rgba16Float` target that it blits into the output, like Bevy's
+  tonemapping and upscaling nodes;
 - sun shadows: the scenario's full `CascadeShadowConfigBuilder` (cascade count, minimum and
   maximum distance, first cascade far bound, overlap), its `ShadowFilteringMethod` on the camera
   (`Hardware2x2` or `Gaussian`), `DirectionalLightShadowMap` 2048 and Bevy's depth/normal biases
