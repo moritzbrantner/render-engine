@@ -45,12 +45,15 @@ The oracle writes `target/oracle/<scenario>.{bevy,engine,flip}.png` and `report.
 the FLIP heat map before changing shading code.
 
 CI (`.github/workflows/validate.yml`) runs all of this on plain Ubuntu with lavapipe
-(`WGPU_FORCE_FALLBACK_ADAPTER=1`); GPU time there is advisory. Run the oracle locally on the GPU
-for any PR that changes passes or shaders and paste its table into the PR.
+(`WGPU_FORCE_FALLBACK_ADAPTER=1`) in two parallel jobs: `tests` (engine fmt/clippy/test, never
+compiles Bevy) and `oracle` (oracle clippy/test and the FLIP gate). Markdown-only PRs skip both;
+`main` requires the `merge-ready` check. The FLIP gate is enforced on CI. The GPU-time gate is a
+**local gate**: run the oracle on the GPU for any PR that changes passes or shaders and paste its
+table into the PR.
 
 ## Execution scope
 
-- **One task = one branch = one PR**, targeting `main`. A task is one eligible issue. Deliver its
+- **One task = one branch = one PR**, targeting `main`, closing its issue (`Closes #n`). A task is one eligible issue. Deliver its
   scope, its oracle scenario and the docs it changes on that branch.
 - **Bevy oracle.** Every parity PR adds its scenario to `oracle/src/scenarios.rs` and its Bevy
   translation to `oracle/src/bevy_side.rs`. Do not add other ratchets, evidence packaging or

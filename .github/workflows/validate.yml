@@ -9,14 +9,42 @@ on:
 permissions:
   contents: read
 
+env:
+  CARGO_TERM_COLOR: always
+  # GitHub runners have no GPU: every wgpu adapter (render-engine and Bevy) is lavapipe.
+  WGPU_FORCE_FALLBACK_ADAPTER: "1"
+
 jobs:
-  validate:
+  docs-scope:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
-    env:
-      # GitHub runners have no GPU: every wgpu adapter (render-engine and Bevy) is lavapipe.
-      WGPU_FORCE_FALLBACK_ADAPTER: "1"
-      CARGO_TERM_COLOR: always
+    outputs:
+      docs-only: ${{ steps.classify.outputs.docs-only }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Fail-closed Markdown-only PR classification
+        id: classify
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          echo "docs-only=false" >> "$GITHUB_OUTPUT"
+          if [[ "${{ github.event_name }}" != "pull_request" ]]; then exit 0; fi
+          mapfile -d '' changed < <(git diff --no-renames --name-only -z "$BASE_SHA...$HEAD_SHA")
+          if (( ${#changed[@]} == 0 )); then exit 0; fi
+          for file in "${changed[@]}"; do
+            if [[ "$file" != *.md ]]; then exit 0; fi
+          done
+          echo "docs-only=true" >> "$GITHUB_OUTPUT"
+
+  # The engine crate alone: never compiles Bevy.
+  tests:
+    needs: docs-scope
+    if: needs.docs-scope.outputs.docs-only != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -32,10 +60,6 @@ jobs:
           sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libvulkan1
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          workspaces: |
-            . -> target
-            oracle -> target
 
       - name: Format
         run: |
@@ -43,14 +67,42 @@ jobs:
           (cd oracle && cargo fmt -- --check)
 
       - name: Clippy
-        run: |
-          cargo clippy --all-targets --locked -- -D warnings
-          (cd oracle && cargo clippy --release --all-targets --locked -- -D warnings)
+        run: cargo clippy --all-targets --locked -- -D warnings
 
       - name: Tests (headless render on lavapipe)
+        run: cargo test --locked
+
+  # The Bevy oracle: FLIP image gate enforced on lavapipe, GPU time advisory (no GPU on CI).
+  oracle:
+    needs: docs-scope
+    if: needs.docs-scope.outputs.docs-only != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install the rust-toolchain.toml toolchain
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+          components: clippy
+
+      - name: Install lavapipe (software Vulkan)
         run: |
-          cargo test --locked
-          (cd oracle && cargo test --release --locked)
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libvulkan1
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: oracle -> target
+
+      - name: Clippy (oracle)
+        working-directory: oracle
+        run: cargo clippy --release --all-targets --locked -- -D warnings
+
+      - name: Tests (oracle)
+        working-directory: oracle
+        run: cargo test --release --locked
 
       - name: Bevy oracle (FLIP image gate; GPU time advisory on lavapipe)
         run: cargo run --release --locked --manifest-path oracle/Cargo.toml -- --out target/oracle
@@ -71,10 +123,11 @@ jobs:
   merge-ready:
     name: merge-ready
     if: ${{ always() }}
-    needs: [validate]
+    needs: [docs-scope, tests, oracle]
     runs-on: ubuntu-latest
     steps:
       - uses: moritzbrantner/reusable-workflows/.github/actions/merge-ready@b0f25f241d76af2584dfc9e375084ff5c5cb97da
         with:
           needs: ${{ toJSON(needs) }}
-          required: '["validate"]'
+          required: '["docs-scope", "tests", "oracle"]'
+          allow-skipped: ${{ needs.docs-scope.outputs.docs-only == 'true' && '["tests", "oracle"]' || '[]' }}
