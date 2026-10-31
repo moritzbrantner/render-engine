@@ -7,10 +7,14 @@
 
 const PI: f32 = 3.141592653589793;
 
+const MAX_CASCADES: u32 = 4u;
+
 struct Frame {
     clip_from_world: mat4x4<f32>,
     view_from_world: mat4x4<f32>,
-    light_clip_from_world: mat4x4<f32>,
+    cascade_clip_from_world: array<mat4x4<f32>, MAX_CASCADES>,
+    // x: far bound (m), y: texel size (m).
+    cascade_params: array<vec4<f32>, MAX_CASCADES>,
     // xyz: camera position.
     eye: vec4<f32>,
     // xyz: unit direction towards the sun.
@@ -19,9 +23,10 @@ struct Frame {
     sun_color: vec4<f32>,
     // rgb: ambient colour × brightness (cd/m²).
     ambient_color: vec4<f32>,
-    // x: depth bias (m), y: normal bias (texels), z: shadow texel size (m), w: shadow far bound.
+    // x: depth bias (m), y: normal bias (texels), z: cascade overlap proportion, w: cascade count.
     shadow: vec4<f32>,
-    // x: exposure, y: 1 when the sun casts shadows, z: 1 when there is a sun.
+    // x: exposure, y: 1 when the sun casts shadows, z: 1 when there is a sun, w: 1 for the
+    // Gaussian shadow filter (else hardware 2×2).
     flags: vec4<f32>,
 }
 
@@ -35,8 +40,11 @@ struct Instance {
 
 @group(0) @binding(0) var<uniform> frame: Frame;
 @group(0) @binding(1) var<storage, read> instances: array<Instance>;
-@group(1) @binding(0) var shadow_map: texture_depth_2d;
+// Main pass only.
+@group(1) @binding(0) var shadow_maps: texture_depth_2d_array;
 @group(1) @binding(1) var shadow_sampler: sampler_comparison;
+// Shadow pass only: the cascade being rendered (dynamic offset).
+@group(1) @binding(2) var<uniform> cascade_clip_from_world: mat4x4<f32>;
 
 struct VertexIn {
     @builtin(instance_index) instance: u32,
@@ -49,7 +57,7 @@ struct VertexIn {
 @vertex
 fn shadow_vs(in: VertexIn) -> @builtin(position) vec4<f32> {
     let world = instances[in.instance].world_from_local * vec4(in.position, 1.0);
-    var clip = frame.light_clip_from_world * world;
+    var clip = cascade_clip_from_world * world;
     // Shadow pancaking: casters between the sun and the cascade's near plane clamp onto it
     // (reverse Z, orthographic, so w == 1).
     clip.z = min(clip.z, 1.0);
@@ -145,21 +153,82 @@ fn aces_fitted(color: vec3<f32>) -> vec3<f32> {
     return saturate(c);
 }
 
-fn sun_shadow(world: vec3<f32>, normal: vec3<f32>) -> f32 {
-    let view_z = (frame.view_from_world * vec4(world, 1.0)).z;
-    if (-view_z >= frame.shadow.w) {
+fn sample_hardware(uv: vec2<f32>, depth: f32, layer: u32) -> f32 {
+    return textureSampleCompareLevel(shadow_maps, shadow_sampler, uv, layer, depth);
+}
+
+// Bevy `sample_shadow_map_castano_thirteen`: a 13-tap Gaussian from 9 hardware PCF taps.
+// https://web.archive.org/web/20230210095515/http://the-witness.net/news/2013/09/shadow-mapping-summary-part-1
+fn sample_gaussian(light_local: vec2<f32>, depth: f32, layer: u32) -> f32 {
+    let size = vec2<f32>(textureDimensions(shadow_maps));
+    let inv = 1.0 / size;
+    let uv = light_local * size;
+    var base_uv = floor(uv + 0.5);
+    let s = uv.x + 0.5 - base_uv.x;
+    let t = uv.y + 0.5 - base_uv.y;
+    base_uv = (base_uv - 0.5) * inv;
+
+    let uw = vec3(4.0 - 3.0 * s, 7.0, 1.0 + 3.0 * s);
+    let u = vec3((3.0 - 2.0 * s) / uw.x - 2.0, (3.0 + s) / uw.y, s / uw.z + 2.0);
+    let vw = vec3(4.0 - 3.0 * t, 7.0, 1.0 + 3.0 * t);
+    let v = vec3((3.0 - 2.0 * t) / vw.x - 2.0, (3.0 + t) / vw.y, t / vw.z + 2.0);
+
+    var sum = 0.0;
+    for (var j = 0u; j < 3u; j++) {
+        for (var i = 0u; i < 3u; i++) {
+            sum += uw[i] * vw[j] * sample_hardware(base_uv + vec2(u[i], v[j]) * inv, depth, layer);
+        }
+    }
+    return sum * (1.0 / 144.0);
+}
+
+// Bevy `sample_directional_cascade`.
+fn sample_cascade(cascade: u32, world: vec3<f32>, normal: vec3<f32>) -> f32 {
+    let texel_size = frame.cascade_params[cascade].y;
+    let offset = world
+        + frame.shadow.y * texel_size * normal
+        + frame.shadow.x * frame.direction_to_light.xyz;
+    let clip = frame.cascade_clip_from_world[cascade] * vec4(offset, 1.0);
+    if (clip.w <= 0.0) {
         return 1.0;
     }
-    let offset = world
-        + frame.shadow.y * frame.shadow.z * normal
-        + frame.shadow.x * frame.direction_to_light.xyz;
-    let clip = frame.light_clip_from_world * vec4(offset, 1.0);
     let ndc = clip.xyz / clip.w;
     if (any(ndc.xy < vec2(-1.0)) || ndc.z < 0.0 || any(ndc > vec3(1.0))) {
         return 1.0;
     }
     let uv = ndc.xy * vec2(0.5, -0.5) + vec2(0.5);
-    return textureSampleCompareLevel(shadow_map, shadow_sampler, uv, ndc.z);
+    if (frame.flags.w > 0.5) {
+        return sample_gaussian(uv, ndc.z, cascade);
+    }
+    return sample_hardware(uv, ndc.z, cascade);
+}
+
+// Bevy `fetch_directional_shadow`: pick the cascade by view depth, blend into the next one
+// across the overlap.
+fn sun_shadow(world: vec3<f32>, normal: vec3<f32>) -> f32 {
+    let depth = -(frame.view_from_world * vec4(world, 1.0)).z;
+    let count = u32(frame.shadow.w);
+    var cascade = count;
+    for (var i = 0u; i < count; i++) {
+        if (depth < frame.cascade_params[i].x) {
+            cascade = i;
+            break;
+        }
+    }
+    if (cascade >= count) {
+        return 1.0;
+    }
+    var shadow = sample_cascade(cascade, world, normal);
+    let next = cascade + 1u;
+    if (next < count) {
+        let this_far = frame.cascade_params[cascade].x;
+        let next_near = (1.0 - frame.shadow.z) * this_far;
+        if (depth >= next_near) {
+            let next_shadow = sample_cascade(next, world, normal);
+            shadow = mix(shadow, next_shadow, (depth - next_near) / (this_far - next_near));
+        }
+    }
+    return shadow;
 }
 
 @fragment

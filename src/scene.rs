@@ -28,6 +28,8 @@ pub struct Camera {
     pub near: f32,
     /// Bevy `Exposure::ev100`; scene radiance is multiplied by `2^-ev100 / 1.2`.
     pub ev100: f32,
+    /// Bevy `ShadowFilteringMethod` on the camera.
+    pub shadow_filter: ShadowFilter,
 }
 
 impl Camera {
@@ -48,16 +50,27 @@ pub struct Sun {
     pub shadows: Option<SunShadows>,
 }
 
-/// A single-cascade directional shadow map (Bevy `CascadeShadowConfig` with one cascade,
-/// `DirectionalLightShadowMap`, `ShadowFilteringMethod::Hardware2x2`).
+/// Most cascades a sun can have (Bevy `MAX_CASCADES_PER_LIGHT`).
+pub const MAX_CASCADES: usize = 4;
+
+/// Cascaded directional shadow maps (Bevy `CascadeShadowConfigBuilder`,
+/// `DirectionalLightShadowMap`, the light's shadow biases). The defaults are Bevy's.
 #[derive(Clone, Copy, Debug)]
 pub struct SunShadows {
-    /// Texels per side.
+    /// Texels per side of every cascade's map (Bevy `DirectionalLightShadowMap::size`).
     pub map_size: u32,
+    /// 1 to [`MAX_CASCADES`] (Bevy `num_cascades`).
+    pub num_cascades: usize,
     /// View distance where shadows start (Bevy `minimum_distance`).
     pub min_distance: f32,
+    /// Far bound of the first cascade; the others are spaced exponentially up to
+    /// `max_distance`. Ignored with one cascade (Bevy `first_cascade_far_bound`).
+    pub first_cascade_far_bound: f32,
     /// View distance where shadows end (Bevy `maximum_distance`).
     pub max_distance: f32,
+    /// Share of each cascade's far bound blended into the next cascade, in `[0, 1)` (Bevy
+    /// `overlap_proportion`).
+    pub overlap_proportion: f32,
     /// World-space offset towards the light (Bevy `shadow_depth_bias`).
     pub depth_bias: f32,
     /// Offset along the surface normal in shadow texels (Bevy `shadow_normal_bias`).
@@ -68,12 +81,64 @@ impl Default for SunShadows {
     fn default() -> Self {
         Self {
             map_size: 2048,
+            num_cascades: 4,
             min_distance: 0.1,
-            max_distance: 30.0,
+            first_cascade_far_bound: 10.0,
+            max_distance: 150.0,
+            overlap_proportion: 0.2,
             depth_bias: 0.02,
             normal_bias: 1.8,
         }
     }
+}
+
+impl SunShadows {
+    /// One cascade covering `min_distance..max_distance`.
+    pub fn single_cascade(max_distance: f32) -> Self {
+        Self {
+            num_cascades: 1,
+            max_distance,
+            ..Self::default()
+        }
+    }
+
+    /// Far bound of each cascade (Bevy `calculate_cascade_bounds`).
+    pub fn far_bounds(&self) -> Vec<f32> {
+        assert!(
+            (1..=MAX_CASCADES).contains(&self.num_cascades),
+            "num_cascades must be 1..={MAX_CASCADES}, was {}",
+            self.num_cascades
+        );
+        if self.num_cascades == 1 {
+            return vec![self.max_distance];
+        }
+        let base = (self.max_distance / self.first_cascade_far_bound)
+            .powf(1.0 / (self.num_cascades - 1) as f32);
+        (0..self.num_cascades)
+            .map(|i| self.first_cascade_far_bound * base.powf(i as f32))
+            .collect()
+    }
+
+    /// `(near, far)` view distances of each cascade: the first starts at `min_distance`, each
+    /// later one at `1 - overlap_proportion` of the previous far bound (Bevy
+    /// `build_directional_light_cascades`).
+    pub fn cascade_ranges(&self) -> Vec<(f32, f32)> {
+        let far = self.far_bounds();
+        let near = std::iter::once(self.min_distance)
+            .chain(far.iter().map(|f| (1.0 - self.overlap_proportion) * f));
+        near.zip(far.iter().copied()).collect()
+    }
+}
+
+/// How shadow maps are filtered (Bevy `ShadowFilteringMethod`, a camera setting). The default is
+/// Bevy's.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ShadowFilter {
+    /// One hardware 2×2 PCF comparison.
+    Hardware2x2,
+    /// Castaño's 13-tap fixed Gaussian (9 hardware PCF samples).
+    #[default]
+    Gaussian,
 }
 
 /// Uniform ambient light (Bevy `GlobalAmbientLight`).

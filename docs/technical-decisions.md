@@ -48,8 +48,10 @@ when:
 - The p99 term exists because the whole-image mean dilutes local defects: on `sun_shadows`, a
   renderer with shadows switched off scores mean 0.0104 but p99 0.748. Calibration on the first
   scenario (RTX 3060 Ti): parity 0.0005 / p99 0.0008; Lambert instead of Burley diffuse 0.0180;
-  no multiscatter compensation 0.0128; no normal bias 0.0014 / 0.0059 (passes — a sub-texel
-  bias change is not a parity break).
+  no multiscatter compensation 0.0128; no normal bias 0.0014 / 0.0059 (passes with the 2×2
+  filter). The wide Gaussian filter is more sensitive: on `sun_cascades`, missing Bevy's √2
+  normal-bias factor scored 0.0048 / p99 0.052 (fails); with it, 0.0004 / 0.0029, and
+  `sun_shadows` went from 0.0005 to 0.0000.
 - GPU time is measured with timestamp queries: 200 frames per side, median. render-engine times
   its whole frame (first pass start to last pass end). Bevy's time is the sum of the top-level
   `RenderDiagnosticsPlugin` spans (`render/<span>/elapsed_gpu`: mesh preprocessing, shadow
@@ -68,8 +70,8 @@ sets `WGPU_FORCE_FALLBACK_ADAPTER=1`; Bevy and render-engine both honour that va
 - On a hardware adapter (the owner's RTX 3060 Ti) **both gates are enforced**. Run the oracle
   locally before merging work that touches render passes or shaders, and put its table in the
   PR.
-- The images agree across devices: `sun_shadows` scores mean 0.0005 on both lavapipe and the
-  RTX 3060 Ti.
+- The images agree across devices: `sun_shadows` scores mean 0.0000 and `sun_cascades` 0.0004
+  on both lavapipe and the RTX 3060 Ti.
 
 ## D5 — Pinned Bevy configuration per scenario
 
@@ -78,12 +80,15 @@ upgrade that changes a default shows up as a deliberate scenario change:
 
 - tone mapping `AcesFitted` (analytic, no LUT), `DebandDither::Disabled`, `Msaa::Sample4`, a
   non-HDR `Rgba8UnormSrgb` target;
-- sun shadows: one cascade, `ShadowFilteringMethod::Hardware2x2`, `DirectionalLightShadowMap`
-  2048, Bevy's depth/normal biases (0.02 m, 1.8 texels);
+- sun shadows: the scenario's full `CascadeShadowConfigBuilder` (cascade count, minimum and
+  maximum distance, first cascade far bound, overlap), its `ShadowFilteringMethod` on the camera
+  (`Hardware2x2` or `Gaussian`), `DirectionalLightShadowMap` 2048 and Bevy's depth/normal biases
+  (0.02 m, 1.8 texels). `sun_shadows` keeps one cascade with 2×2 PCF; `sun_cascades` uses
+  Bevy's defaults (4 cascades, 10 m / 150 m, overlap 0.2, Gaussian);
 - `GlobalAmbientLight` for ambient; no environment map yet.
 
-Later scenarios lift these one at a time (cascades, Gaussian/temporal filtering, IBL, TonyMcMapface
-tone mapping, HDR targets, fog, sky).
+Later scenarios lift these one at a time (temporal filtering, IBL, TonyMcMapface tone mapping,
+HDR targets, fog, sky).
 
 ## D6 — Order: lighting first, then particles
 
