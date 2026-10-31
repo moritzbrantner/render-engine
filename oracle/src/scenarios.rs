@@ -88,7 +88,7 @@ impl Feature {
             Feature::PointSpot => &[24],
             Feature::TexturedProps => &[25],
             Feature::Sky => &[26],
-            Feature::Culling => &[29],
+            Feature::Culling => &[30],
         }
     }
 
