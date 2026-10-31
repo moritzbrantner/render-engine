@@ -1,6 +1,9 @@
 //! Per-size targets and per-frame GPU state, reused and grown from frame to frame.
 
-use super::{DEPTH_FORMAT, HDR_FORMAT, Renderer, SAMPLE_COUNT, gpu::FrameUniform};
+use super::{
+    DEPTH_FORMAT, HDR_FORMAT, Renderer, SAMPLE_COUNT,
+    gpu::{FrameUniform, InstanceData},
+};
 use crate::{
     scene::{Cubemap, Tonemapping},
     sky::SkyTargets,
@@ -47,6 +50,10 @@ pub struct Viewport {
     pub(super) shadow_passes: Vec<ShadowPass>,
     /// Main-pass draws in order; shadow passes draw the same list.
     pub(super) draws: Vec<Draw>,
+    /// Scratch for sorting the frame's instances, kept between frames with its allocation.
+    pub(super) draw_keys: Vec<DrawKey>,
+    /// Scratch for the instance buffer's contents, kept likewise.
+    pub(super) instance_data: Vec<InstanceData>,
     pub(super) clear_color: wgpu::Color,
     pub(super) tonemapping: Tonemapping,
 }
@@ -174,6 +181,17 @@ pub(super) struct ShadowPass {
     pub(super) view: u32,
 }
 
+/// What places an instance in the frame's draw order.
+pub(super) struct DrawKey {
+    pub(super) phase: Phase,
+    pub(super) face: usize,
+    pub(super) material: MaterialId,
+    pub(super) mesh: MeshId,
+    pub(super) view_z: f32,
+    /// Index in the consumer's instance list.
+    pub(super) index: u32,
+}
+
 /// Consecutive instances sharing a pipeline, material and mesh.
 pub(super) struct Draw {
     pub(super) face: usize,
@@ -210,6 +228,8 @@ impl Viewport {
             sky: None,
             shadow_passes: Vec::new(),
             draws: Vec::new(),
+            draw_keys: Vec::new(),
+            instance_data: Vec::new(),
             clear_color: wgpu::Color::BLACK,
             tonemapping: Tonemapping::default(),
         }

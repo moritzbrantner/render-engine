@@ -8,14 +8,15 @@ use super::{
     projection::{Cascade, look_at, looking_to, perspective_infinite_reverse},
     textures::upload_cube,
     viewport::{
-        Draw, Phase, SHADOW_VIEW_STRIDE, ShadowArray, ShadowPass, UploadedEnvironment, Viewport,
+        Draw, DrawKey, Phase, SHADOW_VIEW_STRIDE, ShadowArray, ShadowPass, UploadedEnvironment,
+        Viewport,
     },
 };
 use crate::{
     material::AlphaMode,
     scene::{FogFalloff, MAX_CASCADES, Scene, ShadowFilter, Tonemapping},
     sky::SkyTargets,
-    world::{Instance, MaterialId, MeshId, World},
+    world::{Instance, World},
 };
 use bytemuck::Zeroable;
 use glam::{Mat3, Mat4, UVec4, Vec3, Vec4};
@@ -393,82 +394,81 @@ fn write_instances(
     view_from_world: Mat4,
     instances: &[Instance],
 ) {
-    // Instances, grouped into draws: opaque, then alpha-masked (each by pipeline, material
-    // and mesh), then blended from back to front by origin (Bevy's transparent sort).
-    struct Sorted {
-        phase: Phase,
-        face: usize,
-        material: MaterialId,
-        mesh: MeshId,
-        view_z: f32,
-        data: InstanceData,
-    }
-    let mut sorted: Vec<Sorted> = instances
-        .iter()
-        .map(|inst| {
-            let material = &world.material(inst.material).material;
-            let mesh = world.mesh(inst.mesh);
-            let m = inst.world_from_local;
-            let linear = Mat3::from_mat4(m);
-            let mirrored = linear.determinant() < 0.0;
-            let normal = linear.inverse().transpose();
-            Sorted {
-                phase: match material.alpha_mode {
-                    AlphaMode::Opaque => Phase::Opaque,
-                    AlphaMode::Mask(_) => Phase::Mask,
-                    AlphaMode::Blend => Phase::Blend,
-                },
-                face: face_variant(mirrored, material.double_sided),
-                material: inst.material,
-                mesh: inst.mesh,
-                view_z: (view_from_world * m.w_axis).z,
-                data: InstanceData {
-                    world_from_local: m,
-                    normal_from_local: [
-                        normal.x_axis.extend(0.0),
-                        normal.y_axis.extend(0.0),
-                        normal.z_axis.extend(0.0),
-                    ],
-                    flags: UVec4::new(u32::from(mesh.has_tangents), u32::from(mirrored), 0, 0),
-                },
-            }
-        })
-        .collect();
-    sorted.sort_by(|a, b| {
-        a.phase.cmp(&b.phase).then_with(|| {
-            if a.phase == Phase::Blend {
-                a.view_z.total_cmp(&b.view_z)
-            } else {
-                (a.face, a.material, a.mesh).cmp(&(b.face, b.material, b.mesh))
-            }
-        })
+    // Instances, grouped into draws: opaque, then alpha-masked (each by pipeline, material and
+    // mesh), then blended from back to front by origin (Bevy's transparent sort). Ties keep the
+    // consumer's order.
+    let keys = &mut viewport.draw_keys;
+    keys.clear();
+    keys.extend(instances.iter().enumerate().map(|(index, inst)| {
+        let material = &world.material(inst.material).material;
+        let m = inst.world_from_local;
+        DrawKey {
+            phase: match material.alpha_mode {
+                AlphaMode::Opaque => Phase::Opaque,
+                AlphaMode::Mask(_) => Phase::Mask,
+                AlphaMode::Blend => Phase::Blend,
+            },
+            face: face_variant(
+                Mat3::from_mat4(m).determinant() < 0.0,
+                material.double_sided,
+            ),
+            material: inst.material,
+            mesh: inst.mesh,
+            view_z: (view_from_world * m.w_axis).z,
+            index: index as u32,
+        }
+    }));
+    keys.sort_unstable_by(|a, b| {
+        a.phase
+            .cmp(&b.phase)
+            .then_with(|| {
+                if a.phase == Phase::Blend {
+                    a.view_z.total_cmp(&b.view_z)
+                } else {
+                    (a.face, a.material, a.mesh).cmp(&(b.face, b.material, b.mesh))
+                }
+            })
+            .then(a.index.cmp(&b.index))
     });
+
     viewport.draws.clear();
-    for (i, s) in sorted.iter().enumerate() {
+    viewport.instance_data.clear();
+    for (i, key) in keys.iter().enumerate() {
         let i = i as u32;
         match viewport.draws.last_mut() {
             Some(d)
                 if (d.phase, d.face, d.material, d.mesh)
-                    == (s.phase, s.face, s.material, s.mesh) =>
+                    == (key.phase, key.face, key.material, key.mesh) =>
             {
                 d.instances.end = i + 1;
             }
             _ => viewport.draws.push(Draw {
-                face: s.face,
-                phase: s.phase,
-                mesh: s.mesh,
-                material: s.material,
+                face: key.face,
+                phase: key.phase,
+                mesh: key.mesh,
+                material: key.material,
                 instances: i..i + 1,
             }),
         }
+        let m = instances[key.index as usize].world_from_local;
+        let normal = Mat3::from_mat4(m).inverse().transpose();
+        let has_tangents = world.mesh(key.mesh).has_tangents;
+        viewport.instance_data.push(InstanceData {
+            world_from_local: m,
+            normal_from_local: [
+                normal.x_axis.extend(0.0),
+                normal.y_axis.extend(0.0),
+                normal.z_axis.extend(0.0),
+            ],
+            flags: UVec4::new(u32::from(has_tangents), (key.face & 1) as u32, 0, 0),
+        });
     }
-    let mut instance_data: Vec<InstanceData> = sorted.iter().map(|s| s.data).collect();
-    if instance_data.is_empty() {
-        instance_data.push(InstanceData::zeroed());
+    if viewport.instance_data.is_empty() {
+        viewport.instance_data.push(InstanceData::zeroed());
     }
     if viewport
         .instance_buffer
-        .write(device, queue, bytemuck::cast_slice(&instance_data))
+        .write(device, queue, bytemuck::cast_slice(&viewport.instance_data))
     {
         viewport.frame_group = None;
     }
