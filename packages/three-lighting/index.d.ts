@@ -49,6 +49,48 @@ export interface Sun {
   shadows: SunShadows | null;
 }
 
+/** Shadows of a point or spot light (Bevy `shadow_depth_bias`, `shadow_normal_bias`, `shadow_map_near_z`, `soft_shadows_enabled`). */
+export interface LightShadows {
+  /** World-space offset towards the light (m). */
+  depthBias: number;
+  /** Offset along the surface normal, in shadow texels. */
+  normalBias: number;
+  /** Near plane of the shadow projection (m); casters closer to the light cast nothing. */
+  nearZ: number;
+  /** Percentage-closer soft shadows with a penumbra from the light's radius (Bevy PCSS); otherwise `Lighting.shadowFilter`. */
+  soft: boolean;
+}
+
+/** Bevy's `PointLight` shadow defaults. */
+export const POINT_LIGHT_SHADOWS: Readonly<LightShadows>;
+/** Bevy's `SpotLight` shadow defaults. */
+export const SPOT_LIGHT_SHADOWS: Readonly<LightShadows>;
+
+/** Bevy `PointLight`. */
+export interface PointLight {
+  position: Vec3;
+  /** Linear RGB. */
+  color: Vec3;
+  /** Luminous power, lumens. */
+  intensity: number;
+  /** Distance where the light has faded out (m; Bevy's smooth window over 1/d²). */
+  range: number;
+  /** Radius of the light's sphere (m): widens highlights and soft-shadow penumbrae. */
+  radius?: number;
+  /** Cube-map shadows, or null for none. At most 4 shadowed point lights per frame. */
+  shadows: LightShadows | null;
+}
+
+/** Bevy `SpotLight`. Shadows: a perspective map at `Lighting.shadowMapSize`, at most 4 per frame. */
+export interface SpotLight extends PointLight {
+  /** Direction the light points. */
+  direction: Vec3;
+  /** Radians off the axis where the falloff starts. */
+  innerAngle: number;
+  /** Radians off the axis where the light ends (below π/2). */
+  outerAngle: number;
+}
+
 /** Bevy `GlobalAmbientLight`. */
 export interface Ambient {
   color: Vec3;
@@ -128,18 +170,28 @@ export class LitMaterial extends ShaderMaterial {
 }
 
 export class Lighting {
-  constructor(luts: ToneMappingLuts, options?: { shadowMapSize?: number });
+  /**
+   * `shadowMapSize`: texels per side of each sun cascade and spot map (Bevy
+   * `DirectionalLightShadowMap`, default 2048); `pointShadowMapSize`: per point-light cube face
+   * (Bevy `PointLightShadowMap`, default 1024).
+   */
+  constructor(luts: ToneMappingLuts, options?: { shadowMapSize?: number; pointShadowMapSize?: number });
   /** Linear RGB where nothing is drawn: tone mapped, not exposed. */
   clearColor: Vec3;
   ev100: number;
   tonemapping: ToneMapping;
+  /** Filter of the sun's shadows and of point and spot shadows that are not soft. */
   shadowFilter: ShadowFilter;
   sun: Sun | null;
+  /** Shaded before the spot lights and the sun (Bevy's order), shadow casters first. */
+  pointLights: PointLight[];
+  spotLights: SpotLight[];
   ambient: Ambient;
   environment: EnvironmentMap | null;
   fog: Fog | null;
   readonly shadowMapSize: number;
-  /** Shadow cascades, MSAA HDR pass, tone mapping and sRGB output into `target` (null: canvas). */
+  readonly pointShadowMapSize: number;
+  /** Shadow cascades, spot maps and point-light cube faces, MSAA HDR pass, tone mapping and sRGB output into `target` (null: canvas). */
   render(
     renderer: WebGLRenderer,
     scene: Scene,

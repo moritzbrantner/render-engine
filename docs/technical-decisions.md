@@ -248,6 +248,16 @@ As built (#11):
   `DEPTH_COMPONENT32F`; without them the depth is remapped and clamped per fragment. The sun-glow
   fog term samples the shadow with the view direction as normal, which sits on the edge of
   self-shadowing; only the native pipeline reproduces Bevy's result there.
+- **Point and spot lights (#38)** port render-engine's passes rather than three's `PointLight`/
+  `SpotLight` shadows (their own falloff, projection and filters): Bevy's clustered order (points,
+  then spots, casters first, then the sun), range window, sphere-light specular and cone falloff;
+  spot maps at the cascades' size, point lights in a `WebGLCubeRenderTarget` with a
+  `CubeDepthTexture` (three allocates it as `DEPTH_COMPONENT24`; Bevy uses 32-bit float). Both
+  render with Bevy's infinite reverse-Z projection and clipped depth; cube faces render upside
+  down, because GL stores a face's NDC y = −1 in row 0 where wgpu stores +1. WebGL 2 cannot
+  linearly sample a depth texture without comparison, so the local passes also write their depth
+  into an R32F target that the soft-shadow (PCSS) blocker search reads. Shader macros are
+  `LIT_*`: three.js rewrites `NUM_POINT_LIGHTS` and its other light counts in every shader.
 - **Oracle side.** `oracle --no-three` skips it; otherwise the oracle exports every lighting
   scenario the port covers (`oracle/src/three_side.rs`: scene in Bevy units plus vertex data) and
   renders them in one headless Chromium run (`oracle/three/render.mjs`, Playwright) through

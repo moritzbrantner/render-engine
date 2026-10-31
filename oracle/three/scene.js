@@ -58,7 +58,12 @@ async function main() {
   camera.position.set(...c.eye);
   camera.lookAt(...c.target);
 
-  const lighting = new Lighting(await loadToneMappingLuts(), { shadowMapSize: doc.shadowMapSize });
+  const lighting = new Lighting(await loadToneMappingLuts(), {
+    shadowMapSize: doc.shadowMapSize,
+    pointShadowMapSize: doc.pointShadowMapSize,
+  });
+  lighting.pointLights = doc.pointLights;
+  lighting.spotLights = doc.spotLights;
   lighting.clearColor = doc.clearColor;
   lighting.ev100 = c.ev100;
   lighting.tonemapping = c.tonemapping;
