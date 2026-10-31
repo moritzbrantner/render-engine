@@ -168,6 +168,10 @@ fn headless_app() -> App {
     let mut app = App::new();
     app.add_plugins(
         DefaultPlugins
+            .build()
+            // bevy_hanabi enables Bevy's `x11` feature, which brings in winit; the oracle has no
+            // window, and winit fails without a display (CI).
+            .disable::<bevy::winit::WinitPlugin>()
             .set(WindowPlugin {
                 primary_window: None,
                 exit_condition: ExitCondition::DontExit,
