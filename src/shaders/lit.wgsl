@@ -106,6 +106,8 @@ const MATERIAL_ALPHA_BLEND: u32 = 256u;
 
 @group(0) @binding(0) var<uniform> frame: Frame;
 @group(0) @binding(1) var<storage, read> instances: array<Instance>;
+// Per view, the indices of the instances that survived frustum culling; draws index into it.
+@group(0) @binding(2) var<storage, read> visible: array<u32>;
 // Main pass only.
 @group(1) @binding(0) var shadow_maps: texture_depth_2d_array;
 @group(1) @binding(1) var shadow_sampler: sampler_comparison;
@@ -170,7 +172,7 @@ struct ShadowOut {
 }
 
 fn shadow_vertex(in: VertexIn) -> ShadowOut {
-    let world = instances[in.instance].world_from_local * vec4(in.position, 1.0);
+    let world = instances[visible[in.instance]].world_from_local * vec4(in.position, 1.0);
     var out: ShadowOut;
     out.clip = cascade_clip_from_world * world;
     out.uv = in.uv;
@@ -228,7 +230,8 @@ struct VertexOut {
 // (MikkTSpace), not again per fragment.
 @vertex
 fn lit_vs(in: VertexIn) -> VertexOut {
-    let inst = instances[in.instance];
+    let index = visible[in.instance];
+    let inst = instances[index];
     let world = inst.world_from_local * vec4(in.position, 1.0);
     var out: VertexOut;
     out.clip = frame.clip_from_world * world;
@@ -247,7 +250,7 @@ fn lit_vs(in: VertexIn) -> VertexOut {
         let sign = select(1.0, -1.0, inst.flags.y != 0u);
         out.tangent = vec4(normalize(m * in.tangent.xyz), in.tangent.w * sign);
     }
-    out.instance = in.instance;
+    out.instance = index;
     out.uv = in.uv;
     out.color = in.color;
     return out;

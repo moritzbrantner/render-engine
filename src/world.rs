@@ -3,6 +3,7 @@
 //! material and a transform) and the renderer draws them; nothing else is uploaded again.
 
 use crate::{
+    cull::Aabb,
     material::{AlphaMode, StandardMaterial, TextureData},
     mesh::MeshData,
     renderer::Renderer,
@@ -83,6 +84,8 @@ pub(crate) struct GpuMesh {
     pub indices: wgpu::Buffer,
     pub index_count: u32,
     pub has_tangents: bool,
+    /// Local bounds for frustum culling, computed once per upload.
+    pub aabb: Aabb,
 }
 
 struct GpuTexture {
@@ -197,6 +200,7 @@ impl World {
                 self.queue
                     .write_buffer(&slot.indices, 0, bytemuck::cast_slice(&mesh.indices));
                 slot.has_tangents = !mesh.tangents.is_empty();
+                slot.aabb = Aabb::from_points(&mesh.positions);
             }
         }
     }
@@ -221,6 +225,7 @@ impl World {
                 }),
             index_count: mesh.indices.len() as u32,
             has_tangents: !mesh.tangents.is_empty(),
+            aabb: Aabb::from_points(&mesh.positions),
         }
     }
 

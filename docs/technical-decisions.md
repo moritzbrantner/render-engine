@@ -51,10 +51,21 @@ when:
   filter). The wide Gaussian filter is more sensitive: on `sun_cascades`, missing Bevy's √2
   normal-bias factor scored 0.0048 / p99 0.052 (fails); with it, 0.0004 / 0.0029, and
   `sun_shadows` went from 0.0005 to 0.0000.
-- GPU time is measured with timestamp queries: 200 frames per side, median. render-engine times
-  its whole frame (first pass start to last pass end). Bevy's time is the sum of the top-level
-  `RenderDiagnosticsPlugin` spans (`render/<span>/elapsed_gpu`: mesh preprocessing, shadow
-  views, main pass, upscaling, …), i.e. Bevy's real GPU work for the same frame.
+- GPU time is measured with timestamp queries, the same quantity on both sides: the sum of a
+  frame's pass spans. Bevy's is the sum of the top-level `RenderDiagnosticsPlugin` spans
+  (`render/<span>/elapsed_gpu`: mesh preprocessing, shadow views, main pass, upscaling, …);
+  render-engine writes a begin and an end timestamp on every pass. Gaps between passes, where a
+  shared GPU runs other processes' work, count on neither side.
+- Measurement protocol (#28): 300 frames per side and round; render-engine renders 0.5 s of
+  untimed frames first and then submits frames back to back in batches of 64. The rounds
+  alternate (Bevy, render-engine, Bevy, render-engine) and each side's time is the median of its
+  fastest round, since other work on the GPU and lower power states only slow a round down. A
+  scenario still over the margin gets up to two more rounds before it fails. Before #28,
+  render-engine submitted one frame and waited for it; the mostly idle GPU then dropped to a
+  lower power state part-way through some runs and the same frame timed exactly 4× slower
+  (`sun_cascades` 0.20 → 0.80 ms within one run), which made the local gate flip between 0.7×
+  and 4× from run to run without any code change. Bevy, when the host's CPU is saturated, shows
+  the same 3.3× step (0.27 → 0.88–0.92 ms).
 - A scenario's thresholds may only be loosened in the PR that adds it, with the measured numbers
   and the reason in that PR.
 
@@ -156,7 +167,18 @@ upgrade that changes a default shows up as a deliberate scenario change:
   filter there scored mean 0.0015–0.0062 / p99 0.024–0.034, the port of it 0.0001 / ≤ 0.0034.
   Bevy filters one frame behind (its filter runs before the atmosphere passes); render-engine
   filters the current frame's sky, which agrees once Bevy has warmed up and does not lag in a
-  running day cycle. Bevy's raymarched mode, volumetric fog and stars are out of scope.
+  running day cycle. Bevy's raymarched mode, volumetric fog and stars are out of scope;
+- frustum culling (#28): Bevy's CPU culling (`check_visibility` and the light views'), with
+  GPU occlusion culling off as Bevy has it by default. Each mesh's local `Aabb` is computed
+  once when the `World` uploads it; per frame, every instance's box under its model matrix is
+  tested against each view's half spaces (`ViewFrustum::intersects_obb`): the camera without
+  its far plane, each sun cascade without its near plane (casters between the sun and the
+  cascade still cast; depth is pancaked), spot maps and point-light cube faces with their far
+  plane at the light's range after Bevy's light-sphere test. Every view gets its own draws over
+  a run of visible instance indices, so a view only draws what it can see. Both sides share
+  shape meshes and materials between objects (as a game shares handles), so Bevy's batching and
+  ours see the same groups. `many_instances` (22 400 props on a 400 × 350 m field, four
+  cascades) measures it.
 
 Later scenarios lift these one at a time (temporal filtering).
 
