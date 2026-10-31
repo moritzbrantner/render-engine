@@ -74,7 +74,8 @@ sets `WGPU_FORCE_FALLBACK_ADAPTER=1`; Bevy and render-engine both honour that va
   pixels by one 8-bit step: `sun_shadows` scores mean 0.0024 / p99 0.038 on lavapipe and
   0.0001 / 0.0007 on the RTX 3060 Ti; `sun_cascades` 0.0026 / 0.025 and 0.0005 / 0.0086;
   `ibl_materials` 0.0005 / 0.0081 and 0.0000 / 0.0000; `ibl_materials_sun` 0.0022 / 0.031 and
-  0.0000 / 0.0001.
+  0.0000 / 0.0001; the `fog_*` views at most 0.0028 / 0.045 (`fog_exponential_squared`) and
+  0.0000 / 0.0007.
 
 ## D5 — Pinned Bevy configuration per scenario
 
@@ -90,7 +91,11 @@ upgrade that changes a default shows up as a deliberate scenario change:
   maximum distance, first cascade far bound, overlap), its `ShadowFilteringMethod` on the camera
   (`Hardware2x2` or `Gaussian`), `DirectionalLightShadowMap` 2048 and Bevy's depth/normal biases
   (0.02 m, 1.8 texels). `sun_shadows` keeps one cascade with 2×2 PCF; `sun_cascades` uses
-  Bevy's defaults (4 cascades, 10 m / 150 m, overlap 0.2, Gaussian);
+  Bevy's defaults (4 cascades, 10 m / 150 m, overlap 0.2, Gaussian). Shadow maps are rendered
+  with unclipped depth like Bevy's directional shadow views (`DEPTH_CLIP_CONTROL`; on adapters
+  without it, Bevy's fragment-depth emulation). Clamping per vertex instead bends the stored
+  depth of large ground triangles that reach towards a low sun; it hid the self-shadowing Bevy
+  shows in the fog inscattering lookup (`fog_*_sun` scored 0.014 / 0.20 before);
 - `GlobalAmbientLight` for ambient (brightness 0 in the IBL scenarios);
 - image-based light: an `EnvironmentMapLight` on the camera (intensity in cd/m², no rotation)
   whose diffuse and specular `Image`s are built from the same decoded texels render-engine
@@ -99,9 +104,14 @@ upgrade that changes a default shows up as a deliberate scenario change:
   `bake_ibl`: the glTF IBL Sampler's split-sum layout that Bevy documents (GGX specular with
   perceptual roughness `mip / (mips - 1)`, Lambertian diffuse), written as zstd `rgb9e5` KTX2 by
   KTX-Software. Both sides therefore sample identical cube maps; render-engine owns the
-  sampling and the BRDF terms. Bevy's runtime `GeneratedEnvironmentMapLight` is not used.
+  sampling and the BRDF terms. Bevy's runtime `GeneratedEnvironmentMapLight` is not used;
+- distance fog: a `DistanceFog` on the camera with the scenario's colour, falloff and
+  directional-light colour/exponent (`fog_modes`: every `FogFalloff`, each without and with sun
+  inscattering, clear colour = fog colour). render-engine ports `apply_fog` and `fog.wesl`
+  term by term on the exposed colour, including the inscattering's shadow lookup with the view
+  direction as normal. Volumetric fog is out of scope.
 
-Later scenarios lift these one at a time (temporal filtering, fog, sky).
+Later scenarios lift these one at a time (temporal filtering, sky).
 
 ## D6 — Order: lighting first, then particles
 

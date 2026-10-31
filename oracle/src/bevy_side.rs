@@ -29,7 +29,9 @@ use bevy::{
     },
     window::ExitCondition,
 };
-use render_engine::scene::{Cubemap, ShadowFilter, Shape, Tonemapping as EngineTonemapping};
+use render_engine::scene::{
+    Cubemap, FogFalloff as EngineFogFalloff, ShadowFilter, Shape, Tonemapping as EngineTonemapping,
+};
 use std::{
     path::PathBuf,
     sync::{Arc, Mutex},
@@ -182,6 +184,32 @@ pub fn run(scenario: Scenario, timed_frames: u32) -> BevyRun {
                     specular_map: images.add(cube_image(&env.specular)),
                     intensity: env.intensity,
                     ..default()
+                });
+            }
+            if let Some(fog) = scene.fog {
+                let rgba = |v: render_engine::glam::Vec4| Color::linear_rgba(v.x, v.y, v.z, v.w);
+                camera.insert(DistanceFog {
+                    color: rgba(fog.color),
+                    directional_light_color: rgba(fog.directional_light_color),
+                    directional_light_exponent: fog.directional_light_exponent,
+                    falloff: match fog.falloff {
+                        EngineFogFalloff::Linear { start, end } => {
+                            FogFalloff::Linear { start, end }
+                        }
+                        EngineFogFalloff::Exponential { density } => {
+                            FogFalloff::Exponential { density }
+                        }
+                        EngineFogFalloff::ExponentialSquared { density } => {
+                            FogFalloff::ExponentialSquared { density }
+                        }
+                        EngineFogFalloff::Atmospheric {
+                            extinction,
+                            inscattering,
+                        } => FogFalloff::Atmospheric {
+                            extinction: v3(extinction),
+                            inscattering: v3(inscattering),
+                        },
+                    },
                 });
             }
             if let Some(sun) = scene.sun {

@@ -4,7 +4,7 @@
 //! Units follow Bevy's physical conventions: lengths in metres, directional illuminance in lux,
 //! ambient and environment-map brightness in cd/m², exposure as EV100. Colours are linear RGB.
 
-use glam::{Quat, Vec2, Vec3};
+use glam::{Quat, Vec2, Vec3, Vec4};
 use std::sync::Arc;
 
 /// Everything one frame needs.
@@ -18,7 +18,100 @@ pub struct Scene {
     pub ambient: Ambient,
     /// Image-based ambient light, added to `ambient` (Bevy `EnvironmentMapLight` on the camera).
     pub environment: Option<EnvironmentMap>,
+    /// Distance fog over lit geometry (Bevy `DistanceFog` on the camera). The clear colour is not
+    /// fogged, as in Bevy; set it to the fog colour for a fogged horizon.
+    pub fog: Option<Fog>,
     pub meshes: Vec<MeshInstance>,
+}
+
+/// Distance fog (Bevy `DistanceFog`), blended into the exposed HDR colour of every lit fragment
+/// by its distance to the camera.
+#[derive(Clone, Copy, Debug)]
+pub struct Fog {
+    /// Linear RGB fog colour, not exposed; alpha scales how much fog is blended in (Bevy `color`).
+    pub color: Vec4,
+    /// Sun inscattering: `rgb × a` times the exposed sun colour is added to the fog colour where
+    /// the view looks towards the sun, attenuated by the sun's shadow at the fragment. `a = 0`
+    /// turns it off (Bevy `directional_light_color`).
+    pub directional_light_color: Vec4,
+    /// Sharpness of the sun glow: `max(dot(view, to_sun), 0)^exponent` (Bevy
+    /// `directional_light_exponent`).
+    pub directional_light_exponent: f32,
+    pub falloff: FogFalloff,
+}
+
+impl Default for Fog {
+    /// Bevy's `DistanceFog` defaults: white, linear from 0 to 100 m, no sun glow.
+    fn default() -> Self {
+        Self {
+            color: Vec4::ONE,
+            directional_light_color: Vec4::ZERO,
+            directional_light_exponent: 8.0,
+            falloff: FogFalloff::Linear {
+                start: 0.0,
+                end: 100.0,
+            },
+        }
+    }
+}
+
+/// How fog builds up with distance `d` (Bevy `FogFalloff`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum FogFalloff {
+    /// `clamp((d - start) / (end - start), 0, 1)`, in metres.
+    Linear { start: f32, end: f32 },
+    /// `1 - e^(-d·density)`.
+    Exponential { density: f32 },
+    /// `1 - e^(-(d·density)²)`.
+    ExponentialSquared { density: f32 },
+    /// Per channel: the scene colour is attenuated by `1 - e^(-d·extinction)` and the fog colour
+    /// added by `1 - e^(-d·inscattering)`.
+    Atmospheric {
+        extinction: Vec3,
+        inscattering: Vec3,
+    },
+}
+
+impl FogFalloff {
+    /// Bevy `REVISED_KOSCHMIEDER_CONTRAST_THRESHOLD`: the contrast at which an object counts as
+    /// no longer visible.
+    pub const REVISED_KOSCHMIEDER_CONTRAST_THRESHOLD: f32 = 0.05;
+
+    /// Extinction coefficient for which contrast falls to `contrast_threshold` at `visibility`
+    /// metres (Bevy `koschmieder`).
+    pub fn koschmieder(visibility: f32, contrast_threshold: f32) -> f32 {
+        -contrast_threshold.ln() / visibility
+    }
+
+    /// Exponential fog that hides objects beyond `visibility` metres (Bevy `from_visibility`).
+    pub fn from_visibility(visibility: f32) -> Self {
+        Self::Exponential {
+            density: Self::koschmieder(visibility, Self::REVISED_KOSCHMIEDER_CONTRAST_THRESHOLD),
+        }
+    }
+
+    /// Exponential-squared fog that hides objects beyond `visibility` metres (Bevy
+    /// `from_visibility_squared`).
+    pub fn from_visibility_squared(visibility: f32) -> Self {
+        let k = Self::koschmieder(visibility, Self::REVISED_KOSCHMIEDER_CONTRAST_THRESHOLD);
+        Self::ExponentialSquared {
+            density: (k / visibility).sqrt(),
+        }
+    }
+
+    /// Atmospheric fog from an extinction and an inscattering colour (linear RGBA; alpha scales
+    /// the effect) that hides objects beyond `visibility` metres (Bevy `from_visibility_colors`).
+    pub fn from_visibility_colors(visibility: f32, extinction: Vec4, inscattering: Vec4) -> Self {
+        use std::f32::consts::E;
+        let k = Self::koschmieder(visibility, Self::REVISED_KOSCHMIEDER_CONTRAST_THRESHOLD);
+        let pow = |v: Vec3| Vec3::new(v.x.powf(E), v.y.powf(E), v.z.powf(E));
+        Self::Atmospheric {
+            // Inverted so the colour means what it looks like (blue extinction gives blue, not
+            // yellow, results), as in Bevy.
+            extinction: pow(Vec3::ONE - extinction.truncate()) * k * extinction.w.powf(E),
+            inscattering: pow(inscattering.truncate()) * k * inscattering.w.powf(E),
+        }
+    }
 }
 
 /// A perspective camera with an infinite reverse-Z projection (Bevy `PerspectiveProjection`).

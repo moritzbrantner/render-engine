@@ -11,6 +11,7 @@
 //!     sun: Some(Sun { direction: Vec3::new(-0.4, -1.0, -0.3), color: Vec3::ONE, illuminance: 10_000.0, shadows: Some(SunShadows::default()) }),
 //!     ambient: Ambient { color: Vec3::ONE, brightness: 500.0 },
 //!     environment: None,
+//!     fog: None,
 //!     meshes: vec![MeshInstance::new(Shape::Plane(Vec2::splat(20.0)), Vec3::ZERO, Material::default())],
 //! };
 //! let gpu = Headless::new()?;

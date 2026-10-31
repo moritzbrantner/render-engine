@@ -75,11 +75,9 @@ impl Headless {
         let timestamps = adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY);
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("render-engine headless"),
-            required_features: if timestamps {
-                wgpu::Features::TIMESTAMP_QUERY
-            } else {
-                wgpu::Features::empty()
-            },
+            // Unclipped shadow-map depth (see `Renderer::new`) where the adapter has it.
+            required_features: adapter.features()
+                & (wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::DEPTH_CLIP_CONTROL),
             ..Default::default()
         }))
         .map_err(Error::Device)?;
