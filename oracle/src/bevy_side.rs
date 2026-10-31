@@ -12,7 +12,7 @@ use bevy::{
     diagnostic::DiagnosticsStore,
     light::{
         CascadeShadowConfigBuilder, DirectionalLightShadowMap, EnvironmentMapLight,
-        GlobalAmbientLight, ShadowFilteringMethod,
+        GlobalAmbientLight, PointLightShadowMap, ShadowFilteringMethod,
     },
     prelude::*,
     render::{
@@ -30,7 +30,8 @@ use bevy::{
     window::ExitCondition,
 };
 use render_engine::scene::{
-    Cubemap, FogFalloff as EngineFogFalloff, ShadowFilter, Shape, Tonemapping as EngineTonemapping,
+    Cubemap, FogFalloff as EngineFogFalloff, LightShadows, ShadowFilter, Shape,
+    Tonemapping as EngineTonemapping,
 };
 use std::{
     path::PathBuf,
@@ -130,12 +131,13 @@ pub fn run(scenario: Scenario, timed_frames: u32) -> BevyRun {
         color: linear(scene.ambient.color),
         brightness: scene.ambient.brightness,
         ..default()
+    })
+    .insert_resource(DirectionalLightShadowMap {
+        size: scene.shadow_maps.directional as usize,
+    })
+    .insert_resource(PointLightShadowMap {
+        size: scene.shadow_maps.point as usize,
     });
-    if let Some(shadows) = scene.sun.and_then(|s| s.shadows) {
-        app.insert_resource(DirectionalLightShadowMap {
-            size: shadows.map_size as usize,
-        });
-    }
 
     app.add_systems(
         Startup,
@@ -236,6 +238,48 @@ pub fn run(scenario: Scenario, timed_frames: u32) -> BevyRun {
                         l.shadow_normal_bias = s.normal_bias;
                     });
                 }
+            }
+            // Shadow settings default to Bevy's for lights without shadows.
+            let shadows = |s: Option<LightShadows>, default: LightShadows| s.unwrap_or(default);
+            for l in &scene.point_lights {
+                let s = shadows(l.shadows, LightShadows::POINT);
+                commands.spawn((
+                    PointLight {
+                        color: linear(l.color),
+                        intensity: l.intensity,
+                        range: l.range,
+                        radius: l.radius,
+                        shadow_maps_enabled: l.shadows.is_some(),
+                        shadow_depth_bias: s.depth_bias,
+                        shadow_normal_bias: s.normal_bias,
+                        shadow_map_near_z: s.near_z,
+                        soft_shadows_enabled: s.soft,
+                        ..default()
+                    },
+                    Transform::from_translation(v3(l.position)),
+                ));
+            }
+            for l in &scene.spot_lights {
+                let s = shadows(l.shadows, LightShadows::SPOT);
+                commands.spawn((
+                    SpotLight {
+                        color: linear(l.color),
+                        intensity: l.intensity,
+                        range: l.range,
+                        radius: l.radius,
+                        inner_angle: l.inner_angle,
+                        outer_angle: l.outer_angle,
+                        shadow_maps_enabled: l.shadows.is_some(),
+                        shadow_depth_bias: s.depth_bias,
+                        shadow_normal_bias: s.normal_bias,
+                        shadow_map_near_z: s.near_z,
+                        soft_shadows_enabled: s.soft,
+                        ..default()
+                    },
+                    Transform::from_translation(v3(l.position)).with_rotation(
+                        Quat::from_rotation_arc(Vec3::NEG_Z, v3(l.direction).normalize()),
+                    ),
+                ));
             }
             for m in &scene.meshes {
                 let mesh = match m.shape {

@@ -111,7 +111,16 @@ upgrade that changes a default shows up as a deliberate scenario change:
   directional-light colour/exponent (`fog_modes`: every `FogFalloff`, each without and with sun
   inscattering, clear colour = fog colour). render-engine ports `apply_fog` and `fog.wesl`
   term by term on the exposed colour, including the inscattering's shadow lookup with the view
-  direction as normal. Volumetric fog is out of scope.
+  direction as normal. Volumetric fog is out of scope;
+- point and spot lights: `PointLight`/`SpotLight` entities with the scene's lumens, range,
+  radius, cone angles and Bevy's shadow biases (point 0.08 m / 0.6 texels, spot 0.02 m /
+  1.8 texels, near plane 0.1 m), `DirectionalLightShadowMap` 2048 (spot maps share its array,
+  after the sun cascades) and `PointLightShadowMap` 1024, and the `experimental_pbr_pcss`
+  feature so `point_spot_soft` can switch on soft shadows. Bevy assigns lights to clusters;
+  render-engine loops over the whole list in Bevy's order (point lights, then spot lights, each
+  with the shadow casters first, then the sun). Outside its range a light contributes exactly
+  zero in both, so the sums agree; clustering waits until the GPU-time gate asks for it. The
+  temporal shadow filter (it needs TAA) and light textures are out of scope.
 
 Later scenarios lift these one at a time (temporal filtering, sky).
 
