@@ -110,6 +110,28 @@ let frame = gpu.render(&mut viewport, &world, &scene, &instances)?;
 | `textured_props` | CC0 glTF props through the consumer API: base-colour, normal and metallic-roughness textures, vertex colours, alpha-masked double-sided bushes (one mirrored) with cut-out shadows, a blended sphere, one crate mesh drawn twice; cascaded sun + IBL | 0.0000 / 0.0007 | 0.323 / 0.573 (0.56×) | 76.4 / 82.2 |
 | `skinned_figure` | CC0 rigged character (7281 vertices, 65 joints, normal-mapped) skinned on the GPU in two poses, one figure mirrored, both casting cascaded sun shadows; IBL | 0.0000 / 0.0002 | 0.191 / 0.425 (0.45×) | 115 / 173 |
 
+## Web: three.js
+
+The mmorpg web client (three.js 0.186) gets the same lighting from
+[`packages/three-lighting`](packages/three-lighting) (`@moritzbrantner/three-lighting`, pinned as
+`github:moritzbrantner/render-engine#<commit>`; see [consumer integration](docs/consumer-integration.md#web-client-threejs)
+and [D8](docs/technical-decisions.md#d8--web-path-a-threejs-port-gated-by-the-same-oracle)). The
+oracle renders each lighting scenario it covers in headless Chromium and holds it to the same
+FLIP gate against Bevy. CI run on lavapipe (ANGLE on Vulkan), FLIP mean / p99 against Bevy:
+
+| Scenario | three.js vs Bevy | Result |
+| --- | --- | --- |
+| `sun_shadows` | 0.0003 / 0.0083 | pass |
+| `sun_cascades` | 0.0003 / 0.0070 | pass |
+| `tonemap_range` (4 views) | ≤ 0.0004 / 0.0107 | pass |
+| `ibl_materials`, `ibl_materials_sun` | ≤ 0.0010 / 0.0304 | pass |
+| `fog_modes` (8 views) | ≤ 0.0001 / 0.0026 | pass |
+| `many_instances` | 0.0058 / 0.0869 | known gap, #42 |
+| `point_spot` (3 views) | – | not ported, #38 |
+| `textured_props` | – | not ported, #40 |
+| `skinned_figure` | – | not ported, #41 |
+| `sky_day_cycle` (4 views) | – | not ported, #39 |
+
 ## Development
 
 ```sh
@@ -119,6 +141,7 @@ cargo test --locked
 cargo run --release --locked --manifest-path oracle/Cargo.toml        # Bevy oracle, both gates on a GPU
 WGPU_FORCE_FALLBACK_ADAPTER=1 cargo run --release --locked --manifest-path oracle/Cargo.toml   # as CI (lavapipe)
 bash scripts/build-pages.sh                                            # site + last oracle run → pages-dist/
+bun install                                                            # three.js side: three + Playwright (needs node)
 ```
 
 [AGENTS.md](AGENTS.md) lists the full command set and repository rules.

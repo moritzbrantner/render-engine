@@ -224,6 +224,41 @@ scenarios** through a headless Chromium side with the same FLIP thresholds (D3);
 advisory there. Option A (render-engine compiled to WASM/WebGPU) stays available later for
 particles only, if three.js GPU particles cannot meet the gate. Scope of the first step: #11.
 
+As built (#11):
+
+- **Package.** `packages/three-lighting`, published from the repository root as
+  `@moritzbrantner/three-lighting` (consumers pin `github:moritzbrantner/render-engine#<commit>`,
+  like 3d-lab's renderer). It targets three.js 0.186's `WebGLRenderer` (the mmorpg web client's
+  renderer), so the custom parts are GLSL ES 3.0 `ShaderMaterial`s ported term for term from
+  `lit.wgsl` and `tonemap.wgsl`, not TSL (TSL needs the WebGPU/node renderer).
+- **Built-ins that pass:** `ShaderMaterial`, multisampled `WebGLRenderTarget`s, `DepthTexture`
+  comparison sampling for the 2×2 PCF taps, three's `FullScreenQuad`, its KTX2 libraries
+  (`ktx-parse`, `zstddec`) for the IBL cube maps and LUTs, and its `ACESFilmicToneMapping` (the
+  same Stephen Hill fit as Bevy's, with `toneMappingExposure` 0.6 to cancel its 1/0.6).
+- **Custom, because the built-ins differ from Bevy by more than the gate:**
+  `MeshStandardMaterial` (Lambert instead of Burley diffuse, no multiscatter compensation, no
+  specular ambient term; D3 measured Lambert alone at FLIP 0.018), three's `CSM` addon (its own
+  splits and fitting; Bevy snaps cascades to texels and rounds their diameter), `PMREMGenerator`
+  (its own cube-UV filtering, not Bevy's split-sum maps; the port samples the same prefiltered
+  KTX2 maps as render-engine), `Fog`/`FogExp2` (view depth and a smoothstep, not distance),
+  `AgXToneMapping` (an analytic fit, not Bevy's LUT) and Tony McMapface (not in three.js). `Sky`
+  is not used yet; the sky is #39.
+- **Shadow pass like Bevy's pipeline:** with `EXT_clip_control` and `EXT_depth_clamp` the cascades
+  render in zero-to-one clip space with rasterizer-clamped (pancaked) reverse-Z depth into
+  `DEPTH_COMPONENT32F`; without them the depth is remapped and clamped per fragment. The sun-glow
+  fog term samples the shadow with the view direction as normal, which sits on the edge of
+  self-shadowing; only the native pipeline reproduces Bevy's result there.
+- **Oracle side.** `oracle --no-three` skips it; otherwise the oracle exports every lighting
+  scenario the port covers (`oracle/src/three_side.rs`: scene in Bevy units plus vertex data) and
+  renders them in one headless Chromium run (`oracle/three/render.mjs`, Playwright) through
+  ANGLE on Vulkan, into an sRGB target like Bevy's output. On a software adapter Chromium gets
+  lavapipe's ICD, the device Bevy runs on: lavapipe and SwiftShader round sRGB stores
+  differently (one 8-bit step on about a sixth of the pixels, FLIP mean 0.023 on
+  `sun_shadows`), so only the same device compares the shading. Each scenario reports
+  `three.status`: passed, failed (fails the run), a known gap (`three_side::GAPS`, with its
+  issue) or not ported (with the issue of the missing capability). GPU time is advisory
+  (`EXT_disjoint_timer_query_webgl2` over the whole `Lighting.render`, where the browser has it).
+
 ## D9 — Particle parity: seeded replay, then statistics
 
 Decided in #12. Particles are random, so an image comparison only works while both sides draw the

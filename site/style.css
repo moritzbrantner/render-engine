@@ -121,6 +121,9 @@ img { display: block; max-width: 100%; height: auto; }
 .status::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
 .status.pass { color: var(--pass); }
 .status.fail { color: var(--fail); }
+.status.gap { color: var(--muted); }
+.card .web { font-size: 13px; color: var(--muted); }
+.card .web .v { margin-left: auto; font-variant-numeric: tabular-nums; }
 .row { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 
 /* Particle scenarios: Bevy captures and the alive-count chart */
