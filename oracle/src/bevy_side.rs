@@ -37,8 +37,12 @@ use bevy::{
 };
 use bevy::{
     asset::RenderAssetUsages,
+    camera::visibility::NoFrustumCulling,
     image::{ImageSampler, ImageSamplerDescriptor},
-    mesh::{Indices, PrimitiveTopology},
+    mesh::{
+        Indices, PrimitiveTopology, VertexAttributeValues,
+        skinning::{SkinnedMesh, SkinnedMeshInverseBindposes},
+    },
     render::render_resource::Face,
 };
 use bevy_hanabi as hanabi;
@@ -133,7 +137,18 @@ fn mesh(m: &MeshData) -> Mesh {
     if !m.colors.is_empty() {
         mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, arrays4(&m.colors));
     }
+    if !m.joints.is_empty() {
+        mesh.insert_attribute(
+            Mesh::ATTRIBUTE_JOINT_INDEX,
+            VertexAttributeValues::Uint16x4(m.joints.clone()),
+        );
+        mesh.insert_attribute(Mesh::ATTRIBUTE_JOINT_WEIGHT, arrays4(&m.weights));
+    }
     mesh
+}
+
+fn mat4(m: render_engine::glam::Mat4) -> Mat4 {
+    Mat4::from_cols_array(&m.to_cols_array())
 }
 
 /// The same texels, mip chain and sampler render-engine uploads, as a Bevy `Image`.
@@ -262,7 +277,8 @@ pub fn run(scenario: Scenario, timed_frames: u32) -> BevyRun {
               mut images: ResMut<Assets<Image>>,
               mut meshes: ResMut<Assets<Mesh>>,
               mut materials: ResMut<Assets<StandardMaterial>>,
-              mut media: ResMut<Assets<ScatteringMedium>>| {
+              mut media: ResMut<Assets<ScatteringMedium>>,
+              mut bindposes: ResMut<Assets<SkinnedMeshInverseBindposes>>| {
             let target = images.add(Image::new_target_texture(
                 width,
                 height,
@@ -498,15 +514,43 @@ pub fn run(scenario: Scenario, timed_frames: u32) -> BevyRun {
                         })
                     })
                     .clone();
-                commands.spawn((
-                    Mesh3d(mesh),
-                    MeshMaterial3d(material),
-                    Transform {
-                        translation: v3(m.translation),
-                        rotation: Quat::from_array(m.rotation.to_array()),
-                        scale: v3(m.scale),
-                    },
-                ));
+                let transform = Transform {
+                    translation: v3(m.translation),
+                    rotation: Quat::from_array(m.rotation.to_array()),
+                    scale: v3(m.scale),
+                };
+                let mut entity =
+                    commands.spawn((Mesh3d(mesh), MeshMaterial3d(material), transform));
+                if let Some(skin) = m.skin {
+                    // Bevy's joints are world-space entities: the figure's transform times each
+                    // joint's pose, without a hierarchy. The skinned model matrix replaces the
+                    // mesh entity's; that one only places the bounds, so culling is off.
+                    let skin = &assets.skins[skin];
+                    let world_from_local = m.transform();
+                    let joints = skin
+                        .model_from_joint
+                        .iter()
+                        .map(|j| {
+                            entity
+                                .commands()
+                                .spawn(Transform::from_matrix(mat4(world_from_local * *j)))
+                                .id()
+                        })
+                        .collect();
+                    let inverse_bindposes = bindposes.add(SkinnedMeshInverseBindposes::from(
+                        skin.inverse_bindposes
+                            .iter()
+                            .map(|m| mat4(*m))
+                            .collect::<Vec<_>>(),
+                    ));
+                    entity.insert((
+                        SkinnedMesh {
+                            inverse_bindposes,
+                            joints,
+                        },
+                        NoFrustumCulling,
+                    ));
+                }
             }
         },
     )

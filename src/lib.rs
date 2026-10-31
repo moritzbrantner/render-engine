@@ -29,7 +29,12 @@
 //!     environment: None,
 //!     fog: None,
 //! };
-//! let instances = [Instance { mesh: ground, material: grey, world_from_local: Mat4::IDENTITY }];
+//! let instances = [Instance {
+//!     mesh: ground,
+//!     material: grey,
+//!     world_from_local: Mat4::IDENTITY,
+//!     skin: None,
+//! }];
 //! let mut viewport = Viewport::new(gpu.renderer(), 1280, 720);
 //! let frame = gpu.render(&mut viewport, &world, &scene, &instances)?;
 //! assert_eq!(frame.rgba.len(), 1280 * 720 * 4);

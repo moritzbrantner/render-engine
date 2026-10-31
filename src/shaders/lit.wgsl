@@ -79,7 +79,8 @@ const LIGHT_SPOT_Y_NEGATIVE: u32 = 2u;
 struct Instance {
     world_from_local: mat4x4<f32>,
     normal_from_local: mat3x3<f32>,
-    // x: 1 when the mesh has tangents, y: 1 when the model matrix mirrors (negative determinant).
+    // x: 1 when the mesh has tangents, y: 1 when the model matrix mirrors (negative determinant),
+    // z: the skin's first joint in `joint_matrices`.
     flags: vec4<u32>,
 }
 
@@ -108,6 +109,8 @@ const MATERIAL_ALPHA_BLEND: u32 = 256u;
 @group(0) @binding(1) var<storage, read> instances: array<Instance>;
 // Per view, the indices of the instances that survived frustum culling; draws index into it.
 @group(0) @binding(2) var<storage, read> visible: array<u32>;
+// The joint palettes of the frame's skins; a skinned instance's run starts at `flags.z`.
+@group(0) @binding(3) var<storage, read> joint_matrices: array<mat4x4<f32>>;
 // Main pass only.
 @group(1) @binding(0) var shadow_maps: texture_depth_2d_array;
 @group(1) @binding(1) var shadow_sampler: sampler_comparison;
@@ -145,6 +148,46 @@ struct VertexIn {
     @location(4) color: vec4<f32>,
 }
 
+// A skinned mesh's vertex: `VertexIn` plus `JOINTS_0` and `WEIGHTS_0`.
+struct SkinnedVertexIn {
+    @builtin(instance_index) instance: u32,
+    @location(0) position: vec3<f32>,
+    @location(1) normal: vec3<f32>,
+    @location(2) uv: vec2<f32>,
+    @location(3) tangent: vec4<f32>,
+    @location(4) color: vec4<f32>,
+    @location(5) joint_indices: vec4<u32>,
+    @location(6) joint_weights: vec4<f32>,
+}
+
+fn unskinned(in: SkinnedVertexIn) -> VertexIn {
+    return VertexIn(in.instance, in.position, in.normal, in.uv, in.tangent, in.color);
+}
+
+// Bevy `skin_model`. The palette is in the mesh's local space, so the instance's model matrix
+// then places the skinned mesh (Bevy's joints are in world space and replace it).
+fn skinned_world_from_local(index: u32, joints: vec4<u32>, weights: vec4<f32>) -> mat4x4<f32> {
+    let base = instances[index].flags.z;
+    let skin = weights.x * joint_matrices[base + joints.x]
+        + weights.y * joint_matrices[base + joints.y]
+        + weights.z * joint_matrices[base + joints.z]
+        + weights.w * joint_matrices[base + joints.w];
+    return instances[index].world_from_local * skin;
+}
+
+// Bevy `inverse_transpose_3x3m`.
+fn inverse_transpose_3x3(m: mat3x3<f32>) -> mat3x3<f32> {
+    let x = cross(m[1], m[2]);
+    let y = cross(m[2], m[0]);
+    let z = cross(m[0], m[1]);
+    let det = dot(m[2], z);
+    return mat3x3<f32>(x / det, y / det, z / det);
+}
+
+fn linear_part(m: mat4x4<f32>) -> mat3x3<f32> {
+    return mat3x3(m[0].xyz, m[1].xyz, m[2].xyz);
+}
+
 // The material's base colour times its texture (Bevy samples it the same way in the main pass
 // and, for alpha-masked casters, the shadow pass).
 fn textured_base_color(uv: vec2<f32>) -> vec4<f32> {
@@ -171,23 +214,44 @@ struct ShadowOut {
     @location(1) unclipped_depth: f32,
 }
 
-fn shadow_vertex(in: VertexIn) -> ShadowOut {
-    let world = instances[visible[in.instance]].world_from_local * vec4(in.position, 1.0);
+fn shadow_vertex(world_from_local: mat4x4<f32>, position: vec3<f32>, uv: vec2<f32>) -> ShadowOut {
+    let world = world_from_local * vec4(position, 1.0);
     var out: ShadowOut;
     out.clip = cascade_clip_from_world * world;
-    out.uv = in.uv;
+    out.uv = uv;
     out.unclipped_depth = out.clip.z;
     return out;
 }
 
+fn shadow_unskinned(in: VertexIn) -> ShadowOut {
+    return shadow_vertex(instances[visible[in.instance]].world_from_local, in.position, in.uv);
+}
+
+fn shadow_skinned(in: SkinnedVertexIn) -> ShadowOut {
+    let model = skinned_world_from_local(visible[in.instance], in.joint_indices, in.joint_weights);
+    return shadow_vertex(model, in.position, in.uv);
+}
+
 @vertex
 fn shadow_vs(in: VertexIn) -> ShadowOut {
-    return shadow_vertex(in);
+    return shadow_unskinned(in);
 }
 
 @vertex
 fn shadow_emulated_vs(in: VertexIn) -> ShadowOut {
-    var out = shadow_vertex(in);
+    var out = shadow_unskinned(in);
+    out.clip.z = min(out.clip.z, 1.0);
+    return out;
+}
+
+@vertex
+fn shadow_skinned_vs(in: SkinnedVertexIn) -> ShadowOut {
+    return shadow_skinned(in);
+}
+
+@vertex
+fn shadow_emulated_skinned_vs(in: SkinnedVertexIn) -> ShadowOut {
+    var out = shadow_skinned(in);
     out.clip.z = min(out.clip.z, 1.0);
     return out;
 }
@@ -228,32 +292,50 @@ struct VertexOut {
 
 // Bevy `mesh_normal_local_to_world` and `mesh_tangent_local_to_world`: normalised per vertex
 // (MikkTSpace), not again per fragment.
-@vertex
-fn lit_vs(in: VertexIn) -> VertexOut {
-    let index = visible[in.instance];
-    let inst = instances[index];
-    let world = inst.world_from_local * vec4(in.position, 1.0);
+fn lit_vertex(
+    in: VertexIn,
+    index: u32,
+    world_from_local: mat4x4<f32>,
+    world_normal: vec3<f32>,
+) -> VertexOut {
+    let world = world_from_local * vec4(in.position, 1.0);
     var out: VertexOut;
     out.clip = frame.clip_from_world * world;
     out.world = world.xyz;
-    out.normal = in.normal;
-    if (any(in.normal != vec3(0.0))) {
-        out.normal = normalize(inst.normal_from_local * in.normal);
-    }
+    out.normal = world_normal;
     out.tangent = in.tangent;
     if (any(in.tangent != vec4(0.0))) {
-        let m = mat3x3(
-            inst.world_from_local[0].xyz,
-            inst.world_from_local[1].xyz,
-            inst.world_from_local[2].xyz,
+        let sign = select(1.0, -1.0, instances[index].flags.y != 0u);
+        out.tangent = vec4(
+            normalize(linear_part(world_from_local) * in.tangent.xyz),
+            in.tangent.w * sign,
         );
-        let sign = select(1.0, -1.0, inst.flags.y != 0u);
-        out.tangent = vec4(normalize(m * in.tangent.xyz), in.tangent.w * sign);
     }
     out.instance = index;
     out.uv = in.uv;
     out.color = in.color;
     return out;
+}
+
+@vertex
+fn lit_vs(in: VertexIn) -> VertexOut {
+    let index = visible[in.instance];
+    let inst = instances[index];
+    var normal = in.normal;
+    if (any(in.normal != vec3(0.0))) {
+        normal = normalize(inst.normal_from_local * in.normal);
+    }
+    return lit_vertex(in, index, inst.world_from_local, normal);
+}
+
+// Bevy's skinned path: the skinned model matrix replaces the instance's for positions and
+// tangents, and normals go through its inverse transpose (`skin_normals`).
+@vertex
+fn lit_skinned_vs(in: SkinnedVertexIn) -> VertexOut {
+    let index = visible[in.instance];
+    let model = skinned_world_from_local(index, in.joint_indices, in.joint_weights);
+    let normal = normalize(inverse_transpose_3x3(linear_part(model)) * in.normal);
+    return lit_vertex(unskinned(in), index, model, normal);
 }
 
 fn perceptual_roughness_to_roughness(p: f32) -> f32 {

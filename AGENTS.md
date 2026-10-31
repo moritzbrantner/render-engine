@@ -29,6 +29,8 @@ never depends on Bevy outside `oracle/`.
 | `oracle/` | Bevy oracle (own manifest/lockfile): each scenario on Bevy and render-engine, FLIP + GPU-time gates; particle scenarios on Bevy + `bevy_hanabi` and render-engine (`particles.rs`, decision D9) |
 | `assets/ibl/` | CC0 HDRI and its prefiltered environment cube maps (`oracle/src/bin/bake_ibl.rs`; provenance in its README) |
 | `assets/props/` | CC0 glTF props for `textured_props` (provenance in its README) |
+| `assets/figure/` | CC0 rigged character for `skinned_figure` (provenance in its README) |
+| `examples/mesh_upload.rs` | Microbenchmark: per-frame pose uploads (`set_mesh`, `set_mesh_positions_normals`, `set_skin`) |
 | `docs/consumer-integration.md` | How a consumer (the mmorpg native client) drives the engine |
 | `site/` | Report page over the last oracle run (`scripts/build-pages.sh` → `pages-dist/`) |
 

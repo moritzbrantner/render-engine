@@ -11,10 +11,10 @@ the mmorpg native client (`crates/mmorpg-client`), the first consumer.
 | Type | Lifetime | Role |
 | --- | --- | --- |
 | `renderer::Renderer` | one per device and output format | pipelines, samplers, tone-mapping LUTs |
-| `world::World` | one per device, for as long as the content lives | meshes, textures, materials and particle emitters behind stable handles (`MeshId`, `TextureId`, `MaterialId`, `EmitterId`) |
+| `world::World` | one per device, for as long as the content lives | meshes, textures, materials, joint palettes and particle emitters behind stable handles (`MeshId`, `TextureId`, `MaterialId`, `SkinId`, `EmitterId`) |
 | `renderer::Viewport` | one per output surface | the engine's targets for one size, plus per-frame buffers (instances, lights, shadow maps) that it reuses and grows |
 | `scene::Scene` | rebuilt every frame (plain values) | camera, sun, moon, sky, point and spot lights, ambient light, environment map, fog |
-| `world::Instance` | a list rebuilt every frame | `{ mesh, material, world_from_local }`, one per drawn copy |
+| `world::Instance` | a list rebuilt every frame | `{ mesh, material, world_from_local, skin }`, one per drawn copy |
 
 ## Setup
 
@@ -51,6 +51,7 @@ let mut mesh = MeshData {
     uvs,                             // TEXCOORD_0; empty if absent
     tangents,                        // TANGENT; empty if absent
     colors,                          // COLOR_0 as linear RGBA; empty if absent
+    joints, weights,                 // JOINTS_0, WEIGHTS_0 for skinned meshes; else empty
     indices,
 };
 if has_normal_map && mesh.tangents.is_empty() {
@@ -82,8 +83,13 @@ Handles stay valid until they are removed. In the client, the `resource_key → 
 `graphics/frame.rs` becomes `resource_key → MeshId`. Unlike the current `Weak` pointer check,
 nothing is uploaded again unless the consumer asks for it:
 
-- `world.set_mesh(id, &data)` rewrites a mesh in place when its vertex and index counts are
-  unchanged. Use it for CPU-skinned meshes every frame, until GPU skinning lands.
+- `world.set_mesh(id, &data)` rewrites every stream of a mesh and its indices, in place when
+  the vertex and index counts are unchanged. Use it when the topology or the surface
+  attributes change, not for a new pose.
+- `world.set_mesh_positions_normals(id, &positions, &normals)` rewrites only a mesh's positions
+  and normals (two buffer writes, nothing re-interleaved, no index rewrite). It is the
+  per-frame call for meshes still posed on the CPU; see [Skinned meshes](#skinned-meshes) for
+  the GPU path.
 - `world.set_material(id, &material)` changes a material's colours or textures.
 - `remove_mesh`, `remove_texture` and `remove_material` free a handle. A removed texture stays
   alive for as long as a material still uses it.
@@ -99,6 +105,54 @@ The `Material` fields used today map as follows:
 | `double_sided` | `double_sided` |
 
 Procedural `mmorpg-presentation` geometry keeps its per-vertex colours in `MeshData::colors`.
+
+## Skinned meshes
+
+The engine skins on the GPU the way Bevy does (`SkinnedMesh`): the mesh keeps its bind pose,
+each instance names a joint palette, and the vertex shaders (main and shadow passes) blend
+four joint matrices per vertex. A new pose uploads one 64-byte matrix per joint instead of the
+mesh.
+
+```rust
+// Once per mesh: the bind pose with JOINTS_0 / WEIGHTS_0.
+let body = world.add_mesh(&MeshData { joints, weights, ..bind_pose });
+// Once per figure: a palette, then a new pose each frame.
+let skin = world.add_skin(&palette);
+world.set_skin(skin, &palette);
+// Every instance of a mesh with joints names a skin; instances may share one.
+Instance { mesh: body, material, world_from_local: unit_transform, skin: Some(skin) }
+```
+
+`palette[j]` is joint `j`'s transform relative to the skinned mesh times its inverse bind
+matrix, `local_from_joint * inverse_bind[j]`. That is glTF's joint matrix without the
+mesh node's inverse global transform, and Bevy's `joint_global * inverse_bindpose` without the
+world part: `world_from_local` still places the figure, so the palette stays the same wherever
+the unit stands. Culling follows the pose: each mesh keeps a bind-pose box per joint (Bevy
+`SkinnedMeshBounds`), and `prepare` unions them under the palette. `oracle/src/content.rs`
+(`Assets::load_skin`) computes a palette from a glTF skin; the `skinned_figure` oracle scenario
+renders one against Bevy.
+
+**Switching the mmorpg native client** (`crates/mmorpg-presentation` CPU skinning,
+`graphics/frame.rs` uploads):
+
+1. Upload each skinned unit mesh once in its bind pose with `joints` and `weights`, keyed by
+   resource as other meshes are; drop the per-unit posed copies.
+2. Give each moving unit a `SkinId` (`add_skin` when it spawns, `remove_skin` when it
+   despawns).
+3. Each frame, where the client now evaluates the animation and skins vertices, stop after the
+   joint matrices: build the palette (`model_from_joint * inverse_bind`, which the CPU skinning
+   loop already computes per joint) and call `set_skin`. Delete the vertex loop and the
+   `set_mesh` call.
+4. Put `skin: Some(id)` on the unit's instances and keep `world_from_local` as the unit's
+   transform; every other instance gets `skin: None`.
+
+Until step 3 lands, a CPU-skinned unit should call `set_mesh_positions_normals` instead of
+`set_mesh`. Measured with `cargo run --release --example mesh_upload` (89 figures, 110 k
+vertices, RTX 3060 Ti, including submit and the GPU taking the writes): `set_mesh` 2.48 ms
+per frame (27.9 µs per mesh), `set_mesh_positions_normals` 1.01 ms (11.3 µs), `set_skin` with
+65-joint palettes plus the whole `prepare` 0.39 ms (4.4 µs), of which `prepare` alone takes
+0.09 ms. GPU skinning also removes the client's own CPU skinning (about 6 ms per frame in
+mmorpg#588).
 
 ## Every frame
 
@@ -122,6 +176,7 @@ let instances: Vec<Instance> = draws.iter().map(|d| Instance {
     mesh: mesh_ids[&d.resource_key],
     material: d.material_id,
     world_from_local: d.model,          // a negative determinant (mirroring) is handled
+    skin: d.skin_id,                    // Some for skinned meshes, else None
 }).collect();
 
 renderer.prepare(&mut viewport, &world, &scene, &instances);
@@ -137,7 +192,8 @@ frame.present();
   from back to front by instance origin (Bevy's phases). The consumer does not sort them.
 - **Culling.** `prepare` frustum-culls every instance per view (the camera, each sun cascade,
   spot map and point-light cube face) against its mesh's bounds, which the `World` computes
-  from the positions on `add_mesh`/`set_mesh`. List the whole scene; the engine drops what a
+  from the positions on `add_mesh`, `set_mesh` and `set_mesh_positions_normals` (skinned
+  meshes: per joint, under the current palette). List the whole scene; the engine drops what a
   view cannot see.
 - **Resize.** Call `viewport.resize(&renderer, width, height)` together with
   `surface.configure`.
@@ -219,7 +275,7 @@ world.step_particles(&mut encoder, dt, None);
 ## Not covered yet
 
 - Stars, clouds and moon phases: the sky is Bevy's clear atmosphere; the moon is a full disc.
-- GPU skinning. Skin on the CPU and call `set_mesh`.
+- Morph targets, and more than four joint influences per vertex (`JOINTS_1`).
 - Clustered lights. Every point and spot light is evaluated for every fragment.
 - glTF features outside the core metallic-roughness model: texture transforms, a second UV set,
   clearcoat, transmission.

@@ -38,10 +38,11 @@ pub enum Feature {
     TexturedProps,
     Sky,
     Culling,
+    Skinning,
 }
 
 impl Feature {
-    pub const ALL: [Feature; 8] = [
+    pub const ALL: [Feature; 9] = [
         Feature::Shadows,
         Feature::Tonemap,
         Feature::Ibl,
@@ -50,6 +51,7 @@ impl Feature {
         Feature::TexturedProps,
         Feature::Sky,
         Feature::Culling,
+        Feature::Skinning,
     ];
 
     pub fn id(self) -> &'static str {
@@ -62,6 +64,7 @@ impl Feature {
             Feature::TexturedProps => "textured_props",
             Feature::Sky => "sky",
             Feature::Culling => "culling",
+            Feature::Skinning => "skinning",
         }
     }
 
@@ -75,6 +78,7 @@ impl Feature {
             Feature::TexturedProps => "Textured props",
             Feature::Sky => "Sky",
             Feature::Culling => "Culling",
+            Feature::Skinning => "Skinning",
         }
     }
 
@@ -89,6 +93,7 @@ impl Feature {
             Feature::TexturedProps => &[25],
             Feature::Sky => &[26],
             Feature::Culling => &[30],
+            Feature::Skinning => &[36],
         }
     }
 
@@ -106,8 +111,94 @@ pub fn all() -> Vec<Scenario> {
     all.extend(fog_modes());
     all.extend(point_spot());
     all.push(textured_props());
+    all.push(skinned_figure());
     all.extend(sky_day_cycle());
     all
+}
+
+/// `skinned_figure`: Quaternius' CC0 base character (one 7281-vertex primitive on a 65-joint
+/// rig, normal-mapped) skinned on the GPU in a pose away from its bind pose: arms lowered and
+/// one bent forward, head and torso turned, one knee raised. Two copies share the mesh with
+/// different skins, one of them mirrored, over a ground that catches both shadows; sun and
+/// IBL as in `textured_props`.
+fn skinned_figure() -> Scenario {
+    let mut assets = Assets::default();
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../assets/figure/Superhero_Male.gltf");
+    let prims = assets.load_gltf(&path);
+    let deg = |d: f32| d.to_radians();
+    let x = |d| Quat::from_rotation_x(deg(d));
+    let y = |d| Quat::from_rotation_y(deg(d));
+    let z = |d| Quat::from_rotation_z(deg(d));
+    let poses = [
+        assets.load_skin(
+            &path,
+            &[
+                ("upperarm_l", z(-60.0)),
+                ("upperarm_r", z(55.0) * y(-40.0)),
+                ("lowerarm_r", z(-70.0)),
+                ("spine_02", x(12.0)),
+                ("Head", x(-20.0)),
+                ("thigh_l", z(35.0)),
+                ("calf_l", z(-60.0)),
+            ],
+        ),
+        assets.load_skin(
+            &path,
+            &[
+                ("upperarm_l", z(-70.0)),
+                ("upperarm_r", z(70.0)),
+                ("spine_01", x(-10.0)),
+                ("thigh_r", z(20.0)),
+                ("calf_r", z(-30.0)),
+            ],
+        ),
+    ];
+    let mut objects = vec![MeshInstance::new(
+        Shape::Plane(Vec2::splat(10.0)),
+        Vec3::ZERO,
+        Material {
+            base_color: rgb(0.32, 0.30, 0.26),
+            perceptual_roughness: 0.9,
+            ..Material::default()
+        },
+    )];
+    for (skin, translation, yaw, scale) in [
+        (poses[0], Vec3::new(-0.5, 0.0, 0.0), 20.0f32, Vec3::ONE),
+        (
+            poses[1],
+            Vec3::new(0.6, 0.0, -0.6),
+            -25.0,
+            Vec3::new(-1.0, 1.0, 1.0),
+        ),
+    ] {
+        for p in &prims {
+            objects.push(MeshInstance {
+                geometry: Geometry::Mesh(p.mesh),
+                translation,
+                rotation: Quat::from_rotation_y(yaw.to_radians()),
+                scale,
+                material: p.material,
+                skin: Some(skin),
+            });
+        }
+    }
+    let base = textured_props();
+    Scenario {
+        name: "skinned_figure",
+        capability: "GPU skinning (SkinnedMesh)",
+        feature: Feature::Skinning,
+        scene: Scene {
+            camera: Camera {
+                eye: Vec3::new(0.6, 1.5, 3.6),
+                target: Vec3::new(0.0, 0.95, -0.2),
+                ..base.scene.camera
+            },
+            ..base.scene
+        },
+        objects,
+        assets,
+        ..base
+    }
 }
 
 /// `sky_day_cycle`: the `sun_shadows` ground and boxes on a wide plain under Bevy's atmosphere
@@ -264,6 +355,7 @@ fn textured_props() -> Scenario {
                 rotation: Quat::from_rotation_y(yaw.to_radians()),
                 scale,
                 material: p.material,
+                skin: None,
             });
         }
     }

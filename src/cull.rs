@@ -1,7 +1,8 @@
 //! Frustum culling as Bevy does it (`bevy_camera::primitives`): each mesh's local bounding box
 //! is computed once when the [`World`](crate::world::World) uploads it, and each view (the
 //! camera, every sun cascade, spot map and point-light cube face) keeps only the instances whose
-//! oriented box reaches into its frustum.
+//! oriented box reaches into its frustum. Skinned meshes keep a box per joint in the bind pose
+//! (Bevy `SkinnedMeshBounds`); their local box is the union of those under the current palette.
 
 use glam::{Mat4, Vec3, Vec4};
 
@@ -20,10 +21,35 @@ impl Aabb {
         let (min, max) = points
             .iter()
             .fold((first, first), |(min, max), &p| (min.min(p), max.max(p)));
+        Self::from_min_max(min, max)
+    }
+
+    fn from_min_max(min: Vec3, max: Vec3) -> Self {
         Self {
             center: 0.5 * (min + max),
             half_extents: 0.5 * (max - min),
         }
+    }
+
+    /// The smallest box around this one under an affine `m` (Arvo; Bevy `transform_aabb`).
+    pub fn transformed(&self, m: Mat4) -> Self {
+        let abs = glam::Mat3::from_cols(
+            m.x_axis.truncate().abs(),
+            m.y_axis.truncate().abs(),
+            m.z_axis.truncate().abs(),
+        );
+        Self {
+            center: m.transform_point3(self.center),
+            half_extents: abs * self.half_extents,
+        }
+    }
+
+    /// The box around both.
+    pub fn union(&self, other: &Self) -> Self {
+        Self::from_min_max(
+            (self.center - self.half_extents).min(other.center - other.half_extents),
+            (self.center + self.half_extents).max(other.center + other.half_extents),
+        )
     }
 }
 
