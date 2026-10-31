@@ -91,6 +91,8 @@ pub struct MeshInstance {
     pub rotation: Quat,
     pub scale: Vec3,
     pub material: Material,
+    /// Index into [`Assets::skins`] for a skinned mesh.
+    pub skin: Option<usize>,
 }
 
 impl MeshInstance {
@@ -101,6 +103,7 @@ impl MeshInstance {
             rotation: Quat::IDENTITY,
             scale: Vec3::ONE,
             material,
+            skin: None,
         }
     }
 
@@ -115,11 +118,30 @@ impl MeshInstance {
     }
 }
 
+/// A glTF skin in one pose: per joint, its transform relative to the skinned mesh and its
+/// inverse bind matrix.
+pub struct Skin {
+    pub model_from_joint: Vec<Mat4>,
+    pub inverse_bindposes: Vec<Mat4>,
+}
+
+impl Skin {
+    /// render-engine's joint palette (`World::add_skin`).
+    pub fn palette(&self) -> Vec<Mat4> {
+        self.model_from_joint
+            .iter()
+            .zip(&self.inverse_bindposes)
+            .map(|(j, ib)| *j * *ib)
+            .collect()
+    }
+}
+
 /// Mesh and texture data shared by a scenario's objects.
 #[derive(Default)]
 pub struct Assets {
     pub meshes: Vec<MeshData>,
     pub textures: Vec<TextureData>,
+    pub skins: Vec<Skin>,
     /// Texture index per (image file, sRGB), so props sharing a texture share the upload.
     loaded: HashMap<(std::path::PathBuf, bool), usize>,
 }
@@ -169,6 +191,14 @@ impl Assets {
                     colors: r
                         .read_colors(0)
                         .map(|c| c.into_rgba_f32().map(Vec4::from).collect())
+                        .unwrap_or_default(),
+                    joints: r
+                        .read_joints(0)
+                        .map(|j| j.into_u16().collect())
+                        .unwrap_or_default(),
+                    weights: r
+                        .read_weights(0)
+                        .map(|w| w.into_f32().map(Vec4::from).collect())
                         .unwrap_or_default(),
                     indices: r.read_indices().expect("indexed").into_u32().collect(),
                 };
@@ -228,6 +258,49 @@ impl Assets {
             }
         }
         out
+    }
+
+    /// Poses a glTF file's first skin: each named joint turns by its rotation on top of its rest
+    /// rotation, and every joint's transform follows from the node hierarchy (the skinned mesh
+    /// sits at the scene root, so these are relative to it). Returns the index into
+    /// [`Assets::skins`].
+    pub fn load_skin(&mut self, path: &Path, pose: &[(&str, Quat)]) -> usize {
+        let (doc, buffers, _) =
+            gltf::import(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        let skin = doc.skins().next().expect("a glTF skin");
+        let mut global = vec![Mat4::IDENTITY; doc.nodes().len()];
+        let scene = doc.default_scene().expect("glTF default scene");
+        let mut stack: Vec<(gltf::Node, Mat4)> =
+            scene.nodes().map(|n| (n, Mat4::IDENTITY)).collect();
+        while let Some((node, parent)) = stack.pop() {
+            let (t, r, s) = node.transform().decomposed();
+            let mut rotation = Quat::from_array(r);
+            if let Some((_, q)) = pose.iter().find(|(name, _)| Some(*name) == node.name()) {
+                rotation *= *q;
+            }
+            let local = Mat4::from_scale_rotation_translation(s.into(), rotation, t.into());
+            let transform = parent * local;
+            global[node.index()] = transform;
+            stack.extend(node.children().map(|c| (c, transform)));
+        }
+        for (name, _) in pose {
+            assert!(
+                skin.joints().any(|j| j.name() == Some(*name)),
+                "{}: no joint {name}",
+                path.display()
+            );
+        }
+        let inverse_bindposes = skin
+            .reader(|b| Some(&buffers[b.index()]))
+            .read_inverse_bind_matrices()
+            .expect("inverse bind matrices")
+            .map(|m| Mat4::from_cols_array_2d(&m))
+            .collect();
+        self.skins.push(Skin {
+            model_from_joint: skin.joints().map(|j| global[j.index()]).collect(),
+            inverse_bindposes,
+        });
+        self.skins.len() - 1
     }
 }
 
@@ -335,6 +408,11 @@ pub fn upload(
         .map(|t| world.add_texture(t))
         .collect();
     let meshes: Vec<_> = assets.meshes.iter().map(|m| world.add_mesh(m)).collect();
+    let skins: Vec<_> = assets
+        .skins
+        .iter()
+        .map(|s| world.add_skin(&s.palette()))
+        .collect();
     let mut shapes = HashMap::new();
     let mut materials = HashMap::new();
     let instances = objects
@@ -350,6 +428,7 @@ pub fn upload(
                 .entry(format!("{:?}", o.material))
                 .or_insert_with(|| world.add_material(&o.material.engine(&textures))),
             world_from_local: o.transform(),
+            skin: o.skin.map(|i| skins[i]),
         })
         .collect();
     (world, instances)

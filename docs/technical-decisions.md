@@ -179,7 +179,20 @@ upgrade that changes a default shows up as a deliberate scenario change:
   a run of visible instance indices, so a view only draws what it can see. Both sides share
   shape meshes and materials between objects (as a game shares handles), so Bevy's batching and
   ours see the same groups. `many_instances` (22 400 props on a 400 × 350 m field, four
-  cascades) measures it.
+  cascades) measures it;
+- GPU skinning (#34): `skinned_figure` gives Bevy the same `Mesh` with
+  `ATTRIBUTE_JOINT_INDEX`/`ATTRIBUTE_JOINT_WEIGHT`, a `SkinnedMesh` whose joints are
+  unparented entities at `world_from_local * model_from_joint` and the file's inverse bind
+  matrices, so Bevy's `joint_global * inverse_bindpose` equals render-engine's
+  `world_from_local * palette[j]`. The pose is set on joint transforms (no `AnimationPlayer`,
+  so no clock to match). render-engine ports `skin_model` and `skin_normals` (inverse transpose
+  of the skinned matrix, tangents through the matrix itself); its palette is mesh-local so the
+  instance transform keeps placing the figure, where Bevy's joints are world-space and replace
+  the mesh entity's transform. Culling uses per-joint bind-pose boxes like Bevy's
+  `SkinnedMeshBounds`; Bevy only does that with `DynamicSkinnedMeshBounds`, so its figures get
+  `NoFrustumCulling` (they are always in view). Mesh streams are split (positions, normals,
+  surface attributes, joints and weights) so a CPU-side pose can rewrite positions and normals
+  alone; Bevy interleaves, which does not change the image.
 
 Later scenarios lift these one at a time (temporal filtering).
 

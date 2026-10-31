@@ -28,7 +28,9 @@ and GPU frame time. See [technical decisions](docs/technical-decisions.md).
   (Bevy's range window, sphere-light specular and cone falloff) in a plain forward loop, with
   cube-map shadows for point lights and perspective maps for spot lights, filtered like the
   sun's or with soft shadows (PCSS). Bevy's frustum culling for the camera and every shadow
-  view, so each pass only draws the instances it can see. Same wgpu major as the mmorpg native
+  view, so each pass only draws the instances it can see. GPU skinning like Bevy's
+  `SkinnedMesh` (a joint palette per instance, four influences per vertex), and per-frame
+  position/normal updates for meshes posed on the CPU. Same wgpu major as the mmorpg native
   client.
 - **Bevy as oracle:** `oracle/` renders every parity scenario on Bevy (`bevy_pbr`) and on
   render-engine, headless. It fails when mean FLIP > 0.005 or p99 FLIP > 0.05, or — on a GPU —
@@ -105,6 +107,7 @@ let frame = gpu.render(&mut viewport, &world, &scene, &instances)?;
 | `fog_modes` (8 views) | 180 m double row of pillars towards a low sun; linear, exponential, exponential squared and atmospheric fog, each without and with shadowed sun inscattering | ≤ 0.0000 / 0.0007 | 0.16–0.25 / 0.25–0.30 (≤ 0.89×) | 22–30 / 16–33 |
 | `point_spot` (3 views) | dusk courtyard: 3 point lights (one with cube shadows, one whose range ends in view), 2 spot lights (one shadowed from above, one pointing up a wall); Gaussian, 2×2 PCF on 512/256 maps, and soft shadows (PCSS) close up | ≤ 0.0000 / 0.0009 | 0.23–0.42 / 0.74–0.92 (≤ 0.45×) | 23–48 / 26–53 |
 | `textured_props` | CC0 glTF props through the consumer API: base-colour, normal and metallic-roughness textures, vertex colours, alpha-masked double-sided bushes (one mirrored) with cut-out shadows, a blended sphere, one crate mesh drawn twice; cascaded sun + IBL | 0.0000 / 0.0007 | 0.323 / 0.573 (0.56×) | 76.4 / 82.2 |
+| `skinned_figure` | CC0 rigged character (7281 vertices, 65 joints, normal-mapped) skinned on the GPU in two poses, one figure mirrored, both casting cascaded sun shadows; IBL | 0.0000 / 0.0002 | 0.191 / 0.425 (0.45×) | 115 / 173 |
 
 ## Development
 

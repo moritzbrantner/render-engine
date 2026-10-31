@@ -5,7 +5,11 @@ use glam::{Vec2, Vec3, Vec4};
 
 /// An indexed triangle list with counter-clockwise front faces, uploaded once with
 /// [`World::add_mesh`](crate::world::World::add_mesh). Attribute names follow glTF; the optional
-/// attributes are either empty or hold one value per position.
+/// attributes are either empty or hold one value per position. On the GPU, positions, normals,
+/// the other surface attributes and the skin weights are separate vertex streams, so a new
+/// CPU-side pose ([`World::set_mesh_positions_normals`]) rewrites only the first two.
+///
+/// [`World::set_mesh_positions_normals`]: crate::world::World::set_mesh_positions_normals
 #[derive(Clone, Debug, Default)]
 pub struct MeshData {
     /// `POSITION`, in metres.
@@ -20,6 +24,12 @@ pub struct MeshData {
     /// `COLOR_0`: linear RGBA multiplied into the material's base colour (Bevy
     /// `ATTRIBUTE_COLOR`).
     pub colors: Vec<Vec4>,
+    /// `JOINTS_0`: four indices per vertex into the joint palette of the instance's skin
+    /// ([`World::add_skin`](crate::world::World::add_skin)). A mesh with joints is skinned on the
+    /// GPU, and every instance of it needs a skin.
+    pub joints: Vec<[u16; 4]>,
+    /// `WEIGHTS_0`: one weight per joint index; one per position when `joints` is set.
+    pub weights: Vec<Vec4>,
     pub indices: Vec<u32>,
 }
 

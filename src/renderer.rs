@@ -15,11 +15,11 @@ use crate::{
     particle_sim::SimPipelines,
     scene::{Cubemap, FogFalloff, LightShadows, MAX_CASCADES, Scene, ShadowFilter, Tonemapping},
     sky::{SkyPipelines, SkyTargets},
-    world::{Instance, MaterialId, MeshId, Vertex, World},
+    world::{Instance, MaterialId, MeshId, SkinId, World, streams},
 };
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat3, Mat4, UVec4, Vec3, Vec4};
-use std::{ops::Range, sync::Arc};
+use std::{collections::HashMap, ops::Range, sync::Arc};
 use wgpu::util::DeviceExt;
 
 /// MSAA sample count of the main pass (Bevy's default `Msaa::Sample4`).
@@ -116,7 +116,8 @@ struct InstanceData {
     world_from_local: Mat4,
     // mat3x3<f32> in WGSL: three columns padded to 16 bytes.
     normal_from_local: [Vec4; 3],
-    /// x 1 when the mesh has tangents, y 1 when the model matrix mirrors.
+    /// x 1 when the mesh has tangents, y 1 when the model matrix mirrors, z the skin's first
+    /// joint in the joint buffer.
     flags: UVec4,
 }
 
@@ -129,8 +130,14 @@ fn face_variant(mirrored: bool, double_sided: bool) -> usize {
 }
 
 /// Index into `Renderer::shadow_pipelines`, in the order `Renderer::new` creates them.
-fn shadow_pipeline_index(local: bool, face: usize, masked: bool) -> usize {
-    (usize::from(local) * FACE_VARIANTS + face) * 2 + usize::from(masked)
+fn shadow_pipeline_index(skinned: bool, local: bool, face: usize, masked: bool) -> usize {
+    ((usize::from(skinned) * 2 + usize::from(local)) * FACE_VARIANTS + face) * 2
+        + usize::from(masked)
+}
+
+/// Index into `Renderer::lit_pipelines`, in the order `Renderer::new` creates them.
+fn lit_pipeline_index(skinned: bool, face: usize, phase: Phase) -> usize {
+    (usize::from(skinned) * FACE_VARIANTS + face) * 3 + phase as usize
 }
 
 fn primitive(face: usize) -> wgpu::PrimitiveState {
@@ -258,6 +265,8 @@ pub struct Viewport {
     tonemap: Option<(Tonemapping, wgpu::BindGroup)>,
     frame_buffer: wgpu::Buffer,
     instance_buffer: Growable,
+    /// The joint palettes of this frame's skins, one run per skin.
+    joint_buffer: Growable,
     /// Every view's culled instance indices, one run per draw.
     visible_buffer: Growable,
     light_buffer: Growable,
@@ -410,6 +419,7 @@ struct ShadowPass {
 struct Draw {
     face: usize,
     phase: Phase,
+    skinned: bool,
     mesh: MeshId,
     material: MaterialId,
     instances: Range<u32>,
@@ -452,6 +462,17 @@ impl Renderer {
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 2,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // Every skinned instance's joint palette (Bevy `joint_matrices`).
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
                     visibility: wgpu::ShaderStages::VERTEX,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: true },
@@ -593,10 +614,32 @@ impl Renderer {
                     count: None,
                 }],
             });
-        let vertex_layout = wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<Vertex>() as u64,
+        // Positions, normals and the surface attributes; skinned meshes add their joints and
+        // weights (see `world::streams`).
+        let stream = |stride: usize, attributes| wgpu::VertexBufferLayout {
+            array_stride: stride as u64,
             step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &Vertex::ATTRIBUTES,
+            attributes,
+        };
+        let unskinned_streams = [
+            Some(stream(12, &streams::POSITIONS[..])),
+            Some(stream(12, &streams::NORMALS[..])),
+            Some(stream(
+                std::mem::size_of::<crate::world::SurfaceVertex>(),
+                &streams::SURFACE[..],
+            )),
+        ];
+        let mut skinned_streams = unskinned_streams.to_vec();
+        skinned_streams.push(Some(stream(
+            std::mem::size_of::<crate::world::SkinVertex>(),
+            &streams::SKIN[..],
+        )));
+        let vertex_streams = |skinned: bool| -> &[Option<wgpu::VertexBufferLayout<'_>>] {
+            if skinned {
+                &skinned_streams
+            } else {
+                &unskinned_streams
+            }
         };
         // Reverse Z everywhere: nearer is larger.
         let depth = |write: bool| wgpu::DepthStencilState {
@@ -623,7 +666,7 @@ impl Renderer {
             .features()
             .contains(wgpu::Features::DEPTH_CLIP_CONTROL);
         let mut shadow_pipelines = Vec::new();
-        for local in [false, true] {
+        for (skinned, local) in [(false, false), (false, true), (true, false), (true, true)] {
             for face in 0..FACE_VARIANTS {
                 for masked in [false, true] {
                     let emulated = !local && !unclipped_depth;
@@ -639,13 +682,14 @@ impl Renderer {
                             layout: Some(&shadow_pipeline_layout),
                             vertex: wgpu::VertexState {
                                 module: &shader,
-                                entry_point: Some(if emulated {
-                                    "shadow_emulated_vs"
-                                } else {
-                                    "shadow_vs"
+                                entry_point: Some(match (emulated, skinned) {
+                                    (false, false) => "shadow_vs",
+                                    (true, false) => "shadow_emulated_vs",
+                                    (false, true) => "shadow_skinned_vs",
+                                    (true, true) => "shadow_emulated_skinned_vs",
                                 }),
                                 compilation_options: Default::default(),
-                                buffers: &[Some(vertex_layout.clone())],
+                                buffers: vertex_streams(skinned),
                             },
                             primitive: wgpu::PrimitiveState {
                                 unclipped_depth: !local && unclipped_depth,
@@ -677,7 +721,10 @@ impl Renderer {
             immediate_size: 0,
         });
         let mut lit_pipelines = Vec::new();
-        for face in 0..FACE_VARIANTS {
+        for (skinned, face) in [false, true]
+            .into_iter()
+            .flat_map(|s| (0..FACE_VARIANTS).map(move |f| (s, f)))
+        {
             for phase in [Phase::Opaque, Phase::Mask, Phase::Blend] {
                 let blend = phase == Phase::Blend;
                 lit_pipelines.push(device.create_render_pipeline(
@@ -686,9 +733,9 @@ impl Renderer {
                         layout: Some(&lit_pipeline_layout),
                         vertex: wgpu::VertexState {
                             module: &shader,
-                            entry_point: Some("lit_vs"),
+                            entry_point: Some(if skinned { "lit_skinned_vs" } else { "lit_vs" }),
                             compilation_options: Default::default(),
-                            buffers: &[Some(vertex_layout.clone())],
+                            buffers: vertex_streams(skinned),
                         },
                         primitive: primitive(face),
                         // Blended fragments test depth but do not write it (Bevy).
@@ -1058,7 +1105,11 @@ impl Renderer {
             view_z: f32,
             obb: Obb,
             data: InstanceData,
+            skinned: bool,
         }
+        // Each skin's palette once, in order of first use (Bevy `prepare_skins`).
+        let mut joints: Vec<Mat4> = Vec::new();
+        let mut skin_offsets: HashMap<SkinId, u32> = HashMap::new();
         let mut sorted: Vec<Sorted> = instances
             .iter()
             .map(|inst| {
@@ -1068,7 +1119,28 @@ impl Renderer {
                 let linear = Mat3::from_mat4(m);
                 let mirrored = linear.determinant() < 0.0;
                 let normal = linear.inverse().transpose();
+                let skinned = mesh.skin.is_some();
+                let (joint_offset, local_aabb) = match (skinned, inst.skin) {
+                    (false, None) => (0, mesh.aabb),
+                    (true, Some(skin)) => {
+                        let palette = world.skin(skin);
+                        let offset = *skin_offsets.entry(skin).or_insert_with(|| {
+                            joints.extend_from_slice(palette);
+                            (joints.len() - palette.len()) as u32
+                        });
+                        let aabb = mesh
+                            .joint_bounds
+                            .iter()
+                            .filter_map(|(j, b)| Some(b.transformed(*palette.get(*j as usize)?)))
+                            .reduce(|a, b| a.union(&b))
+                            .unwrap_or(mesh.aabb);
+                        (offset, aabb)
+                    }
+                    (true, None) => panic!("an instance of a skinned mesh needs a skin"),
+                    (false, Some(_)) => panic!("a skin on an instance of an unskinned mesh"),
+                };
                 Sorted {
+                    skinned,
                     phase: match material.alpha_mode {
                         AlphaMode::Opaque => Phase::Opaque,
                         AlphaMode::Mask(_) => Phase::Mask,
@@ -1078,7 +1150,7 @@ impl Renderer {
                     material: inst.material,
                     mesh: inst.mesh,
                     view_z: (view_from_world * m.w_axis).z,
-                    obb: Obb::new(mesh.aabb, m),
+                    obb: Obb::new(local_aabb, m),
                     data: InstanceData {
                         world_from_local: m,
                         normal_from_local: [
@@ -1086,7 +1158,12 @@ impl Renderer {
                             normal.y_axis.extend(0.0),
                             normal.z_axis.extend(0.0),
                         ],
-                        flags: UVec4::new(u32::from(mesh.has_tangents), u32::from(mirrored), 0, 0),
+                        flags: UVec4::new(
+                            u32::from(mesh.has_tangents),
+                            u32::from(mirrored),
+                            joint_offset,
+                            0,
+                        ),
                     },
                 }
             })
@@ -1115,6 +1192,7 @@ impl Renderer {
                 _ => groups.push(Draw {
                     face: s.face,
                     phase: s.phase,
+                    skinned: s.skinned,
                     mesh: s.mesh,
                     material: s.material,
                     instances: i..i + 1,
@@ -1128,6 +1206,15 @@ impl Renderer {
         if viewport
             .instance_buffer
             .write(device, queue, bytemuck::cast_slice(&instance_data))
+        {
+            viewport.frame_group = None;
+        }
+        if joints.is_empty() {
+            joints.push(Mat4::IDENTITY);
+        }
+        if viewport
+            .joint_buffer
+            .write(device, queue, bytemuck::cast_slice(&joints))
         {
             viewport.frame_group = None;
         }
@@ -1336,6 +1423,10 @@ impl Renderer {
                         binding: 2,
                         resource: viewport.visible_buffer.buffer.as_entire_binding(),
                     },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: viewport.joint_buffer.buffer.as_entire_binding(),
+                    },
                 ],
             }));
         }
@@ -1497,7 +1588,12 @@ impl Renderer {
                 }
                 let mesh = world.mesh(d.mesh);
                 if mesh_bound != Some(d.mesh) {
-                    pass.set_vertex_buffer(0, mesh.vertices.slice(..));
+                    pass.set_vertex_buffer(0, mesh.positions.slice(..));
+                    pass.set_vertex_buffer(1, mesh.normals.slice(..));
+                    pass.set_vertex_buffer(2, mesh.surface.slice(..));
+                    if let Some(skin) = &mesh.skin {
+                        pass.set_vertex_buffer(3, skin.slice(..));
+                    }
                     pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
                     mesh_bound = Some(d.mesh);
                 }
@@ -1543,7 +1639,9 @@ impl Renderer {
                 &self.shadow_pipelines,
                 shadow.draws.clone(),
                 Phase::Opaque..Phase::End,
-                &|d: &Draw| shadow_pipeline_index(shadow.local, d.face, d.phase != Phase::Opaque),
+                &|d: &Draw| {
+                    shadow_pipeline_index(d.skinned, shadow.local, d.face, d.phase != Phase::Opaque)
+                },
             );
         }
 
@@ -1557,7 +1655,7 @@ impl Renderer {
             resolve,
         };
         let clear_color = viewport.clear_color;
-        let lit_index = |d: &Draw| d.face * 3 + d.phase as usize;
+        let lit_index = |d: &Draw| lit_pipeline_index(d.skinned, d.face, d.phase);
         match &viewport.sky {
             None => {
                 let mut pass = begin_main_pass(
@@ -1681,6 +1779,7 @@ impl Viewport {
                 mapped_at_creation: false,
             }),
             instance_buffer: Growable::new(device, "instances", wgpu::BufferUsages::STORAGE),
+            joint_buffer: Growable::new(device, "joints", wgpu::BufferUsages::STORAGE),
             visible_buffer: Growable::new(device, "visible instances", wgpu::BufferUsages::STORAGE),
             light_buffer: Growable::new(device, "lights", wgpu::BufferUsages::STORAGE),
             shadow_view_buffer: Growable::new(device, "shadow views", wgpu::BufferUsages::UNIFORM),

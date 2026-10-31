@@ -53,7 +53,60 @@ fn at(mesh: MeshId, material: MaterialId, translation: Vec3) -> Instance {
         mesh,
         material,
         world_from_local: Mat4::from_translation(translation),
+        skin: None,
     }
+}
+
+/// A box seen from straight above, skinned to one joint on the GPU and posed on the CPU: each
+/// frame it lands where its new pose puts it (outside its bind-pose bounds, so culling has to
+/// follow the joints), with only the palette or the positions and normals uploaded.
+#[test]
+fn skinned_and_cpu_posed_meshes_follow_their_poses() {
+    let gpu = Headless::new().expect("a wgpu adapter");
+    let mut world = World::new(gpu.renderer());
+    let mut data = MeshData::shape(Shape::Cuboid(Vec3::splat(0.6)));
+    let plain = world.add_mesh(&data);
+    data.joints = vec![[1, 0, 0, 0]; data.positions.len()];
+    data.weights = vec![Vec4::X; data.positions.len()];
+    let skinned = world.add_mesh(&data);
+    let white = world.add_material(&StandardMaterial::default());
+    let shift = |x: f32| Mat4::from_translation(Vec3::new(x, 0.0, 0.0));
+    let skin = world.add_skin(&[Mat4::IDENTITY, shift(1.2)]);
+
+    let mut s = scene(false, Tonemapping::AcesFitted);
+    s.camera.eye = Vec3::new(0.0, 5.0, 0.001);
+    s.camera.fov_y = 40f32.to_radians();
+    let (w, h) = (64, 64);
+    let mut viewport = Viewport::new(gpu.renderer(), w, h);
+    let lit = |p: [u8; 4]| p[0] > 100 && p[1] > 100;
+    // 1.2 m to either side is about 22 pixels from the centre.
+    let (left, right) = ((w / 2 - 22, h / 2), (w / 2 + 22, h / 2));
+
+    let instances = [Instance {
+        skin: Some(skin),
+        ..at(skinned, white, Vec3::ZERO)
+    }];
+    let frame = gpu.render(&mut viewport, &world, &s, &instances).unwrap();
+    assert!(
+        lit(pixel(&frame, right.0, right.1)),
+        "skinned box moved right"
+    );
+    assert!(!lit(pixel(&frame, w / 2, h / 2)), "bind pose is empty");
+
+    world.set_skin(skin, &[Mat4::IDENTITY, shift(-1.2)]);
+    let frame = gpu.render(&mut viewport, &world, &s, &instances).unwrap();
+    assert!(lit(pixel(&frame, left.0, left.1)), "skinned box moved left");
+    assert!(!lit(pixel(&frame, right.0, right.1)));
+
+    let moved: Vec<Vec3> = data.positions.iter().map(|p| *p + Vec3::X * 1.2).collect();
+    world.set_mesh_positions_normals(plain, &moved, &data.normals);
+    let instances = [at(plain, white, Vec3::ZERO)];
+    let frame = gpu.render(&mut viewport, &world, &s, &instances).unwrap();
+    assert!(
+        lit(pixel(&frame, right.0, right.1)),
+        "CPU-posed box moved right"
+    );
+    assert!(!lit(pixel(&frame, w / 2, h / 2)));
 }
 
 #[test]

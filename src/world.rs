@@ -13,7 +13,7 @@ use crate::{
     renderer::{FrameTimestamps, Renderer},
 };
 use bytemuck::{Pod, Zeroable};
-use glam::{Mat4, Vec4};
+use glam::{Mat4, Vec3, Vec4};
 use wgpu::util::DeviceExt;
 
 /// A mesh in a [`World`]; valid until [`World::remove_mesh`].
@@ -32,6 +32,10 @@ pub struct MaterialId(u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct EmitterId(u32);
 
+/// A joint palette in a [`World`]; valid until [`World::remove_skin`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct SkinId(u32);
+
 /// One drawn copy of a mesh this frame.
 #[derive(Clone, Copy, Debug)]
 pub struct Instance {
@@ -40,23 +44,38 @@ pub struct Instance {
     /// Model matrix. A negative determinant (mirroring) flips the winding, which the renderer
     /// accounts for.
     pub world_from_local: Mat4,
+    /// The joint palette a skinned mesh (one with [`MeshData::joints`]) is posed with; `None`
+    /// for every other mesh. Instances may share a skin.
+    pub skin: Option<SkinId>,
 }
 
-/// Interleaved vertex as the shaders read it.
+/// The vertex streams as the shaders read them: positions (location 0) and normals (1) on
+/// their own, so a new pose rewrites just those, then [`SurfaceVertex`] and, for skinned
+/// meshes, [`SkinVertex`].
+pub(crate) mod streams {
+    pub const POSITIONS: [wgpu::VertexAttribute; 1] = wgpu::vertex_attr_array![0 => Float32x3];
+    pub const NORMALS: [wgpu::VertexAttribute; 1] = wgpu::vertex_attr_array![1 => Float32x3];
+    pub const SURFACE: [wgpu::VertexAttribute; 3] =
+        wgpu::vertex_attr_array![2 => Float32x2, 3 => Float32x4, 4 => Float32x4];
+    pub const SKIN: [wgpu::VertexAttribute; 2] =
+        wgpu::vertex_attr_array![5 => Uint16x4, 6 => Float32x4];
+}
+
+/// The attributes a pose leaves alone: uv, tangent and colour.
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
-pub(crate) struct Vertex {
-    position: [f32; 3],
-    normal: [f32; 3],
+pub(crate) struct SurfaceVertex {
     uv: [f32; 2],
     tangent: [f32; 4],
     color: [f32; 4],
 }
 
-impl Vertex {
-    pub(crate) const ATTRIBUTES: [wgpu::VertexAttribute; 5] = wgpu::vertex_attr_array![
-        0 => Float32x3, 1 => Float32x3, 2 => Float32x2, 3 => Float32x4, 4 => Float32x4
-    ];
+/// `JOINTS_0` and `WEIGHTS_0`.
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub(crate) struct SkinVertex {
+    joints: [u16; 4],
+    weights: [f32; 4],
 }
 
 /// `MaterialUniform::flags` (mirrored in `lit.wgsl`).
@@ -88,12 +107,20 @@ struct MaterialUniform {
 }
 
 pub(crate) struct GpuMesh {
-    pub vertices: wgpu::Buffer,
+    pub positions: wgpu::Buffer,
+    pub normals: wgpu::Buffer,
+    pub surface: wgpu::Buffer,
+    /// Skinned meshes only.
+    pub skin: Option<wgpu::Buffer>,
     pub indices: wgpu::Buffer,
+    pub vertex_count: u32,
     pub index_count: u32,
     pub has_tangents: bool,
-    /// Local bounds for frustum culling, computed once per upload.
+    /// Local bounds for frustum culling, computed per upload.
     pub aabb: Aabb,
+    /// Skinned meshes: the bind-pose box of the vertices each joint moves (Bevy
+    /// `SkinnedMeshBounds`), by joint index.
+    pub joint_bounds: Vec<(u16, Aabb)>,
 }
 
 struct GpuTexture {
@@ -154,6 +181,7 @@ pub struct World {
     meshes: Slots<GpuMesh>,
     textures: Slots<GpuTexture>,
     materials: Slots<GpuMaterial>,
+    skins: Slots<Vec<Mat4>>,
     emitters: Slots<EmitterState>,
     particles: ParticlePool,
 }
@@ -182,6 +210,7 @@ impl World {
             meshes: Slots::new(),
             textures: Slots::new(),
             materials: Slots::new(),
+            skins: Slots::new(),
             emitters: Slots::new(),
             particles: ParticlePool::new(renderer.device(), renderer.sim_pipelines()),
         }
@@ -194,55 +223,128 @@ impl World {
     }
 
     /// Replaces a mesh's data under the same handle, rewriting its buffers in place when the
-    /// vertex and index counts are unchanged (CPU-skinned or animated meshes, every frame).
+    /// vertex and index counts and the skinning are unchanged. For a new pose of the same
+    /// topology, [`World::set_mesh_positions_normals`] (CPU skinning) or a skinned mesh and
+    /// [`World::set_skin`] (GPU skinning) upload far less.
     pub fn set_mesh(&mut self, id: MeshId, mesh: &MeshData) {
-        let vertices = vertices(mesh);
+        let streams = Streams::new(mesh);
         let old = self.meshes.get(id.0).expect("set_mesh on a removed mesh");
-        let same_size = old.vertices.size() == std::mem::size_of_val(vertices.as_slice()) as u64
-            && old.index_count as usize == mesh.indices.len();
-        let replacement = (!same_size).then(|| self.gpu_mesh(mesh));
+        let in_place = old.vertex_count as usize == mesh.positions.len()
+            && old.index_count as usize == mesh.indices.len()
+            && old.skin.is_some() == streams.skin.is_some();
+        if !in_place {
+            let gpu = self.gpu_mesh(mesh);
+            self.meshes.items[id.0 as usize] = Some(gpu);
+            return;
+        }
         let slot = self.meshes.items[id.0 as usize]
             .as_mut()
             .expect("checked above");
-        match replacement {
-            Some(gpu) => *slot = gpu,
-            None => {
-                self.queue
-                    .write_buffer(&slot.vertices, 0, bytemuck::cast_slice(&vertices));
-                self.queue
-                    .write_buffer(&slot.indices, 0, bytemuck::cast_slice(&mesh.indices));
-                slot.has_tangents = !mesh.tangents.is_empty();
-                slot.aabb = Aabb::from_points(&mesh.positions);
-            }
+        let q = &self.queue;
+        q.write_buffer(&slot.positions, 0, bytemuck::cast_slice(&mesh.positions));
+        q.write_buffer(&slot.normals, 0, bytemuck::cast_slice(&mesh.normals));
+        q.write_buffer(&slot.surface, 0, bytemuck::cast_slice(&streams.surface));
+        if let (Some(buffer), Some(skin)) = (&slot.skin, &streams.skin) {
+            q.write_buffer(buffer, 0, bytemuck::cast_slice(skin));
         }
+        q.write_buffer(&slot.indices, 0, bytemuck::cast_slice(&mesh.indices));
+        slot.has_tangents = !mesh.tangents.is_empty();
+        slot.aabb = Aabb::from_points(&mesh.positions);
+        slot.joint_bounds = joint_bounds(mesh);
+    }
+
+    /// Rewrites only a mesh's positions and normals, one per vertex, keeping its other
+    /// attributes and its indices: a CPU-skinned or morphed pose of an unchanged topology. Two
+    /// buffer writes of 12 bytes per vertex each, no re-interleaving. Skinned meshes take their
+    /// poses through [`World::set_skin`] instead (their per-joint bounds stay those of the
+    /// first upload).
+    pub fn set_mesh_positions_normals(&mut self, id: MeshId, positions: &[Vec3], normals: &[Vec3]) {
+        let slot = self.meshes.items[id.0 as usize]
+            .as_mut()
+            .expect("set_mesh_positions_normals on a removed mesh");
+        let n = slot.vertex_count as usize;
+        assert!(
+            positions.len() == n && normals.len() == n,
+            "{} positions and {} normals for a mesh of {n} vertices",
+            positions.len(),
+            normals.len()
+        );
+        self.queue
+            .write_buffer(&slot.positions, 0, bytemuck::cast_slice(positions));
+        self.queue
+            .write_buffer(&slot.normals, 0, bytemuck::cast_slice(normals));
+        slot.aabb = Aabb::from_points(positions);
     }
 
     fn gpu_mesh(&self, mesh: &MeshData) -> GpuMesh {
-        let vertices = vertices(mesh);
-        let usage = wgpu::BufferUsages::COPY_DST;
+        let streams = Streams::new(mesh);
+        let buffer = |label, contents: &[u8], usage| {
+            self.device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some(label),
+                    contents,
+                    usage: usage | wgpu::BufferUsages::COPY_DST,
+                })
+        };
+        let vertex = wgpu::BufferUsages::VERTEX;
         GpuMesh {
-            vertices: self
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("mesh vertices"),
-                    contents: bytemuck::cast_slice(&vertices),
-                    usage: usage | wgpu::BufferUsages::VERTEX,
-                }),
-            indices: self
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("mesh indices"),
-                    contents: bytemuck::cast_slice(&mesh.indices),
-                    usage: usage | wgpu::BufferUsages::INDEX,
-                }),
+            positions: buffer(
+                "mesh positions",
+                bytemuck::cast_slice(&mesh.positions),
+                vertex,
+            ),
+            normals: buffer("mesh normals", bytemuck::cast_slice(&mesh.normals), vertex),
+            surface: buffer(
+                "mesh surface",
+                bytemuck::cast_slice(&streams.surface),
+                vertex,
+            ),
+            skin: streams
+                .skin
+                .as_ref()
+                .map(|s| buffer("mesh skin", bytemuck::cast_slice(s), vertex)),
+            indices: buffer(
+                "mesh indices",
+                bytemuck::cast_slice(&mesh.indices),
+                wgpu::BufferUsages::INDEX,
+            ),
+            vertex_count: mesh.positions.len() as u32,
             index_count: mesh.indices.len() as u32,
             has_tangents: !mesh.tangents.is_empty(),
             aabb: Aabb::from_points(&mesh.positions),
+            joint_bounds: joint_bounds(mesh),
         }
     }
 
     pub fn remove_mesh(&mut self, mesh: MeshId) {
         self.meshes.remove(mesh.0);
+    }
+
+    /// A joint palette for skinned meshes: per joint, the mesh-local matrix that moves a
+    /// bind-pose vertex with that joint, `local_from_joint * joint_from_bind` (glTF: the joint's
+    /// transform relative to the skinned mesh times its inverse bind matrix). The instance's
+    /// `world_from_local` then places the skinned mesh, so a palette is independent of where
+    /// the figure stands. Bevy's equivalent is `SkinnedMesh` with joint entities.
+    pub fn add_skin(&mut self, joints: &[Mat4]) -> SkinId {
+        SkinId(self.skins.insert(joints.to_vec()))
+    }
+
+    /// A skin's next pose: the whole palette, uploaded by the next [`Renderer::prepare`] that
+    /// draws it.
+    pub fn set_skin(&mut self, id: SkinId, joints: &[Mat4]) {
+        let palette = self.skins.items[id.0 as usize]
+            .as_mut()
+            .expect("set_skin on a removed skin");
+        palette.clear();
+        palette.extend_from_slice(joints);
+    }
+
+    pub fn remove_skin(&mut self, id: SkinId) {
+        self.skins.remove(id.0);
+    }
+
+    pub(crate) fn skin(&self, id: SkinId) -> &[Mat4] {
+        self.skins.get(id.0).expect("instance of a removed skin")
     }
 
     /// Uploads a texture with all its mip levels.
@@ -506,27 +608,68 @@ fn upload_texture(device: &wgpu::Device, queue: &wgpu::Queue, t: &TextureData) -
     }
 }
 
-/// Interleaves a mesh's attributes as the shaders read them.
-fn vertices(mesh: &MeshData) -> Vec<Vertex> {
-    let n = mesh.positions.len();
-    assert_eq!(mesh.normals.len(), n, "mesh needs one normal per position");
-    for (name, len) in [
-        ("uvs", mesh.uvs.len()),
-        ("tangents", mesh.tangents.len()),
-        ("colors", mesh.colors.len()),
-    ] {
-        assert!(
-            len == 0 || len == n,
-            "mesh {name}: {len} values for {n} positions"
+/// A mesh's interleaved streams besides positions and normals (which upload as they are).
+struct Streams {
+    surface: Vec<SurfaceVertex>,
+    skin: Option<Vec<SkinVertex>>,
+}
+
+impl Streams {
+    fn new(mesh: &MeshData) -> Self {
+        let n = mesh.positions.len();
+        assert_eq!(mesh.normals.len(), n, "mesh needs one normal per position");
+        for (name, len) in [
+            ("uvs", mesh.uvs.len()),
+            ("tangents", mesh.tangents.len()),
+            ("colors", mesh.colors.len()),
+            ("joints", mesh.joints.len()),
+        ] {
+            assert!(
+                len == 0 || len == n,
+                "mesh {name}: {len} values for {n} positions"
+            );
+        }
+        let skinned = !mesh.joints.is_empty();
+        assert_eq!(
+            mesh.weights.len(),
+            if skinned { n } else { 0 },
+            "mesh weights: one per position with joints, none without"
         );
+        Self {
+            surface: (0..n)
+                .map(|i| SurfaceVertex {
+                    uv: mesh.uvs.get(i).map_or([0.0; 2], |v| v.to_array()),
+                    tangent: mesh.tangents.get(i).map_or([0.0; 4], |v| v.to_array()),
+                    color: mesh.colors.get(i).map_or([1.0; 4], |v| v.to_array()),
+                })
+                .collect(),
+            skin: skinned.then(|| {
+                mesh.joints
+                    .iter()
+                    .zip(&mesh.weights)
+                    .map(|(j, w)| SkinVertex {
+                        joints: *j,
+                        weights: w.to_array(),
+                    })
+                    .collect()
+            }),
+        }
     }
-    (0..n)
-        .map(|i| Vertex {
-            position: mesh.positions[i].to_array(),
-            normal: mesh.normals[i].to_array(),
-            uv: mesh.uvs.get(i).map_or([0.0; 2], |v| v.to_array()),
-            tangent: mesh.tangents.get(i).map_or([0.0; 4], |v| v.to_array()),
-            color: mesh.colors.get(i).map_or([1.0; 4], |v| v.to_array()),
-        })
+}
+
+/// Bevy `SkinnedMeshBounds::from_mesh`: per joint, the box around the bind-pose positions it
+/// has a non-zero weight on.
+fn joint_bounds(mesh: &MeshData) -> Vec<(u16, Aabb)> {
+    let mut points: std::collections::BTreeMap<u16, Vec<Vec3>> = Default::default();
+    for ((p, j), w) in mesh.positions.iter().zip(&mesh.joints).zip(&mesh.weights) {
+        for k in 0..4 {
+            if w[k] != 0.0 {
+                points.entry(j[k]).or_default().push(*p);
+            }
+        }
+    }
+    points
+        .into_iter()
+        .map(|(j, p)| (j, Aabb::from_points(&p)))
         .collect()
 }
