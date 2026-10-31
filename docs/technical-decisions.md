@@ -266,9 +266,28 @@ Each capture is judged by one of two tiers:
   simulation frame, as for lighting. hanabi's compute passes (`hanabi:init`, `hanabi:update`)
   write no timestamps, so this covers rendering but not simulation. Timing simulation as well
   belongs to the GPU-simulation work (#14).
-- **Engine side.** render-engine has no particles yet (#13). Each particle scenario is in the
-  report with its Bevy captures and population, marked as a known gap (`"known_gap": 13`). It
-  does not fail the run until #13 adds the engine side and the gates above apply.
+- **Engine side (#13).** `render_engine::particles` simulates on the CPU, replaying hanabi step
+  by step: `EffectSpawner::tick` for the spawn count; the effect seed set to `prng_seed` when
+  the emitter is added and advanced by `StdRng::seed_from_u64(seed).random()` after every step,
+  active or not; `pcg_hash(slot ^ seed)`, `frand`/`frand3`/`frand4` and the init modifiers in
+  their listed order; hanabi's dead-slot stack (`dead_index` starts as `0, 1, 2, …`; a spawn
+  takes the row at the alive count, a death writes its slot back at the decremented count); then
+  age, reap, `v += a·dt`, `p += v·dt` for every alive particle, including the ones just spawned.
+  hanabi compiles an effect, and sets its seed, on app update 1, so the Bevy side reports the
+  update on which its spawners started (`first_spawn_update`). The engine side adds its emitters
+  inactive and steps them `first_spawn_update − 1` times before activating them, so both seed
+  chains are at the same link on the first spawn. With the chain off by one step,
+  `particles_fountain@t0500` scores FLIP mean 0.024 and p99 0.94, so the gate checks the chain.
+  Particles are drawn in the main pass after the blended instances, as hanabi's quads
+  (`ParallelCameraDepthPlane`, the unit quad, `RoundModifier`'s mask, 4× MSAA, depth tested
+  but not written), additive first, then alpha-blended particles sorted back to front.
+- **Recycling in practice.** The CPU replay of the dead-slot stack processes deaths in alive-list
+  order. On the RTX 3060 Ti and on lavapipe, hanabi's atomics produce the same order for
+  `particles_fountain`, so its 2.0 s capture also matches exactly (FLIP 0, statistics 0). The
+  statistical tier still gates it, since other GPUs or scenarios need not schedule the same way.
+- **GPU time** of a particle scenario: render-engine's frame after the last capture (its
+  fastest round) against Bevy's median frame over the run, both covering rendering only; the
+  local gate applies as for lighting.
 
 ## Standing rules
 

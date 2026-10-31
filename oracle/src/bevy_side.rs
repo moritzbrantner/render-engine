@@ -605,6 +605,11 @@ pub struct ParticleRun {
     /// GPU milliseconds per simulation frame (sum of the top-level render diagnostic spans).
     pub gpu_ms: Vec<f64>,
     pub spans: Vec<String>,
+    /// The app update (1 = the first) on which the spawners started. hanabi sets each effect's
+    /// seed to its `prng_seed` when it compiles the effect on update 1 and advances the seed
+    /// chain once per update after that, so the first spawn uses the chain's
+    /// `first_spawn_update - 1`-th successor.
+    pub first_spawn_update: u32,
 }
 
 #[derive(Resource, Clone)]
@@ -612,6 +617,8 @@ struct ParticleShared(Arc<Mutex<ParticleRun>>);
 
 #[derive(Resource)]
 struct ParticlePlan {
+    /// Updates since the app started.
+    updates: u32,
     frame: u32,
     /// Simulation frame (1 = the frame the spawners start); 0 while warming up.
     sim_frame: u32,
@@ -638,8 +645,8 @@ impl Default for ParticleVariant {
 }
 
 /// The emitter as a hanabi effect: the same spawner, init, update and render modifiers, in the
-/// order #13 replays them (the init modifiers draw from the particle's random stream in this
-/// order: position, then velocity).
+/// order `Emitter::engine` gives render-engine (the init modifiers draw from the particle's
+/// random stream in this order: position, then velocity).
 fn effect_asset(e: &Emitter, seed: u32, gravity_scale: f32) -> hanabi::EffectAsset {
     use hanabi::{Attribute, SetAttributeModifier};
     let w = hanabi::ExprWriter::new();
@@ -736,6 +743,7 @@ pub fn run_particles(scenario: ParticleScenario, variant: ParticleVariant) -> Pa
         .insert_resource(ParticlePlan {
             frame: 0,
             sim_frame: 0,
+            updates: 0,
             captures: scenario.captures.iter().map(|c| c.frame).collect(),
             emitters: scenario.emitters.len(),
         });
@@ -830,6 +838,7 @@ fn drive_particles(
     mut exit: MessageWriter<AppExit>,
 ) {
     plan.frame += 1;
+    plan.updates += 1;
     let Some(target) = target else { return };
     if plan.sim_frame == 0 {
         let ready = compiled.iter().filter(|c| c.is_ready()).count() == plan.emitters;
@@ -841,6 +850,7 @@ fn drive_particles(
         } else if plan.frame > WARMUP_FRAMES {
             spawners.iter_mut().for_each(|mut s| s.active = true);
             plan.sim_frame = 1;
+            shared.0.lock().unwrap().first_spawn_update = plan.updates;
         }
     } else {
         plan.sim_frame += 1;
@@ -932,6 +942,7 @@ pub fn run_particles_in_child(
             })
             .unwrap_or_default(),
         gpu_ms: numbers(&value["gpu_ms"]),
+        first_spawn_update: value["first_spawn_update"].as_u64().unwrap_or(0) as u32,
         spans: value["spans"]
             .as_array()
             .map(|a| {

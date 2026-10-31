@@ -1,7 +1,7 @@
 //! The wgpu renderer: one shadow pass per sun cascade, spot light and point-light cube face, one
 //! forward PBR pass with 4× MSAA into an HDR target (opaque, then alpha-masked, then blended
-//! instances back to front), a tone-mapping pass into an Rgba16Float target and a blit into the
-//! consumer's colour target (Bevy's tonemapping and upscaling nodes).
+//! instances back to front, then particles), a tone-mapping pass into an Rgba16Float target and
+//! a blit into the consumer's colour target (Bevy's tonemapping and upscaling nodes).
 //!
 //! [`Renderer`] holds the pipelines, a [`World`] the consumer's meshes, textures and materials,
 //! and a [`Viewport`] the per-size targets and per-frame buffers. Each frame:
@@ -11,6 +11,7 @@
 use crate::{
     cull::{Frustum, Obb},
     material::AlphaMode,
+    particle_pass::{ParticleFrame, ParticlePipelines},
     scene::{Cubemap, FogFalloff, LightShadows, MAX_CASCADES, Scene, ShadowFilter, Tonemapping},
     sky::{SkyPipelines, SkyTargets},
     world::{Instance, MaterialId, MeshId, Vertex, World},
@@ -24,7 +25,7 @@ use wgpu::util::DeviceExt;
 pub const SAMPLE_COUNT: u32 = 4;
 /// Format of the main pass (Bevy's `ViewTarget::TEXTURE_FORMAT_HDR`).
 pub const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
-const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+pub(crate) const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const TONY_MC_MAPFACE_LUT: &[u8] = include_bytes!("luts/tony_mc_mapface.ktx2");
 const AGX_LUT: &[u8] = include_bytes!("luts/AgX-default_contrast.ktx2");
 /// Stride of the per-view shadow uniforms (dynamic-offset alignment).
@@ -188,6 +189,8 @@ pub struct Renderer {
     sky: SkyPipelines,
     /// A 1² transmittance LUT bound when the scene has no sky.
     no_transmittance: wgpu::TextureView,
+    /// Camera-facing particle quads (`particle_pass`).
+    particles: ParticlePipelines,
 }
 
 /// The tone-mapping shader's `METHOD` constant.
@@ -272,6 +275,7 @@ pub struct Viewport {
     main_draws: Range<usize>,
     clear_color: wgpu::Color,
     tonemapping: Tonemapping,
+    particles: ParticleFrame,
 }
 
 struct Targets {
@@ -285,14 +289,18 @@ struct Targets {
 }
 
 /// A buffer that is rewritten every frame and replaced by a larger one when it runs out.
-struct Growable {
-    buffer: wgpu::Buffer,
+pub(crate) struct Growable {
+    pub(crate) buffer: wgpu::Buffer,
     label: &'static str,
     usage: wgpu::BufferUsages,
 }
 
 impl Growable {
-    fn new(device: &wgpu::Device, label: &'static str, usage: wgpu::BufferUsages) -> Self {
+    pub(crate) fn new(
+        device: &wgpu::Device,
+        label: &'static str,
+        usage: wgpu::BufferUsages,
+    ) -> Self {
         let usage = usage | wgpu::BufferUsages::COPY_DST;
         Self {
             buffer: Self::create(device, label, usage, 256),
@@ -316,7 +324,12 @@ impl Growable {
     }
 
     /// Writes `bytes` (never empty), returning whether the buffer was replaced.
-    fn write(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, bytes: &[u8]) -> bool {
+    pub(crate) fn write(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        bytes: &[u8],
+    ) -> bool {
         let size = bytes.len() as u64;
         let grown = size > self.buffer.size();
         if grown {
@@ -871,6 +884,7 @@ impl Renderer {
             agx_lut: load_lut(device, queue, AGX_LUT),
             lut_sampler,
             sky: SkyPipelines::new(device, queue),
+            particles: ParticlePipelines::new(device),
             no_transmittance: device
                 .create_texture_with_data(
                     queue,
@@ -1339,6 +1353,14 @@ impl Renderer {
             ));
         }
         viewport.tonemapping = cam.tonemapping;
+        viewport.particles.prepare(
+            device,
+            queue,
+            &self.particles,
+            world,
+            clip_from_view * view_from_world,
+            world_from_view,
+        );
         let c = scene.clear_color;
         viewport.clear_color = wgpu::Color {
             r: c.x.into(),
@@ -1545,6 +1567,7 @@ impl Renderer {
                     Phase::Opaque..Phase::End,
                     &lit_index,
                 );
+                viewport.particles.draw(&mut pass, &self.particles);
             }
             Some(sky) => {
                 let mut pass = begin_main_pass(
@@ -1587,6 +1610,7 @@ impl Renderer {
                     Phase::Blend..Phase::End,
                     &lit_index,
                 );
+                viewport.particles.draw(&mut pass, &self.particles);
             }
         }
 
@@ -1664,6 +1688,7 @@ impl Viewport {
             main_draws: 0..0,
             clear_color: wgpu::Color::BLACK,
             tonemapping: Tonemapping::default(),
+            particles: ParticleFrame::new(device),
         }
     }
 

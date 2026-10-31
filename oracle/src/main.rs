@@ -163,8 +163,7 @@ fn bevy_particles_child(s: particles::ParticleScenario, o: &Options) -> Result<(
             rgba,
         )?;
     }
-    let json =
-        serde_json::json!({ "spawns": run.spawns, "gpu_ms": run.gpu_ms, "spans": run.spans });
+    let json = serde_json::json!({ "spawns": run.spawns, "gpu_ms": run.gpu_ms, "spans": run.spans, "first_spawn_update": run.first_spawn_update });
     std::fs::write(o.out.join(format!("{name}.bevy.json")), json.to_string())
         .map_err(|e| e.to_string())
 }
@@ -222,9 +221,89 @@ fn population_json(s: &particles::ParticleScenario, spawns: &[Vec<u32>]) -> serd
     )
 }
 
-/// The particle scenarios: Bevy + bevy_hanabi as the reference; render-engine's side is not
-/// implemented yet (#13), so each scenario is reported as a known gap and does not fail the run.
-fn particle_scenarios(o: &Options) -> (Vec<serde_json::Value>, bool) {
+/// What render-engine's side of a particle scenario produced.
+struct EngineParticles {
+    plate: Vec<u8>,
+    /// `(simulation frame, RGBA8)` per capture.
+    captures: Vec<(u32, Vec<u8>)>,
+    /// Per emitter and simulation frame: the spawner's count and the alive particles after it.
+    spawn_counts: Vec<Vec<u32>>,
+    alive: Vec<Vec<u32>>,
+    /// The state after the last capture, for GPU timing.
+    world: render_engine::world::World,
+    viewport: Viewport,
+}
+
+/// Runs a particle scenario on render-engine at `particles::DT`. The emitters are added before
+/// the first step, like hanabi compiling them on update 1, and stepped inactive until Bevy's
+/// first spawn update, so both sides' seed chains are at the same link when spawning starts.
+fn run_engine_particles(
+    gpu: &Headless,
+    s: &particles::ParticleScenario,
+    first_spawn_update: u32,
+) -> Result<EngineParticles, String> {
+    let mut world = render_engine::world::World::new(gpu.renderer());
+    let emitters: Vec<_> = s
+        .emitters
+        .iter()
+        .enumerate()
+        .map(|(i, e)| {
+            let desc = e.engine(s.seed.wrapping_add(i as u32));
+            (world.add_emitter(&desc), desc)
+        })
+        .collect();
+    let scene = s.scene();
+    let mut viewport = Viewport::new(gpu.renderer(), s.width, s.height);
+    let plate = gpu
+        .render(&mut viewport, &world, &scene, &[])
+        .map_err(|e| e.to_string())?
+        .rgba;
+    for _ in 1..first_spawn_update {
+        world.step_particles(particles::DT);
+    }
+    for (id, desc) in &emitters {
+        world.set_emitter(
+            *id,
+            &render_engine::particles::Emitter {
+                active: true,
+                ..desc.clone()
+            },
+        );
+    }
+    let last = s.captures.iter().map(|c| c.frame).max().unwrap_or(0);
+    let mut out = EngineParticles {
+        plate,
+        captures: Vec::new(),
+        spawn_counts: vec![Vec::new(); emitters.len()],
+        alive: vec![Vec::new(); emitters.len()],
+        world,
+        viewport,
+    };
+    for frame in 1..=last {
+        out.world.step_particles(particles::DT);
+        for (i, (id, _)) in emitters.iter().enumerate() {
+            let stats = out.world.emitter_stats(*id);
+            out.spawn_counts[i].push(stats.spawn_count);
+            out.alive[i].push(stats.alive);
+        }
+        if s.captures.iter().any(|c| c.frame == frame) {
+            let f = gpu
+                .render(&mut out.viewport, &out.world, &scene, &[])
+                .map_err(|e| e.to_string())?;
+            out.captures.push((frame, f.rgba));
+        }
+    }
+    Ok(out)
+}
+
+/// The particle scenarios: Bevy + bevy_hanabi as the reference, render-engine's emitters
+/// against it. Each capture is judged by its tier (D9), every frame by the spawn and alive
+/// counts, and on a hardware adapter the frame by GPU time.
+fn particle_scenarios(
+    o: &Options,
+    gpu: &Headless,
+    gate_timing: bool,
+) -> (Vec<serde_json::Value>, bool) {
     let mut report = Vec::new();
     let mut failed = false;
     for s in particles::all()
@@ -239,32 +318,146 @@ fn particle_scenarios(o: &Options) -> (Vec<serde_json::Value>, bool) {
                 continue;
             }
         };
+        let mut ours = match run_engine_particles(gpu, s, run.first_spawn_update) {
+            Ok(r) => r,
+            Err(e) => {
+                println!(
+                    "{:<24} {:<20} render-engine failed: {e}",
+                    s.name, "particles"
+                );
+                failed = true;
+                continue;
+            }
+        };
         let population = population_json(s, &run.spawns);
-        for c in &s.captures {
-            let alive: u32 = s
-                .emitters
+        // Same spawner counts, and the alive counts the spawns and lifetimes imply.
+        let population_ok = s.emitters.iter().enumerate().all(|(i, e)| {
+            let expected: Vec<u32> = particles::population(&run.spawns[i], e.lifetime, e.capacity)
                 .iter()
-                .zip(&run.spawns)
-                .map(|(e, sp)| {
-                    particles::population(sp, e.lifetime, e.capacity)
-                        .get(c.frame as usize - 1)
-                        .map_or(0, |p| p.alive)
-                })
-                .sum();
+                .map(|p| p.alive)
+                .collect();
+            ours.spawn_counts[i] == run.spawns[i] && ours.alive[i] == expected
+        });
+        let write = |name: String, rgba: &[u8]| {
+            if let Err(e) = save_png(&o.out.join(&name), s.width, s.height, rgba) {
+                eprintln!("cannot write {name}: {e}");
+            }
+        };
+        write(format!("{}.plate.engine.png", s.name), &ours.plate);
+
+        // GPU time of the frame after the last capture; Bevy's is the median over its run.
+        let mut engine_rounds = Vec::new();
+        while o.timing && engine_rounds.len() < (TIMING_ROUNDS + RETRIES) as usize {
+            engine_rounds.push(
+                gpu.gpu_frame_times(
+                    &mut ours.viewport,
+                    &ours.world,
+                    &s.scene(),
+                    &[],
+                    o.frames as usize,
+                )
+                .ok()
+                .and_then(|t| median(&t)),
+            );
+            if !gate_timing {
+                break;
+            }
+        }
+        let engine_ms = fastest(&engine_rounds);
+        let bevy_ms = if o.timing { median(&run.gpu_ms) } else { None };
+        let slow = matches!((engine_ms, bevy_ms), (Some(e), Some(b)) if e > b * GPU_MARGIN);
+        let timing_missing = gate_timing && (engine_ms.is_none() || bevy_ms.is_none());
+        let fmt = |v: Option<f64>| v.map_or("-".to_string(), |v| format!("{v:.3}"));
+        let ratio = match (engine_ms, bevy_ms) {
+            (Some(e), Some(b)) => format!("{:.2}", e / b),
+            _ => "-".into(),
+        };
+
+        let mut captures = Vec::new();
+        let mut images_ok = true;
+        for c in &s.captures {
+            let (Some((_, bevy)), Some((_, engine))) = (
+                run.captures.iter().find(|(f, _)| *f == c.frame),
+                ours.captures.iter().find(|(f, _)| *f == c.frame),
+            ) else {
+                println!("{:<24} missing capture at frame {}", s.name, c.frame);
+                images_ok = false;
+                continue;
+            };
+            let cmp = compare_particles(
+                s,
+                c.tier,
+                (run.plate.as_deref().unwrap_or_default(), bevy),
+                (&ours.plate, engine),
+            );
+            images_ok &= cmp.passed;
+            let stem = format!("{}.{}", s.name, c.label());
+            write(format!("{stem}.engine.png"), engine);
+            write(format!("{stem}.flip.png"), &cmp.flip.heatmap);
+            let alive: u32 = ours.alive.iter().map(|a| a[c.frame as usize - 1]).sum();
+            let result = if !cmp.passed {
+                match c.tier {
+                    particles::Tier::Exact => format!(
+                        "IMAGE DIFFERS (FLIP mean > {FLIP_MEAN_MAX} or p99 > {FLIP_P99_MAX})"
+                    ),
+                    particles::Tier::Statistical => "STATISTICS DIFFER".to_string(),
+                }
+            } else if !population_ok {
+                "POPULATION DIFFERS".to_string()
+            } else {
+                "ok".to_string()
+            };
             println!(
-                "{:<24} {:<20} {:>9} {:>9} {:>12} {:>12} {:>7}  KNOWN GAP: engine side (#13); t = {:.3} s ({}), Bevy alive {alive}",
+                "{:<24} {:<20} {:>9.4} {:>9.4} {:>12} {:>12} {:>7}  {result}; {} tier, alive {alive}, stats {:.3}/{:.3}/{:.3}",
                 format!("{}@{}", s.name, c.label()),
                 "particles",
-                "-",
-                "-",
-                "-",
-                "-",
-                "-",
-                c.time(),
+                cmp.flip.mean,
+                cmp.flip.p99,
+                fmt(engine_ms),
+                fmt(bevy_ms),
+                ratio,
                 c.tier.id(),
+                cmp.stats.coverage,
+                cmp.stats.spatial,
+                cmp.stats.colour,
             );
+            captures.push(serde_json::json!({
+                "label": c.label(),
+                "frame": c.frame,
+                "time": c.time(),
+                "tier": c.tier.id(),
+                "bevy_coverage": particles::ImageStats::new(
+                    s.width,
+                    s.height,
+                    bevy,
+                    run.plate.as_deref().unwrap_or_default(),
+                ).coverage,
+                "alive": alive,
+                "flip_mean": cmp.flip.mean,
+                "flip_p99": cmp.flip.p99,
+                "stats": {
+                    "coverage": cmp.stats.coverage,
+                    "spatial": cmp.stats.spatial,
+                    "colour": cmp.stats.colour,
+                },
+                "passed": cmp.passed,
+            }));
         }
-        let bevy_ms = median(&run.gpu_ms);
+        let passed = images_ok && population_ok && !timing_missing && !(slow && gate_timing);
+        failed |= !passed;
+        let result = if !images_ok {
+            "image or statistics gate failed".to_string()
+        } else if !population_ok {
+            "spawn or alive counts differ from Bevy".to_string()
+        } else if timing_missing {
+            "NO GPU TIMESTAMPS".to_string()
+        } else if slow && gate_timing {
+            format!("SLOWER THAN BEVY (> {GPU_MARGIN:.2}×)")
+        } else if slow {
+            "ok (slower, advisory)".to_string()
+        } else {
+            "ok".to_string()
+        };
         report.push(serde_json::json!({
             "scenario": s.name,
             "capability": s.capability,
@@ -279,29 +472,15 @@ fn particle_scenarios(o: &Options) -> (Vec<serde_json::Value>, bool) {
                 "colour": s.stat_max.colour,
             },
             "decision": "d9--particle-parity-seeded-replay-then-statistics",
-            "captures": s.captures.iter().zip(&run.captures).map(|(c, (_, rgba))| serde_json::json!({
-                "label": c.label(),
-                "frame": c.frame,
-                "time": c.time(),
-                "tier": c.tier.id(),
-                "bevy_coverage": particles::ImageStats::new(
-                    s.width,
-                    s.height,
-                    rgba,
-                    run.plate.as_deref().unwrap_or_default(),
-                ).coverage,
-                "flip_mean": null,
-                "flip_p99": null,
-                "stats": null,
-                "passed": null,
-            })).collect::<Vec<_>>(),
+            "captures": captures,
             "population": population,
-            "engine_gpu_ms": null,
+            "population_passed": population_ok,
+            "engine_gpu_ms": engine_ms,
             "bevy_gpu_ms": bevy_ms,
+            "timing_rounds": engine_rounds.len(),
             "bevy_spans": run.spans,
-            "known_gap": 13,
-            "result": "known gap: render-engine side not implemented yet (#13)",
-            "passed": null,
+            "result": result,
+            "passed": passed,
         }));
     }
     (report, failed)
@@ -653,7 +832,7 @@ fn main() -> ExitCode {
             "passed": image_ok && !timing_missing && !(slow && gate_timing),
         }));
     }
-    let (particle_report, particles_failed) = particle_scenarios(&o);
+    let (particle_report, particles_failed) = particle_scenarios(&o, &gpu, gate_timing);
     failed |= particles_failed;
     let report = serde_json::json!({
         "adapter": gpu.adapter.name,

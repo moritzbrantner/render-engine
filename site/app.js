@@ -94,17 +94,19 @@ function aliveChart(s) {
 function particleSection(ci) {
   const list = ci.particles || [];
   if (!list.length) return '';
-  const gap = s => s.known_gap ? `<span class="status gap">Known gap: render-engine side (<a href="${REPO}/issues/${s.known_gap}">#${s.known_gap}</a>)</span>` : status(s);
+  const gate = c => c.tier === 'exact'
+    ? `FLIP mean ${fmt(c.flip_mean)}, p99 ${fmt(c.flip_p99)}`
+    : `coverage ${fmt(c.stats.coverage)}, spatial ${fmt(c.stats.spatial)}, colour ${fmt(c.stats.colour)}`;
   return `<section class="section" id="particles">
     <h2>Particles</h2>
-    <p>Bevy with <code>bevy_hanabi</code> at a fixed 1/64 s timestep and a fixed seed. A capture taken before any particle dies needs an exact image match (the FLIP gate above). Later captures are compared by coverage, spatial and colour statistics, and the alive count has to match on every frame. <a href="${REPO}/blob/main/docs/technical-decisions.md#d9--particle-parity-seeded-replay-then-statistics">Decision record</a>.</p>
+    <p>Bevy with <code>bevy_hanabi</code> against render-engine's emitters, both at a fixed 1/64 s timestep and a fixed seed. A capture taken before any particle dies needs an exact image match (the FLIP gate above). Later captures are compared by coverage, spatial and colour statistics. The spawn and alive counts have to match on every frame. The images are render-engine's; hover for the FLIP heat map. <a href="${REPO}/blob/main/docs/technical-decisions.md#d9--particle-parity-seeded-replay-then-statistics">Decision record</a>.</p>
     ${list.map(s => `<div class="particle">
-      <header><h3>${esc(s.scenario)}</h3>${gap(s)}</header>
-      <p class="cap">${esc(s.capability)} · seed ${s.seed} · statistics gate: coverage ≤ ${g(s.stat_max.coverage)}, spatial ≤ ${g(s.stat_max.spatial)}, colour ≤ ${g(s.stat_max.colour)}</p>
-      <div class="grid">${s.captures.map(c => `<figure class="card">
-        <div class="thumb"><img loading="lazy" src="oracle/${esc(s.scenario)}.${esc(c.label)}.bevy.png" alt="${esc(s.scenario)} at ${c.time} s, Bevy"></div>
-        <figcaption class="body"><div class="row"><h3>t = ${c.time.toFixed(2)} s</h3><span class="tier">${esc(c.tier)}</span></div>
-        <p class="cap">Bevy coverage ${(c.bevy_coverage * 100).toFixed(2)}% of pixels · frame ${c.frame}</p></figcaption>
+      <header><h3>${esc(s.scenario)}</h3>${status(s)}</header>
+      <p class="cap">${esc(s.capability)} · seed ${s.seed} · statistics gate: coverage ≤ ${g(s.stat_max.coverage)}, spatial ≤ ${g(s.stat_max.spatial)}, colour ≤ ${g(s.stat_max.colour)} · spawn and alive counts ${s.population_passed ? 'match' : 'differ'}</p>
+      <div class="grid">${s.captures.map(c => `<figure class="card" tabindex="0">
+        <div class="thumb"><img loading="lazy" src="oracle/${esc(s.scenario)}.${esc(c.label)}.engine.png" alt="${esc(s.scenario)} at ${c.time} s, render-engine"><img class="heat" loading="lazy" src="oracle/${esc(s.scenario)}.${esc(c.label)}.flip.png" alt=""></div>
+        <figcaption class="body"><div class="row"><h3>t = ${c.time.toFixed(2)} s</h3><span class="tier">${esc(c.tier)}</span>${status(c)}</div>
+        <p class="cap">${gate(c)} · ${c.alive} alive · frame ${c.frame} · <a href="oracle/${esc(s.scenario)}.${esc(c.label)}.bevy.png">Bevy image</a></p></figcaption>
       </figure>`).join('')}</div>
       ${aliveChart(s)}
     </div>`).join('')}

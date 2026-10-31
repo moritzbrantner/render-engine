@@ -124,7 +124,6 @@ img { display: block; max-width: 100%; height: auto; }
 .row { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 
 /* Particle scenarios: Bevy captures and the alive-count chart */
-.status.gap { color: var(--muted); }
 .particle { padding: 8px 0 18px; }
 .particle > header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; }
 .particle > header h3 { margin: 0; font-size: 20px; font-weight: 700; }
