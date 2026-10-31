@@ -1,5 +1,5 @@
 {
-  "commit": "e34c60ea24a1608d6bc7596179fea029ab4797d3",
+  "commit": "f29d28ca905c8f3bf01d4c49efb5c2c6ad201ca7",
   "date": "2026-10-31",
   "adapter": "NVIDIA GeForce RTX 3060 Ti",
   "features": [
@@ -67,6 +67,14 @@
       "prs": [
         30
       ]
+    },
+    {
+      "decision": "d5--pinned-bevy-configuration-per-scenario",
+      "id": "skinning",
+      "label": "Skinning",
+      "prs": [
+        36
+      ]
     }
   ],
   "flip_mean_max": 0.004999999888241291,
@@ -76,8 +84,8 @@
   "gpu_margin": 1.1,
   "particles": [
     {
-      "bevy_gpu_ms": 0.16588799999999998,
-      "bevy_sim_ms": 0.03584,
+      "bevy_gpu_ms": 0.17407999999999998,
+      "bevy_sim_ms": 0.037888,
       "bevy_spans": [
         "render/tonemapping/elapsed_gpu",
         "render/upscaling/elapsed_gpu",
@@ -128,8 +136,8 @@
       ],
       "decision": "d9--particle-parity-seeded-replay-then-statistics",
       "dt": 0.015625,
-      "engine_gpu_ms": 0.077568,
-      "engine_sim_ms": 0.015392,
+      "engine_gpu_ms": 0.076672,
+      "engine_sim_ms": 0.015328,
       "feature": "particles",
       "height": 720,
       "passed": true,
@@ -1198,8 +1206,8 @@
       "width": 1280
     },
     {
-      "bevy_gpu_ms": 0.815104,
-      "bevy_sim_ms": 0.575488,
+      "bevy_gpu_ms": 0.8191999999999999,
+      "bevy_sim_ms": 0.579584,
       "bevy_spans": [
         "render/tonemapping/elapsed_gpu",
         "render/upscaling/elapsed_gpu",
@@ -1218,15 +1226,15 @@
         {
           "alive": 40800,
           "bevy_coverage": 0.04264214262366295,
-          "flip_mean": 0.00013915961608290672,
-          "flip_p99": 0.003655783599242568,
+          "flip_mean": 0.00014043727423995733,
+          "flip_p99": 0.003669816767796874,
           "frame": 48,
           "label": "t0750",
           "passed": true,
           "stats": {
-            "colour": 0.00022173026809468865,
+            "colour": 0.0002700435579754412,
             "coverage": 0.000025422255930607207,
-            "spatial": 0.00003076566645177081
+            "spatial": 0.000031184103136183694
           },
           "tier": "exact",
           "time": 0.75
@@ -1234,15 +1242,15 @@
         {
           "alive": 104750,
           "bevy_coverage": 0.09495117515325546,
-          "flip_mean": 0.00021795931388624012,
-          "flip_p99": 0.005536411888897419,
+          "flip_mean": 0.00021937901328783482,
+          "flip_p99": 0.00557680893689394,
           "frame": 192,
           "label": "t3000",
           "passed": true,
           "stats": {
-            "colour": 0.00012619519839063287,
+            "colour": 0.00013698177644982934,
             "coverage": 0.000022912507120054215,
-            "spatial": 0.00001437253740732558
+            "spatial": 0.000015713198081357405
           },
           "tier": "statistical",
           "time": 3.0
@@ -1250,8 +1258,8 @@
       ],
       "decision": "d9--particle-parity-seeded-replay-then-statistics",
       "dt": 0.015625,
-      "engine_gpu_ms": 0.286368,
-      "engine_sim_ms": 0.09776,
+      "engine_gpu_ms": 0.285824,
+      "engine_sim_ms": 0.097472,
       "feature": "particles",
       "height": 720,
       "passed": true,
@@ -41101,8 +41109,8 @@
       "width": 1280
     },
     {
-      "bevy_gpu_ms": 0.201728,
-      "bevy_sim_ms": 0.04096,
+      "bevy_gpu_ms": 0.20377599999999998,
+      "bevy_sim_ms": 0.041984,
       "bevy_spans": [
         "render/tonemapping/elapsed_gpu",
         "render/upscaling/elapsed_gpu",
@@ -41121,31 +41129,31 @@
         {
           "alive": 512,
           "bevy_coverage": 0.03943033888936043,
-          "flip_mean": 0.0010387542424723506,
-          "flip_p99": 0.03860542178153992,
+          "flip_mean": 0.0009448706405237317,
+          "flip_p99": 0.03658969700336456,
           "frame": 64,
           "label": "t1000",
           "passed": true,
           "stats": {
-            "colour": 0.0020914245396852493,
+            "colour": 0.0061641777865588665,
             "coverage": 0.0,
-            "spatial": 0.004217122681438923
+            "spatial": 0.0019517468754202127
           },
           "tier": "statistical",
           "time": 1.0
         },
         {
           "alive": 1016,
-          "bevy_coverage": 0.11443468183279037,
-          "flip_mean": 0.0017774798907339573,
-          "flip_p99": 0.0397847481071949,
+          "bevy_coverage": 0.11427191644906998,
+          "flip_mean": 0.0018153456039726734,
+          "flip_p99": 0.04076641798019409,
           "frame": 192,
           "label": "t3000",
           "passed": true,
           "stats": {
-            "colour": 0.01793833263218403,
-            "coverage": 0.0015171399572864175,
-            "spatial": 0.0019134709145873785
+            "colour": 0.009926734492182732,
+            "coverage": 0.00017089038738049567,
+            "spatial": 0.0015392228960990906
           },
           "tier": "statistical",
           "time": 3.0
@@ -41153,8 +41161,8 @@
       ],
       "decision": "d9--particle-parity-seeded-replay-then-statistics",
       "dt": 0.015625,
-      "engine_gpu_ms": 0.11136,
-      "engine_sim_ms": 0.015168,
+      "engine_gpu_ms": 0.111872,
+      "engine_sim_ms": 0.015104,
       "feature": "particles",
       "height": 720,
       "passed": true,
@@ -42739,7 +42747,7 @@
     {
       "bevy_gpu_ms": 0.214016,
       "capability": "sun+shadow+ambient",
-      "engine_gpu_ms": 0.115712,
+      "engine_gpu_ms": 0.115616,
       "feature": "shadows",
       "flip_mean": 0.000003844148977805162,
       "flip_p99": 0.0,
@@ -42753,7 +42761,7 @@
     {
       "bevy_gpu_ms": 0.33689600000000003,
       "capability": "sun+cascaded shadows (Gaussian)",
-      "engine_gpu_ms": 0.1832,
+      "engine_gpu_ms": 0.182208,
       "feature": "shadows",
       "flip_mean": 0.0000073305518526467495,
       "flip_p99": 0.00005287070234771818,
@@ -42765,9 +42773,9 @@
       "width": 1280
     },
     {
-      "bevy_gpu_ms": 0.8499199999999999,
+      "bevy_gpu_ms": 0.848896,
       "capability": "frustum culling (camera + cascades)",
-      "engine_gpu_ms": 0.725984,
+      "engine_gpu_ms": 0.790464,
       "feature": "culling",
       "flip_mean": 0.00004026912574772723,
       "flip_p99": 0.000672797323204577,
@@ -42779,9 +42787,9 @@
       "width": 1280
     },
     {
-      "bevy_gpu_ms": 0.214016,
+      "bevy_gpu_ms": 0.21504,
       "capability": "HDR + tone mapping",
-      "engine_gpu_ms": 0.116672,
+      "engine_gpu_ms": 0.115712,
       "feature": "tonemap",
       "flip_mean": 0.0000028582992399606155,
       "flip_p99": 0.0,
@@ -42793,7 +42801,7 @@
       "width": 1280
     },
     {
-      "bevy_gpu_ms": 0.21504,
+      "bevy_gpu_ms": 0.214016,
       "capability": "HDR + tone mapping",
       "engine_gpu_ms": 0.116736,
       "feature": "tonemap",
@@ -42809,7 +42817,7 @@
     {
       "bevy_gpu_ms": 0.214016,
       "capability": "HDR + tone mapping",
-      "engine_gpu_ms": 0.116576,
+      "engine_gpu_ms": 0.115712,
       "feature": "tonemap",
       "flip_mean": 9.370957627652388E-7,
       "flip_p99": 0.0,
@@ -42821,9 +42829,9 @@
       "width": 1280
     },
     {
-      "bevy_gpu_ms": 0.21811199999999997,
+      "bevy_gpu_ms": 0.217088,
       "capability": "HDR + tone mapping",
-      "engine_gpu_ms": 0.120768,
+      "engine_gpu_ms": 0.1208,
       "feature": "tonemap",
       "flip_mean": 0.0000010645352404026198,
       "flip_p99": 0.0,
@@ -42849,9 +42857,9 @@
       "width": 1280
     },
     {
-      "bevy_gpu_ms": 0.33382400000000007,
+      "bevy_gpu_ms": 0.33484800000000003,
       "capability": "IBL + sun + shadow",
-      "engine_gpu_ms": 0.182208,
+      "engine_gpu_ms": 0.182272,
       "feature": "ibl",
       "flip_mean": 0.0000031299989586841548,
       "flip_p99": 0.0,
@@ -42865,7 +42873,7 @@
     {
       "bevy_gpu_ms": 0.33280000000000004,
       "capability": "distance fog",
-      "engine_gpu_ms": 0.177088,
+      "engine_gpu_ms": 0.177024,
       "feature": "fog",
       "flip_mean": 0.0000051014922064496204,
       "flip_p99": 0.00003344588549225591,
@@ -42877,7 +42885,7 @@
       "width": 1280
     },
     {
-      "bevy_gpu_ms": 0.36249599999999993,
+      "bevy_gpu_ms": 0.362496,
       "capability": "distance fog + sun inscattering",
       "engine_gpu_ms": 0.212992,
       "feature": "fog",
@@ -42891,9 +42899,9 @@
       "width": 1280
     },
     {
-      "bevy_gpu_ms": 0.33280000000000004,
+      "bevy_gpu_ms": 0.33484800000000003,
       "capability": "distance fog",
-      "engine_gpu_ms": 0.176032,
+      "engine_gpu_ms": 0.17504,
       "feature": "fog",
       "flip_mean": 0.00000431895614383393,
       "flip_p99": 0.0,
@@ -42905,9 +42913,9 @@
       "width": 1280
     },
     {
-      "bevy_gpu_ms": 0.362496,
+      "bevy_gpu_ms": 0.36147200000000007,
       "capability": "distance fog + sun inscattering",
-      "engine_gpu_ms": 0.21296,
+      "engine_gpu_ms": 0.211936,
       "feature": "fog",
       "flip_mean": 0.00002927388959506061,
       "flip_p99": 0.0006574657163582742,
@@ -42919,9 +42927,9 @@
       "width": 1280
     },
     {
-      "bevy_gpu_ms": 0.33382399999999995,
+      "bevy_gpu_ms": 0.33280000000000004,
       "capability": "distance fog",
-      "engine_gpu_ms": 0.176096,
+      "engine_gpu_ms": 0.17504,
       "feature": "fog",
       "flip_mean": 0.000006067986305424711,
       "flip_p99": 0.000047741050366312265,
@@ -42933,9 +42941,9 @@
       "width": 1280
     },
     {
-      "bevy_gpu_ms": 0.391168,
+      "bevy_gpu_ms": 0.362496,
       "capability": "distance fog + sun inscattering",
-      "engine_gpu_ms": 0.211904,
+      "engine_gpu_ms": 0.211872,
       "feature": "fog",
       "flip_mean": 0.000020094606952625327,
       "flip_p99": 0.00041387349483557045,
@@ -42947,9 +42955,9 @@
       "width": 1280
     },
     {
-      "bevy_gpu_ms": 0.359424,
+      "bevy_gpu_ms": 0.3584,
       "capability": "distance fog",
-      "engine_gpu_ms": 0.176128,
+      "engine_gpu_ms": 0.177056,
       "feature": "fog",
       "flip_mean": 0.000005817691544507397,
       "flip_p99": 0.00003576360541046597,
@@ -42961,9 +42969,9 @@
       "width": 1280
     },
     {
-      "bevy_gpu_ms": 0.365568,
+      "bevy_gpu_ms": 0.36352,
       "capability": "distance fog + sun inscattering",
-      "engine_gpu_ms": 0.21392,
+      "engine_gpu_ms": 0.213952,
       "feature": "fog",
       "flip_mean": 0.000019507893739501014,
       "flip_p99": 0.0003867182822432369,
@@ -42975,9 +42983,9 @@
       "width": 1280
     },
     {
-      "bevy_gpu_ms": 1.083392,
+      "bevy_gpu_ms": 1.01376,
       "capability": "point + spot lights, cube + spot shadows (Gaussian)",
-      "engine_gpu_ms": 0.277312,
+      "engine_gpu_ms": 0.277408,
       "feature": "point_spot",
       "flip_mean": 0.000013872851923224516,
       "flip_p99": 0.0002510654157958925,
@@ -42989,9 +42997,9 @@
       "width": 1280
     },
     {
-      "bevy_gpu_ms": 1.021952,
+      "bevy_gpu_ms": 0.965632,
       "capability": "point + spot lights, cube + spot shadows (2×2 PCF)",
-      "engine_gpu_ms": 0.229248,
+      "engine_gpu_ms": 0.230304,
       "feature": "point_spot",
       "flip_mean": 0.000014701021427754313,
       "flip_p99": 0.00027973687974736094,
@@ -43003,9 +43011,9 @@
       "width": 1280
     },
     {
-      "bevy_gpu_ms": 1.204224,
+      "bevy_gpu_ms": 1.1304959999999995,
       "capability": "point + spot lights, soft shadows (PCSS)",
-      "engine_gpu_ms": 0.416768,
+      "engine_gpu_ms": 0.427008,
       "feature": "point_spot",
       "flip_mean": 0.00003860933429677971,
       "flip_p99": 0.0008670188253745437,
@@ -43017,9 +43025,9 @@
       "width": 1280
     },
     {
-      "bevy_gpu_ms": 2.594816,
+      "bevy_gpu_ms": 0.666624,
       "capability": "consumer meshes + textured StandardMaterial",
-      "engine_gpu_ms": 0.32448,
+      "engine_gpu_ms": 0.325568,
       "feature": "textured_props",
       "flip_mean": 0.000032528281735721976,
       "flip_p99": 0.0006694167386740446,
@@ -43031,9 +43039,23 @@
       "width": 1280
     },
     {
-      "bevy_gpu_ms": 2.727936,
+      "bevy_gpu_ms": 0.4229119999999999,
+      "capability": "GPU skinning (SkinnedMesh)",
+      "engine_gpu_ms": 0.191456,
+      "feature": "skinning",
+      "flip_mean": 0.000012713559954136144,
+      "flip_p99": 0.0001917583285830915,
+      "height": 720,
+      "passed": true,
+      "result": "ok",
+      "scenario": "skinned_figure",
+      "timing_rounds": 2,
+      "width": 1280
+    },
+    {
+      "bevy_gpu_ms": 1.5964159999999998,
       "capability": "time-of-day sky (atmosphere)",
-      "engine_gpu_ms": 1.178272,
+      "engine_gpu_ms": 1.163648,
       "feature": "sky",
       "flip_mean": 0.0000991180568234995,
       "flip_p99": 0.00245389761403203,
@@ -43045,9 +43067,9 @@
       "width": 1280
     },
     {
-      "bevy_gpu_ms": 2.768896,
+      "bevy_gpu_ms": 1.5933440000000003,
       "capability": "time-of-day sky (atmosphere)",
-      "engine_gpu_ms": 1.16336,
+      "engine_gpu_ms": 1.166336,
       "feature": "sky",
       "flip_mean": 0.00009231853618985042,
       "flip_p99": 0.0020879250951111317,
@@ -43059,9 +43081,9 @@
       "width": 1280
     },
     {
-      "bevy_gpu_ms": 1.5718399999999997,
+      "bevy_gpu_ms": 1.5697920000000003,
       "capability": "time-of-day sky (atmosphere)",
-      "engine_gpu_ms": 1.1448,
+      "engine_gpu_ms": 1.154336,
       "feature": "sky",
       "flip_mean": 0.00011326350067975,
       "flip_p99": 0.0027030447963625193,
@@ -43073,9 +43095,9 @@
       "width": 1280
     },
     {
-      "bevy_gpu_ms": 1.66912,
+      "bevy_gpu_ms": 1.6701439999999996,
       "capability": "time-of-day sky (atmosphere)",
-      "engine_gpu_ms": 1.259136,
+      "engine_gpu_ms": 1.268896,
       "feature": "sky",
       "flip_mean": 0.0001303602330153808,
       "flip_p99": 0.003350399900227785,
