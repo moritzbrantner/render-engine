@@ -9,7 +9,10 @@
 //! perspective into the HDR frame; the main pass reads the transmittance LUT to filter the
 //! sun and moon light.
 
-use crate::scene::{Camera, Scene, Sky};
+use crate::{
+    renderer::Stamps,
+    scene::{Camera, Scene, Sky},
+};
 use bytemuck::{Pod, Zeroable};
 use glam::{Affine3A, Mat4, Quat, UVec2, Vec3, Vec3A, Vec4};
 
@@ -1192,21 +1195,21 @@ impl SkyTargets {
         }
     }
 
-    /// Records the LUT passes and, with sky ambient light, the environment cubes. The first
-    /// pass starts the frame's timestamps when `start` is given.
+    /// The compute passes [`Self::encode_luts`] records.
+    pub fn compute_passes(&self) -> u32 {
+        1 + u32::from(self.environment)
+    }
+
+    /// Records the LUT passes and, with sky ambient light, the environment cubes.
     pub fn encode_luts(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         p: &SkyPipelines,
-        start: Option<&wgpu::QuerySet>,
+        stamps: &Stamps<'_>,
     ) {
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("atmosphere luts"),
-            timestamp_writes: start.map(|query_set| wgpu::ComputePassTimestampWrites {
-                query_set,
-                beginning_of_pass_write_index: Some(0),
-                end_of_pass_write_index: None,
-            }),
+            timestamp_writes: stamps.compute(),
         });
         let groups_2d = |size: UVec2| (size.x.div_ceil(16), size.y.div_ceil(16));
         pass.set_pipeline(&p.transmittance);
@@ -1231,7 +1234,7 @@ impl SkyTargets {
         }
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("sky environment"),
-            timestamp_writes: None,
+            timestamp_writes: stamps.compute(),
         });
         pass.set_pipeline(&p.environment);
         pass.set_bind_group(0, &self.environment_group, &[]);

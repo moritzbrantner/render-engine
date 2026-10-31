@@ -399,48 +399,64 @@ pub fn run(scenario: Scenario, timed_frames: u32) -> BevyRun {
                 .iter()
                 .map(|t| images.add(texture_image(t)))
                 .collect();
+            // Shapes and materials are shared between objects, as a game shares its handles.
+            let mut shapes = std::collections::HashMap::new();
+            let mut shared_materials = std::collections::HashMap::new();
             for m in &objects {
                 let mesh = match m.geometry {
                     Geometry::Mesh(i) => mesh_handles[i].clone(),
-                    Geometry::Shape(Shape::Cuboid(size)) => {
-                        meshes.add(Cuboid::new(size.x, size.y, size.z))
-                    }
-                    Geometry::Shape(Shape::Plane(size)) => {
-                        meshes.add(Plane3d::default().mesh().size(size.x, size.y))
-                    }
-                    Geometry::Shape(Shape::Sphere {
-                        radius,
-                        sectors,
-                        stacks,
-                    }) => meshes.add(Sphere::new(radius).mesh().uv(sectors, stacks)),
+                    Geometry::Shape(shape) => shapes
+                        .entry(format!("{shape:?}"))
+                        .or_insert_with(|| match shape {
+                            Shape::Cuboid(size) => meshes.add(Cuboid::new(size.x, size.y, size.z)),
+                            Shape::Plane(size) => {
+                                meshes.add(Plane3d::default().mesh().size(size.x, size.y))
+                            }
+                            Shape::Sphere {
+                                radius,
+                                sectors,
+                                stacks,
+                            } => meshes.add(Sphere::new(radius).mesh().uv(sectors, stacks)),
+                        })
+                        .clone(),
                 };
                 let mat = m.material;
                 let texture = |i: Option<usize>| i.map(|i| image_handles[i].clone());
                 let c = mat.base_color;
+                let material = shared_materials
+                    .entry(format!("{mat:?}"))
+                    .or_insert_with(|| {
+                        materials.add(StandardMaterial {
+                            base_color: Color::linear_rgba(c.x, c.y, c.z, mat.alpha),
+                            base_color_texture: texture(mat.base_color_texture),
+                            emissive: LinearRgba::rgb(
+                                mat.emissive.x,
+                                mat.emissive.y,
+                                mat.emissive.z,
+                            ),
+                            emissive_texture: texture(mat.emissive_texture),
+                            metallic: mat.metallic,
+                            perceptual_roughness: mat.perceptual_roughness,
+                            metallic_roughness_texture: texture(mat.metallic_roughness_texture),
+                            reflectance: mat.reflectance,
+                            normal_map_texture: texture(mat.normal_map_texture),
+                            occlusion_texture: texture(mat.occlusion_texture),
+                            alpha_mode: match mat.alpha_mode {
+                                EngineAlphaMode::Opaque => AlphaMode::Opaque,
+                                EngineAlphaMode::Mask(cutoff) => AlphaMode::Mask(cutoff),
+                                EngineAlphaMode::Blend => AlphaMode::Blend,
+                            },
+                            double_sided: mat.double_sided,
+                            // What Bevy's glTF loader sets for `doubleSided`.
+                            cull_mode: (!mat.double_sided).then_some(Face::Back),
+                            unlit: mat.unlit,
+                            ..default()
+                        })
+                    })
+                    .clone();
                 commands.spawn((
                     Mesh3d(mesh),
-                    MeshMaterial3d(materials.add(StandardMaterial {
-                        base_color: Color::linear_rgba(c.x, c.y, c.z, mat.alpha),
-                        base_color_texture: texture(mat.base_color_texture),
-                        emissive: LinearRgba::rgb(mat.emissive.x, mat.emissive.y, mat.emissive.z),
-                        emissive_texture: texture(mat.emissive_texture),
-                        metallic: mat.metallic,
-                        perceptual_roughness: mat.perceptual_roughness,
-                        metallic_roughness_texture: texture(mat.metallic_roughness_texture),
-                        reflectance: mat.reflectance,
-                        normal_map_texture: texture(mat.normal_map_texture),
-                        occlusion_texture: texture(mat.occlusion_texture),
-                        alpha_mode: match mat.alpha_mode {
-                            EngineAlphaMode::Opaque => AlphaMode::Opaque,
-                            EngineAlphaMode::Mask(cutoff) => AlphaMode::Mask(cutoff),
-                            EngineAlphaMode::Blend => AlphaMode::Blend,
-                        },
-                        double_sided: mat.double_sided,
-                        // What Bevy's glTF loader sets for `doubleSided`.
-                        cull_mode: (!mat.double_sided).then_some(Face::Back),
-                        unlit: mat.unlit,
-                        ..default()
-                    })),
+                    MeshMaterial3d(material),
                     Transform {
                         translation: v3(m.translation),
                         rotation: Quat::from_array(m.rotation.to_array()),
@@ -497,9 +513,17 @@ fn drive(
             if parts.len() == 3
                 && parts[0] == "render"
                 && parts[2] == "elapsed_gpu"
-                && let Some(ms) = d.measurement()
+                && let Some(latest) = d.measurement()
             {
-                total += ms.value;
+                // Spans that share a name in one frame (the early and the late
+                // `per_view_shadow_pass`) arrive as several measurements stamped with the same
+                // sync time; `measurement()` alone would keep only the last of them.
+                let ms: f64 = d
+                    .measurements()
+                    .filter(|m| m.time == latest.time)
+                    .map(|m| m.value)
+                    .sum();
+                total += ms;
                 spans.push(path.to_string());
             }
         }

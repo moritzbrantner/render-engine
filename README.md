@@ -27,10 +27,13 @@ and GPU frame time. See [technical decisions](docs/technical-decisions.md).
   exponential squared, atmospheric, with shadowed sun inscattering). Point and spot lights
   (Bevy's range window, sphere-light specular and cone falloff) in a plain forward loop, with
   cube-map shadows for point lights and perspective maps for spot lights, filtered like the
-  sun's or with soft shadows (PCSS). Same wgpu major as the mmorpg native client.
+  sun's or with soft shadows (PCSS). Bevy's frustum culling for the camera and every shadow
+  view, so each pass only draws the instances it can see. Same wgpu major as the mmorpg native
+  client.
 - **Bevy as oracle:** `oracle/` renders every parity scenario on Bevy (`bevy_pbr`) and on
   render-engine, headless. It fails when mean FLIP > 0.005 or p99 FLIP > 0.05, or — on a GPU —
-  when render-engine's median GPU frame time is more than 10% slower than Bevy's.
+  when render-engine's GPU frame time (median of its fastest timing round) is more than 10%
+  slower than Bevy's.
 - **CI without a GPU:** CI renders both sides on lavapipe (software Vulkan); the image gate is
   enforced there, GPU time is advisory. Locally on a GPU both gates apply.
 - **Report site:** <https://moritzbrantner.github.io/render-engine/>, published from CI on

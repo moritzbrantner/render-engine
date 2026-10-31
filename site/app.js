@@ -126,7 +126,7 @@ export function renderIndex({ ci, gpu, build }) {
     </section>`).join('')}
     <section class="section" id="gpu-time">
       <h2>GPU time</h2>
-      <p>Median GPU frame time over ${gpu?.frames ?? 200} frames per side; the gate is ${(gpu?.gpu_margin ?? ci.gpu_margin).toFixed(2)}× Bevy, marked on each bar. Measured locally on ${esc(gpu?.adapter ?? 'the RTX 3060 Ti')}. CI has no GPU, so these numbers come from the latest committed local run, not from the CI run that built this page.</p>
+      <p>GPU frame time (the sum of the frame's pass spans, on both sides): the median over ${gpu?.frames ?? 200} frames of each side's fastest timing round, rounds alternating between Bevy and render-engine; the gate is ${(gpu?.gpu_margin ?? ci.gpu_margin).toFixed(2)}× Bevy, marked on each bar. Measured locally on ${esc(gpu?.adapter ?? 'the RTX 3060 Ti')}. CI has no GPU, so these numbers come from the latest committed local run, not from the CI run that built this page.</p>
       ${gpuTable(gpu)}
     </section>
     <footer>${runInfo(build, gpu)} <a href="${REPO}">Source</a>.</footer>

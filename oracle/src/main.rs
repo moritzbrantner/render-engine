@@ -1,8 +1,12 @@
 //! Bevy oracle (technical decisions D4). For every parity scenario it renders the scene on Bevy
 //! and on render-engine headless, compares the images with NVIDIA FLIP and compares GPU frame
 //! time. It fails when the mean FLIP error exceeds `FLIP_MEAN_MAX` or its 99th percentile exceeds
-//! `FLIP_P99_MAX`, or — on a hardware adapter — when render-engine's median GPU frame time is
-//! more than `GPU_MARGIN` × Bevy's.
+//! `FLIP_P99_MAX`, or — on a hardware adapter — when render-engine's GPU frame time is more than
+//! `GPU_MARGIN` × Bevy's.
+//!
+//! GPU frame time is the sum of a frame's pass spans on both sides (Bevy's top-level render
+//! diagnostic spans; our per-pass timestamps), measured in alternating rounds, each side's time
+//! being its fastest round's median frame.
 //!
 //! CI runs it on a software adapter (`WGPU_FORCE_FALLBACK_ADAPTER=1`, lavapipe): the image gate is
 //! enforced there, GPU times are printed as advisory. Locally on a GPU both gates apply.
@@ -28,8 +32,12 @@ const FLIP_MEAN_MAX: f32 = 0.005;
 const FLIP_P99_MAX: f32 = 0.05;
 /// render-engine may be at most this much slower than Bevy (median GPU ms per frame).
 const GPU_MARGIN: f64 = 1.10;
-/// Frames timed per side.
-const TIMED_FRAMES: u32 = 200;
+/// Frames timed per side and round.
+const TIMED_FRAMES: u32 = 300;
+/// Timing rounds per scenario on a hardware adapter (each side once per round, alternating).
+const TIMING_ROUNDS: u32 = 2;
+/// Extra rounds for a scenario still over the margin before it fails.
+const RETRIES: u32 = 2;
 
 struct Options {
     only: Vec<String>,
@@ -71,10 +79,16 @@ fn options() -> Result<Options, String> {
     Ok(o)
 }
 
-fn median(mut v: Vec<f64>) -> Option<f64> {
+/// The fastest of several rounds' medians.
+fn fastest(rounds: &[Option<f64>]) -> Option<f64> {
+    rounds.iter().flatten().copied().reduce(f64::min)
+}
+
+fn median(v: &[f64]) -> Option<f64> {
     if v.is_empty() {
         return None;
     }
+    let mut v = v.to_vec();
     v.sort_by(f64::total_cmp);
     Some(v[v.len() / 2])
 }
@@ -252,25 +266,47 @@ fn main() -> ExitCode {
             }
         }
 
-        let engine_ms = if o.timing {
-            gpu.gpu_frame_times(
-                &mut viewport,
-                &world,
-                &s.scene,
-                &instances,
-                o.frames as usize,
-            )
-            .ok()
-            .and_then(median)
+        // GPU time, in rounds: Bevy (the child above), then ours, then again. Each side's time
+        // is its fastest round's median: other work on a shared GPU and a GPU that dropped to
+        // a lower power state only ever slow a round down. A scenario still over the margin
+        // gets up to `RETRIES` more rounds before it fails.
+        let mut bevy_rounds = vec![median(&bevy_ms)];
+        let mut engine_rounds = Vec::new();
+        let is_slow = |e: Option<f64>, b: Option<f64>| matches!((e, b), (Some(e), Some(b)) if e > b * GPU_MARGIN);
+        while o.timing && engine_rounds.len() < (TIMING_ROUNDS + RETRIES) as usize {
+            engine_rounds.push(
+                gpu.gpu_frame_times(
+                    &mut viewport,
+                    &world,
+                    &s.scene,
+                    &instances,
+                    o.frames as usize,
+                )
+                .ok()
+                .and_then(|t| median(&t)),
+            );
+            let n = engine_rounds.len() as u32;
+            let more = gate_timing
+                && (n < TIMING_ROUNDS
+                    || (n < TIMING_ROUNDS + RETRIES
+                        && is_slow(fastest(&engine_rounds), fastest(&bevy_rounds))));
+            if !more {
+                break;
+            }
+            match bevy_side::run_in_child(s.name, &o.out, frames) {
+                Ok((_, ms, _)) => bevy_rounds.push(median(&ms)),
+                Err(_) => break,
+            }
+        }
+        let rounds = engine_rounds.len();
+        let engine_ms = fastest(&engine_rounds);
+        let bevy_ms = if o.timing {
+            fastest(&bevy_rounds)
         } else {
             None
         };
-        let bevy_ms = if o.timing { median(bevy_ms) } else { None };
         let image_ok = f.mean <= FLIP_MEAN_MAX && f.p99 <= FLIP_P99_MAX;
-        let slow = match (engine_ms, bevy_ms) {
-            (Some(e), Some(b)) => e > b * GPU_MARGIN,
-            _ => false,
-        };
+        let slow = is_slow(engine_ms, bevy_ms);
         let timing_missing = gate_timing && (engine_ms.is_none() || bevy_ms.is_none());
         let result = if !image_ok {
             format!("IMAGE DIFFERS (FLIP mean > {FLIP_MEAN_MAX} or p99 > {FLIP_P99_MAX})")
@@ -309,6 +345,7 @@ fn main() -> ExitCode {
             "flip_p99": f.p99,
             "engine_gpu_ms": engine_ms,
             "bevy_gpu_ms": bevy_ms,
+            "timing_rounds": rounds,
             "bevy_spans": spans,
             "result": result,
             "passed": image_ok && !timing_missing && !(slow && gate_timing),

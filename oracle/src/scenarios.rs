@@ -37,10 +37,11 @@ pub enum Feature {
     PointSpot,
     TexturedProps,
     Sky,
+    Culling,
 }
 
 impl Feature {
-    pub const ALL: [Feature; 7] = [
+    pub const ALL: [Feature; 8] = [
         Feature::Shadows,
         Feature::Tonemap,
         Feature::Ibl,
@@ -48,6 +49,7 @@ impl Feature {
         Feature::PointSpot,
         Feature::TexturedProps,
         Feature::Sky,
+        Feature::Culling,
     ];
 
     pub fn id(self) -> &'static str {
@@ -59,6 +61,7 @@ impl Feature {
             Feature::PointSpot => "point_spot",
             Feature::TexturedProps => "textured_props",
             Feature::Sky => "sky",
+            Feature::Culling => "culling",
         }
     }
 
@@ -71,6 +74,7 @@ impl Feature {
             Feature::PointSpot => "Point / spot",
             Feature::TexturedProps => "Textured props",
             Feature::Sky => "Sky",
+            Feature::Culling => "Culling",
         }
     }
 
@@ -84,6 +88,7 @@ impl Feature {
             Feature::PointSpot => &[24],
             Feature::TexturedProps => &[25],
             Feature::Sky => &[26],
+            Feature::Culling => &[30],
         }
     }
 
@@ -95,7 +100,7 @@ impl Feature {
 }
 
 pub fn all() -> Vec<Scenario> {
-    let mut all = vec![sun_shadows(), sun_cascades()];
+    let mut all = vec![sun_shadows(), sun_cascades(), many_instances()];
     all.extend(tonemap_range());
     all.extend(ibl_materials());
     all.extend(fog_modes());
@@ -855,6 +860,71 @@ fn sun_shadows() -> Scenario {
             moon: None,
             sky: None,
         },
+    }
+}
+
+/// `many_instances`: about 22 400 posts, crates and stones on a 400 × 350 m field (four shared
+/// materials, like a game's props), lit by a sun with Bevy's default four cascades. The camera
+/// stands near one edge and sees a wedge of it, so most instances lie outside the camera
+/// frustum and many outside every cascade: its GPU time measures frustum culling per view.
+fn many_instances() -> Scenario {
+    let base = sun_cascades();
+    let materials = [
+        rgb(0.62, 0.58, 0.52),
+        rgb(0.45, 0.30, 0.18),
+        rgb(0.70, 0.12, 0.08),
+        rgb(0.12, 0.30, 0.65),
+    ]
+    .map(|base_color| Material {
+        base_color,
+        perceptual_roughness: 0.7,
+        ..Material::default()
+    });
+    let mut objects = vec![MeshInstance::new(
+        Shape::Plane(Vec2::new(400.0, 350.0)),
+        Vec3::new(0.0, 0.0, -165.0),
+        Material {
+            base_color: rgb(0.24, 0.26, 0.20),
+            perceptual_roughness: 0.9,
+            ..Material::default()
+        },
+    )];
+    for row in 0..140 {
+        for column in 0..160 {
+            let (x, z) = (-198.75 + 2.5 * column as f32, 8.75 - 2.5 * row as f32);
+            let k = row * 160 + column;
+            let (shape, y) = match k % 3 {
+                0 => (Shape::Cuboid(Vec3::new(0.3, 1.6, 0.3)), 0.8),
+                1 => (Shape::Cuboid(Vec3::splat(0.9)), 0.45),
+                _ => (
+                    Shape::Sphere {
+                        radius: 0.4,
+                        sectors: 16,
+                        stacks: 8,
+                    },
+                    0.4,
+                ),
+            };
+            objects.push(
+                MeshInstance::new(shape, Vec3::new(x, y, z), materials[k % 4])
+                    .rotated(Quat::from_rotation_y((37.0 * k as f32).to_radians())),
+            );
+        }
+    }
+    Scenario {
+        name: "many_instances",
+        capability: "frustum culling (camera + cascades)",
+        feature: Feature::Culling,
+        objects,
+        scene: Scene {
+            camera: Camera {
+                eye: Vec3::new(0.0, 4.0, 14.0),
+                target: Vec3::new(-6.0, 0.5, -20.0),
+                ..base.scene.camera
+            },
+            ..base.scene
+        },
+        ..base
     }
 }
 

@@ -135,6 +135,10 @@ frame.present();
 
 - **Order of draws.** `prepare` sorts the instances: opaque, then alpha-masked, then blended
   from back to front by instance origin (Bevy's phases). The consumer does not sort them.
+- **Culling.** `prepare` frustum-culls every instance per view (the camera, each sun cascade,
+  spot map and point-light cube face) against its mesh's bounds, which the `World` computes
+  from the positions on `add_mesh`/`set_mesh`. List the whole scene; the engine drops what a
+  view cannot see.
 - **Resize.** Call `viewport.resize(&renderer, width, height)` together with
   `surface.configure`.
 - **Units.** `Scene` uses Bevy's physical units: illuminance in lux, light power in lumens,
@@ -152,7 +156,9 @@ frame.present();
   keeps working because it uses CPU rays (`PickRay`) and does not read the depth buffer.
 - **Headless.** `headless::Headless::render(&mut viewport, &world, &scene, &instances)` runs the
   same `prepare` and `encode` into an offscreen target and reads the pixels back. Tests and the
-  oracle use it.
+  oracle use it. For GPU timing, pass `FrameTimestamps { query_set, first }` to `encode`: it
+  writes a begin and an end timestamp on each pass (`viewport.timestamp_queries()` in all);
+  the frame's GPU time is the sum of the spans.
 
 ## Not covered yet
 

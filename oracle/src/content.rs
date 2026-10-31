@@ -321,8 +321,8 @@ fn texture_data(image: &gltf::image::Data, srgb: bool, sampler: Sampler) -> Text
     }
 }
 
-/// Uploads a scenario's data and objects into a new `World`: each texture and mesh once, one
-/// material per object.
+/// Uploads a scenario's data and objects into a new `World`: each texture, mesh, shape and
+/// distinct material once (the Bevy side shares its handles the same way).
 pub fn upload(
     renderer: &Renderer,
     assets: &Assets,
@@ -336,6 +336,7 @@ pub fn upload(
         .collect();
     let meshes: Vec<_> = assets.meshes.iter().map(|m| world.add_mesh(m)).collect();
     let mut shapes = HashMap::new();
+    let mut materials = HashMap::new();
     let instances = objects
         .iter()
         .map(|o| Instance {
@@ -345,7 +346,9 @@ pub fn upload(
                     .entry(format!("{s:?}"))
                     .or_insert_with(|| world.add_mesh(&MeshData::shape(s))),
             },
-            material: world.add_material(&o.material.engine(&textures)),
+            material: *materials
+                .entry(format!("{:?}", o.material))
+                .or_insert_with(|| world.add_material(&o.material.engine(&textures))),
             world_from_local: o.transform(),
         })
         .collect();

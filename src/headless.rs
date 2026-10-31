@@ -13,6 +13,10 @@ use crate::{
 
 /// The colour format of offscreen frames (tone mapped and sRGB-encoded, like a Bevy image target).
 pub const COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+/// Untimed frames [`Headless::gpu_frame_times`] renders first, so the GPU leaves its idle clocks.
+pub const WARMUP: std::time::Duration = std::time::Duration::from_millis(500);
+/// Frames submitted back to back between timestamp readbacks.
+const BATCH_FRAMES: u32 = 64;
 
 #[derive(Debug)]
 pub enum Error {
@@ -167,8 +171,13 @@ impl Headless {
         })
     }
 
-    /// Renders `frames` frames and returns each frame's GPU time in milliseconds (first pass
-    /// start to last pass end, from timestamp queries).
+    /// Renders `frames` frames and returns each frame's GPU time in milliseconds: the sum of its
+    /// passes' timestamp spans, as Bevy's render diagnostics sum theirs.
+    ///
+    /// Frames are submitted back to back in batches (one submission per frame, as a game does)
+    /// after [`WARMUP`] of untimed frames, so the GPU is at its working clocks. Submitting one
+    /// frame and waiting for it lets an idle GPU drop to a lower power state part-way through a
+    /// run, which made the same scene time 4× slower from one run to the next.
     pub fn gpu_frame_times(
         &self,
         viewport: &mut Viewport,
@@ -184,42 +193,68 @@ impl Headless {
         let (width, height) = viewport.size();
         let target = self.target(width, height);
         let view = target.create_view(&Default::default());
+        let per_frame = viewport.timestamp_queries();
+        let batch = (wgpu::QUERY_SET_MAX_QUERIES / per_frame).clamp(1, BATCH_FRAMES);
+        let count = per_frame * batch;
         let query_set = self.device.create_query_set(&wgpu::QuerySetDescriptor {
             label: Some("frame timestamps"),
             ty: wgpu::QueryType::Timestamp,
-            count: 2,
+            count,
         });
+        let size = u64::from(count) * 8;
         let resolve = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("timestamp resolve"),
-            size: 16,
+            size,
             usage: wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
         let readback = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("timestamp readback"),
-            size: 16,
+            size,
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             mapped_at_creation: false,
         });
+        let frame = |timestamps: Option<FrameTimestamps<'_>>| {
+            let mut encoder = self.device.create_command_encoder(&Default::default());
+            self.renderer
+                .encode(&mut encoder, viewport, world, &view, timestamps);
+            encoder
+        };
+
+        let warmup = std::time::Instant::now();
+        while warmup.elapsed() < WARMUP {
+            for _ in 0..batch {
+                self.queue.submit([frame(None).finish()]);
+            }
+            let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
+        }
+
         let period = f64::from(self.queue.get_timestamp_period());
         let mut times = Vec::with_capacity(frames);
-        for _ in 0..frames {
-            let mut encoder = self.device.create_command_encoder(&Default::default());
-            self.renderer.encode(
-                &mut encoder,
-                viewport,
-                world,
-                &view,
-                Some(FrameTimestamps {
+        while times.len() < frames {
+            let n = batch.min((frames - times.len()) as u32);
+            for f in 0..n {
+                let mut encoder = frame(Some(FrameTimestamps {
                     query_set: &query_set,
-                }),
-            );
-            encoder.resolve_query_set(&query_set, 0..2, &resolve, 0);
-            encoder.copy_buffer_to_buffer(&resolve, 0, &readback, 0, 16);
-            self.queue.submit([encoder.finish()]);
+                    first: f * per_frame,
+                }));
+                if f + 1 == n {
+                    encoder.resolve_query_set(&query_set, 0..n * per_frame, &resolve, 0);
+                    encoder.copy_buffer_to_buffer(&resolve, 0, &readback, 0, size);
+                }
+                self.queue.submit([encoder.finish()]);
+            }
             let bytes = self.read(&readback)?;
-            let ticks: [u64; 2] = bytemuck::pod_read_unaligned(&bytes[..16]);
-            times.push(ticks[1].wrapping_sub(ticks[0]) as f64 * period / 1e6);
+            let ticks: &[u64] = bytemuck::cast_slice(&bytes);
+            for f in ticks.chunks_exact(per_frame as usize).take(n as usize) {
+                let spans: u64 = f
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .map(|[b, e]| e.wrapping_sub(*b))
+                    .sum();
+                times.push(spans as f64 * period / 1e6);
+            }
         }
         Ok(times)
     }

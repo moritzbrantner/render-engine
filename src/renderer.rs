@@ -9,6 +9,7 @@
 //! [`Renderer::encode`] records the passes into the consumer's encoder, ending in its target.
 
 use crate::{
+    cull::{Frustum, Obb},
     material::AlphaMode,
     scene::{Cubemap, FogFalloff, LightShadows, MAX_CASCADES, Scene, ShadowFilter, Tonemapping},
     sky::{SkyPipelines, SkyTargets},
@@ -198,10 +199,47 @@ fn tonemap_index(t: Tonemapping) -> usize {
     }
 }
 
-/// Where a frame writes GPU timestamps: index 0 at the start of the first pass, index 1 at the
-/// end of the last.
+/// Where a frame writes GPU timestamps: a begin and an end query per pass, in pass order from
+/// index `first` on ([`Viewport::timestamp_queries`] of them). Summing the passes' spans gives
+/// the frame's GPU time the way Bevy's render diagnostics sum their top-level spans, without the
+/// gaps between passes where the GPU runs other processes' work.
 pub struct FrameTimestamps<'a> {
     pub query_set: &'a wgpu::QuerySet,
+    pub first: u32,
+}
+
+/// Hands out each pass's pair of timestamp queries.
+pub(crate) struct Stamps<'a> {
+    query_set: Option<&'a wgpu::QuerySet>,
+    next: std::cell::Cell<u32>,
+}
+
+impl<'a> Stamps<'a> {
+    fn pair(&self) -> Option<(&'a wgpu::QuerySet, u32)> {
+        self.query_set.map(|q| {
+            let i = self.next.get();
+            self.next.set(i + 2);
+            (q, i)
+        })
+    }
+
+    fn render(&self) -> Option<wgpu::RenderPassTimestampWrites<'a>> {
+        self.pair()
+            .map(|(query_set, i)| wgpu::RenderPassTimestampWrites {
+                query_set,
+                beginning_of_pass_write_index: Some(i),
+                end_of_pass_write_index: Some(i + 1),
+            })
+    }
+
+    pub(crate) fn compute(&self) -> Option<wgpu::ComputePassTimestampWrites<'a>> {
+        self.pair()
+            .map(|(query_set, i)| wgpu::ComputePassTimestampWrites {
+                query_set,
+                beginning_of_pass_write_index: Some(i),
+                end_of_pass_write_index: Some(i + 1),
+            })
+    }
 }
 
 /// The engine's own render targets for one output size plus the per-frame GPU state (frame
@@ -214,6 +252,8 @@ pub struct Viewport {
     tonemap: Option<(Tonemapping, wgpu::BindGroup)>,
     frame_buffer: wgpu::Buffer,
     instance_buffer: Growable,
+    /// Every view's culled instance indices, one run per draw.
+    visible_buffer: Growable,
     light_buffer: Growable,
     shadow_view_buffer: Growable,
     frame_group: Option<wgpu::BindGroup>,
@@ -227,8 +267,9 @@ pub struct Viewport {
     sky: Option<SkyTargets>,
     /// Every shadow pass in order: sun cascades, spot maps, point-light cube faces.
     shadow_passes: Vec<ShadowPass>,
-    /// Main-pass draws in order; shadow passes draw the same list.
+    /// Every view's draws: the main pass's (`main_draws`), then each shadow pass's.
     draws: Vec<Draw>,
+    main_draws: Range<usize>,
     clear_color: wgpu::Color,
     tonemapping: Tonemapping,
 }
@@ -339,9 +380,17 @@ struct ShadowPass {
     point: bool,
     /// Index of the view's matrix in the shadow-view buffer.
     view: u32,
+    /// The instances the pass keeps after culling.
+    frustum: Frustum,
+    /// A local light's position and range: Bevy first drops casters outside this sphere.
+    sphere: Option<(Vec3, f32)>,
+    /// This pass's range of `Viewport::draws`.
+    draws: Range<usize>,
 }
 
-/// Consecutive instances sharing a pipeline, material and mesh.
+/// Consecutive instances sharing a pipeline, material and mesh: in the sorted instance list
+/// while grouping, then in the visible-index buffer once culled for a view.
+#[derive(Clone)]
 struct Draw {
     face: usize,
     phase: Phase,
@@ -378,6 +427,16 @@ impl Renderer {
                 wgpu::BindGroupLayoutEntry {
                     binding: 1,
                     visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::VERTEX,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
@@ -975,6 +1034,7 @@ impl Renderer {
             material: MaterialId,
             mesh: MeshId,
             view_z: f32,
+            obb: Obb,
             data: InstanceData,
         }
         let mut sorted: Vec<Sorted> = instances
@@ -996,6 +1056,7 @@ impl Renderer {
                     material: inst.material,
                     mesh: inst.mesh,
                     view_z: (view_from_world * m.w_axis).z,
+                    obb: Obb::new(mesh.aabb, m),
                     data: InstanceData {
                         world_from_local: m,
                         normal_from_local: [
@@ -1017,17 +1078,19 @@ impl Renderer {
                 }
             })
         });
-        viewport.draws.clear();
+        // The boxes on their own, compact for the per-view culling loops.
+        let obbs: Vec<Obb> = sorted.iter().map(|s| s.obb).collect();
+        let mut groups: Vec<Draw> = Vec::new();
         for (i, s) in sorted.iter().enumerate() {
             let i = i as u32;
-            match viewport.draws.last_mut() {
+            match groups.last_mut() {
                 Some(d)
                     if (d.phase, d.face, d.material, d.mesh)
                         == (s.phase, s.face, s.material, s.mesh) =>
                 {
                     d.instances.end = i + 1;
                 }
-                _ => viewport.draws.push(Draw {
+                _ => groups.push(Draw {
                     face: s.face,
                     phase: s.phase,
                     mesh: s.mesh,
@@ -1092,26 +1155,87 @@ impl Renderer {
                 layer: i as u32,
                 point: false,
                 view: view_matrices.len() as u32,
+                frustum: Frustum::cascade(c.clip_from_world),
+                sphere: None,
+                draws: 0..0,
             });
             view_matrices.push(c.clip_from_world);
         }
-        for (i, m) in lights.spot_views.iter().enumerate() {
+        let local_views = lights
+            .spot_views
+            .iter()
+            .enumerate()
+            .map(|(i, v)| ((cascades.len() + i) as u32, false, v))
+            .chain(
+                lights
+                    .point_views
+                    .iter()
+                    .enumerate()
+                    .map(|(i, v)| (i as u32, true, v)),
+            );
+        for (layer, point, v) in local_views {
             viewport.shadow_passes.push(ShadowPass {
                 local: true,
-                layer: (cascades.len() + i) as u32,
-                point: false,
+                layer,
+                point,
                 view: view_matrices.len() as u32,
+                frustum: v.frustum,
+                sphere: Some(v.sphere),
+                draws: 0..0,
             });
-            view_matrices.push(*m);
+            view_matrices.push(v.clip_from_world);
         }
-        for (i, m) in lights.point_views.iter().enumerate() {
-            viewport.shadow_passes.push(ShadowPass {
-                local: true,
-                layer: i as u32,
-                point: true,
-                view: view_matrices.len() as u32,
-            });
-            view_matrices.push(*m);
+
+        // Frustum culling per view (Bevy `check_visibility` and the shadow views' culling):
+        // each view keeps its own draws over a run of visible instance indices.
+        viewport.draws.clear();
+        let mut visible: Vec<u32> = Vec::new();
+        let mut cull = |draws: &mut Vec<Draw>, sees: &dyn Fn(usize) -> bool| {
+            let start = draws.len();
+            for group in &groups {
+                let first = visible.len() as u32;
+                visible.extend(group.instances.clone().filter(|&i| sees(i as usize)));
+                let end = visible.len() as u32;
+                if end > first {
+                    draws.push(Draw {
+                        instances: first..end,
+                        ..group.clone()
+                    });
+                }
+            }
+            start..draws.len()
+        };
+        let camera = Frustum::camera(clip_from_view * view_from_world);
+        viewport.main_draws = cull(&mut viewport.draws, &|i| camera.intersects(&obbs[i]));
+        // A light's sphere test runs once for all its views (six cube faces).
+        let mut in_range: Option<((Vec3, f32), Vec<bool>)> = None;
+        for pass in &mut viewport.shadow_passes {
+            let draws = match pass.sphere {
+                None => cull(&mut viewport.draws, &|i| pass.frustum.intersects(&obbs[i])),
+                Some(sphere) => {
+                    if in_range.as_ref().is_none_or(|(s, _)| *s != sphere) {
+                        let near = obbs
+                            .iter()
+                            .map(|o| o.intersects_sphere(sphere.0, sphere.1))
+                            .collect();
+                        in_range = Some((sphere, near));
+                    }
+                    let near = &in_range.as_ref().expect("filled above").1;
+                    cull(&mut viewport.draws, &|i| {
+                        near[i] && pass.frustum.intersects(&obbs[i])
+                    })
+                }
+            };
+            pass.draws = draws;
+        }
+        if visible.is_empty() {
+            visible.push(0);
+        }
+        if viewport
+            .visible_buffer
+            .write(device, queue, bytemuck::cast_slice(&visible))
+        {
+            viewport.frame_group = None;
         }
         let mut view_bytes = vec![0u8; SHADOW_VIEW_STRIDE as usize * view_matrices.len().max(1)];
         for (i, m) in view_matrices.iter().enumerate() {
@@ -1185,6 +1309,10 @@ impl Renderer {
                     wgpu::BindGroupEntry {
                         binding: 1,
                         resource: viewport.instance_buffer.buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: viewport.visible_buffer.buffer.as_entire_binding(),
                     },
                 ],
             }));
@@ -1323,11 +1451,15 @@ impl Renderer {
             .expect("Renderer::prepare before encode");
         let draw = |pass: &mut wgpu::RenderPass<'_>,
                     pipelines: &[wgpu::RenderPipeline],
+                    draws: Range<usize>,
                     phases: Range<Phase>,
                     index: &dyn Fn(&Draw) -> usize| {
             pass.set_bind_group(0, frame_group, &[]);
             let (mut mesh_bound, mut material_bound) = (None, None);
-            for d in viewport.draws.iter().filter(|d| phases.contains(&d.phase)) {
+            for d in viewport.draws[draws]
+                .iter()
+                .filter(|d| phases.contains(&d.phase))
+            {
                 pass.set_pipeline(&pipelines[index(d)]);
                 if material_bound != Some(d.material) {
                     pass.set_bind_group(2, &world.material(d.material).group, &[]);
@@ -1342,21 +1474,13 @@ impl Renderer {
                 pass.draw_indexed(0..mesh.index_count, 0, d.instances.clone());
             }
         };
-        let query_set = timestamps.map(|t| t.query_set);
-        // The frame's start timestamp goes to whichever pass comes first.
-        let mut start = query_set;
-        if let Some(sky) = &viewport.sky {
-            sky.encode_luts(encoder, &self.sky, start.take());
-        }
-        let mut render_start = || {
-            start
-                .take()
-                .map(|query_set| wgpu::RenderPassTimestampWrites {
-                    query_set,
-                    beginning_of_pass_write_index: Some(0),
-                    end_of_pass_write_index: None,
-                })
+        let stamps = Stamps {
+            query_set: timestamps.as_ref().map(|t| t.query_set),
+            next: timestamps.as_ref().map_or(0, |t| t.first).into(),
         };
+        if let Some(sky) = &viewport.sky {
+            sky.encode_luts(encoder, &self.sky, &stamps);
+        }
 
         for shadow in &viewport.shadow_passes {
             let maps = if shadow.point {
@@ -1375,7 +1499,7 @@ impl Renderer {
                     }),
                     stencil_ops: None,
                 }),
-                timestamp_writes: render_start(),
+                timestamp_writes: stamps.render(),
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
@@ -1387,6 +1511,7 @@ impl Renderer {
             draw(
                 &mut pass,
                 &self.shadow_pipelines,
+                shadow.draws.clone(),
                 Phase::Opaque..Phase::End,
                 &|d: &Draw| shadow_pipeline_index(shadow.local, d.face, d.phase != Phase::Opaque),
             );
@@ -1410,12 +1535,13 @@ impl Renderer {
                     targets,
                     clear_color,
                     part("lit", true, true, true),
-                    render_start(),
+                    stamps.render(),
                 );
                 pass.set_bind_group(1, viewport.lighting_group.as_ref(), &[]);
                 draw(
                     &mut pass,
                     &self.lit_pipelines,
+                    viewport.main_draws.clone(),
                     Phase::Opaque..Phase::End,
                     &lit_index,
                 );
@@ -1426,12 +1552,13 @@ impl Renderer {
                     targets,
                     clear_color,
                     part("lit opaque", true, true, false),
-                    render_start(),
+                    stamps.render(),
                 );
                 pass.set_bind_group(1, viewport.lighting_group.as_ref(), &[]);
                 draw(
                     &mut pass,
                     &self.lit_pipelines,
+                    viewport.main_draws.clone(),
                     Phase::Opaque..Phase::Blend,
                     &lit_index,
                 );
@@ -1441,7 +1568,7 @@ impl Renderer {
                     targets,
                     clear_color,
                     part("render sky", false, false, false),
-                    None,
+                    stamps.render(),
                 );
                 sky.draw(&mut pass, &self.sky);
                 drop(pass);
@@ -1450,12 +1577,13 @@ impl Renderer {
                     targets,
                     clear_color,
                     part("lit transparent", false, true, true),
-                    None,
+                    stamps.render(),
                 );
                 pass.set_bind_group(1, viewport.lighting_group.as_ref(), &[]);
                 draw(
                     &mut pass,
                     &self.lit_pipelines,
+                    viewport.main_draws.clone(),
                     Phase::Blend..Phase::End,
                     &lit_index,
                 );
@@ -1474,7 +1602,7 @@ impl Renderer {
                 },
             })],
             depth_stencil_attachment: None,
-            timestamp_writes: None,
+            timestamp_writes: stamps.render(),
             occlusion_query_set: None,
             multiview_mask: None,
         });
@@ -1495,12 +1623,7 @@ impl Renderer {
                 },
             })],
             depth_stencil_attachment: None,
-            // The frame ends at the blit.
-            timestamp_writes: query_set.map(|query_set| wgpu::RenderPassTimestampWrites {
-                query_set,
-                beginning_of_pass_write_index: None,
-                end_of_pass_write_index: Some(1),
-            }),
+            timestamp_writes: stamps.render(),
             occlusion_query_set: None,
             multiview_mask: None,
         });
@@ -1526,6 +1649,7 @@ impl Viewport {
                 mapped_at_creation: false,
             }),
             instance_buffer: Growable::new(device, "instances", wgpu::BufferUsages::STORAGE),
+            visible_buffer: Growable::new(device, "visible instances", wgpu::BufferUsages::STORAGE),
             light_buffer: Growable::new(device, "lights", wgpu::BufferUsages::STORAGE),
             shadow_view_buffer: Growable::new(device, "shadow views", wgpu::BufferUsages::UNIFORM),
             frame_group: None,
@@ -1537,6 +1661,7 @@ impl Viewport {
             sky: None,
             shadow_passes: Vec::new(),
             draws: Vec::new(),
+            main_draws: 0..0,
             clear_color: wgpu::Color::BLACK,
             tonemapping: Tonemapping::default(),
         }
@@ -1557,6 +1682,15 @@ impl Viewport {
 
     pub fn size(&self) -> (u32, u32) {
         (self.width, self.height)
+    }
+
+    /// Timestamp queries [`Renderer::encode`] writes for this viewport's last prepared frame: a
+    /// begin and an end per pass.
+    pub fn timestamp_queries(&self) -> u32 {
+        let sky = self.sky.as_ref().map_or(0, |s| s.compute_passes());
+        // The main pass is three with a sky; then tone mapping and the blit.
+        let main = if self.sky.is_some() { 3 } else { 1 };
+        2 * (sky + self.shadow_passes.len() as u32 + main + 2)
     }
 }
 
@@ -1737,10 +1871,27 @@ struct LocalLights {
     gpu: Vec<GpuLight>,
     point_count: u32,
     spot_count: u32,
-    /// `clip_from_world` per spot shadow map, in layer order after the sun cascades.
-    spot_views: Vec<Mat4>,
-    /// `clip_from_world` per point-light cube face, six per shadow-casting point light.
-    point_views: Vec<Mat4>,
+    /// Per spot shadow map, in layer order after the sun cascades.
+    spot_views: Vec<LightView>,
+    /// Per point-light cube face, six per shadow-casting point light.
+    point_views: Vec<LightView>,
+}
+
+struct LightView {
+    clip_from_world: Mat4,
+    frustum: Frustum,
+    /// The light's position and range: Bevy first drops casters outside this sphere.
+    sphere: (Vec3, f32),
+}
+
+impl LightView {
+    fn new(clip_from_world: Mat4, position: Vec3, forward: Vec3, range: f32) -> Self {
+        Self {
+            clip_from_world,
+            frustum: Frustum::light(clip_from_world, position, forward, range),
+            sphere: (position, range),
+        }
+    }
 }
 
 impl LocalLights {
@@ -1789,7 +1940,12 @@ impl LocalLights {
                 for (target, up) in CUBE_FACES {
                     let world_from_view = Mat4::from_translation(l.position)
                         * Mat4::from_mat3(looking_to(target, up));
-                    point_views.push(projection * world_from_view.inverse());
+                    point_views.push(LightView::new(
+                        projection * world_from_view.inverse(),
+                        l.position,
+                        target,
+                        l.range,
+                    ));
                 }
             }
             gpu.push(light);
@@ -1823,7 +1979,12 @@ impl LocalLights {
                 let world_from_view = Mat4::from_translation(l.position)
                     * Mat4::from_mat3(orthonormalize(-direction));
                 let clip_from_view = perspective_infinite_reverse(2.0 * outer, 1.0, s.near_z);
-                spot_views.push(clip_from_view * world_from_view.inverse());
+                spot_views.push(LightView::new(
+                    clip_from_view * world_from_view.inverse(),
+                    l.position,
+                    direction,
+                    l.range,
+                ));
             }
             gpu.push(light);
         }
@@ -1865,7 +2026,7 @@ pub fn look_at(eye: Vec3, target: Vec3) -> Mat4 {
 }
 
 /// Bevy's right-handed infinite reverse-Z perspective projection.
-fn perspective_infinite_reverse(fov_y: f32, aspect: f32, near: f32) -> Mat4 {
+pub(crate) fn perspective_infinite_reverse(fov_y: f32, aspect: f32, near: f32) -> Mat4 {
     let h = 1.0 / (0.5 * fov_y).tan();
     Mat4::from_cols(
         Vec4::new(h / aspect, 0.0, 0.0, 0.0),
