@@ -1,13 +1,21 @@
 //! The wgpu renderer: one shadow pass per sun cascade, spot light and point-light cube face, one
-//! forward PBR pass with 4× MSAA into an HDR target, a tone-mapping pass into an Rgba16Float target and a blit into the output (Bevy's
-//! tonemapping and upscaling nodes).
+//! forward PBR pass with 4× MSAA into an HDR target (opaque, then alpha-masked, then blended
+//! instances back to front), a tone-mapping pass into an Rgba16Float target and a blit into the
+//! consumer's colour target (Bevy's tonemapping and upscaling nodes).
+//!
+//! [`Renderer`] holds the pipelines, a [`World`] the consumer's meshes, textures and materials,
+//! and a [`Viewport`] the per-size targets and per-frame buffers. Each frame:
+//! [`Renderer::prepare`] writes the frame's camera, lights and instances into the viewport, then
+//! [`Renderer::encode`] records the passes into the consumer's encoder, ending in its target.
 
 use crate::{
-    mesh::{Geometry, Vertex},
+    material::AlphaMode,
     scene::{Cubemap, FogFalloff, LightShadows, MAX_CASCADES, Scene, ShadowFilter, Tonemapping},
+    world::{Instance, MaterialId, MeshId, Vertex, World},
 };
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat3, Mat4, UVec4, Vec3, Vec4};
+use std::{ops::Range, sync::Arc};
 use wgpu::util::DeviceExt;
 
 /// MSAA sample count of the main pass (Bevy's default `Msaa::Sample4`).
@@ -96,24 +104,62 @@ struct InstanceData {
     world_from_local: Mat4,
     // mat3x3<f32> in WGSL: three columns padded to 16 bytes.
     normal_from_local: [Vec4; 3],
-    base_color: Vec4,
-    pbr: Vec4,
+    /// x 1 when the mesh has tangents, y 1 when the model matrix mirrors.
+    flags: UVec4,
 }
 
-/// Fixed GPU state: pipelines, layouts and samplers.
+/// Which faces a pipeline rasterises: bit 0 winds mirrored instances clockwise, bit 1 draws back
+/// faces (double-sided materials).
+const FACE_VARIANTS: usize = 4;
+
+fn face_variant(mirrored: bool, double_sided: bool) -> usize {
+    usize::from(mirrored) | usize::from(double_sided) << 1
+}
+
+/// Index into `Renderer::shadow_pipelines`, in the order `Renderer::new` creates them.
+fn shadow_pipeline_index(local: bool, face: usize, masked: bool) -> usize {
+    (usize::from(local) * FACE_VARIANTS + face) * 2 + usize::from(masked)
+}
+
+fn primitive(face: usize) -> wgpu::PrimitiveState {
+    wgpu::PrimitiveState {
+        front_face: if face & 1 != 0 {
+            wgpu::FrontFace::Cw
+        } else {
+            wgpu::FrontFace::Ccw
+        },
+        cull_mode: (face & 2 == 0).then_some(wgpu::Face::Back),
+        ..Default::default()
+    }
+}
+
+/// The main-pass phase of a draw, in drawing order (Bevy's `Opaque3d`, `AlphaMask3d`,
+/// `Transparent3d`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum Phase {
+    Opaque = 0,
+    Mask = 1,
+    Blend = 2,
+}
+
+/// Fixed GPU state on the consumer's device: pipelines, layouts and samplers.
 pub struct Renderer {
+    device: wgpu::Device,
+    queue: wgpu::Queue,
     frame_layout: wgpu::BindGroupLayout,
     shadow_view_layout: wgpu::BindGroupLayout,
     lighting_layout: wgpu::BindGroupLayout,
+    material_layout: wgpu::BindGroupLayout,
     tonemap_layout: wgpu::BindGroupLayout,
     blit_layout: wgpu::BindGroupLayout,
     /// Copies the tone-mapped Rgba16Float frame into the output (Bevy's upscaling blit).
     blit_pipeline: wgpu::RenderPipeline,
-    /// Sun cascades: orthographic, unclipped depth.
-    shadow_pipeline: wgpu::RenderPipeline,
-    /// Spot maps and point-light cube faces: perspective, clipped depth (as in Bevy).
-    local_shadow_pipeline: wgpu::RenderPipeline,
-    lit_pipeline: wgpu::RenderPipeline,
+    /// Indexed by [`shadow_pipeline_index`]: sun cascades (orthographic, unclipped depth)
+    /// and spot/point views (perspective, clipped depth, as in Bevy), per face variant, opaque
+    /// or cut out by alpha.
+    shadow_pipelines: Vec<wgpu::RenderPipeline>,
+    /// Indexed by `face * 3 + phase`.
+    lit_pipelines: Vec<wgpu::RenderPipeline>,
     /// Indexed by [`tonemap_index`].
     tonemap_pipelines: [wgpu::RenderPipeline; 3],
     shadow_sampler: wgpu::Sampler,
@@ -137,49 +183,160 @@ fn tonemap_index(t: Tonemapping) -> usize {
     }
 }
 
-/// A scene uploaded for one target size; render it any number of times.
-pub struct PreparedScene {
-    width: u32,
-    height: u32,
-    clear_color: wgpu::Color,
-    frame_group: wgpu::BindGroup,
-    lighting_group: wgpu::BindGroup,
-    shadow_view_group: wgpu::BindGroup,
-    /// Every shadow pass in order: sun cascades, spot maps, point-light cube faces.
-    shadow_passes: Vec<ShadowPass>,
-    vertices: wgpu::Buffer,
-    indices: wgpu::Buffer,
-    /// (first index, index count, base vertex) per instance, in instance order.
-    draws: Vec<(u32, u32, i32)>,
-    msaa_view: wgpu::TextureView,
-    depth_view: wgpu::TextureView,
-    /// The resolved HDR frame, read by the tone-mapping pass.
-    hdr_view: wgpu::TextureView,
-    tonemap_group: wgpu::BindGroup,
-    tonemapping: Tonemapping,
-    /// The tone-mapped frame (Rgba16Float, like Bevy's main texture), read by the blit pass.
-    post_view: wgpu::TextureView,
-    blit_group: wgpu::BindGroup,
-}
-
-/// One depth-only pass into a shadow-map layer.
-struct ShadowPass {
-    target: wgpu::TextureView,
-    /// Index of the view's matrix in the shadow-view buffer.
-    view: u32,
-    /// A spot or point-light view (perspective, clipped depth) rather than a sun cascade.
-    local: bool,
-}
-
 /// Where a frame writes GPU timestamps: index 0 at the start of the first pass, index 1 at the
 /// end of the last.
 pub struct FrameTimestamps<'a> {
     pub query_set: &'a wgpu::QuerySet,
 }
 
+/// The engine's own render targets for one output size plus the per-frame GPU state (frame
+/// uniforms, instances, lights, shadow maps), reused and grown as needed from frame to frame.
+pub struct Viewport {
+    width: u32,
+    height: u32,
+    targets: Targets,
+    /// The tone-mapping bind group for the operator it was built for.
+    tonemap: Option<(Tonemapping, wgpu::BindGroup)>,
+    frame_buffer: wgpu::Buffer,
+    instance_buffer: Growable,
+    light_buffer: Growable,
+    shadow_view_buffer: Growable,
+    frame_group: Option<wgpu::BindGroup>,
+    shadow_view_group: Option<wgpu::BindGroup>,
+    lighting_group: Option<wgpu::BindGroup>,
+    /// Sun cascades, then spot maps (Bevy keeps both in one array).
+    directional_shadows: ShadowArray,
+    point_shadows: ShadowArray,
+    environment: Option<UploadedEnvironment>,
+    /// Every shadow pass in order: sun cascades, spot maps, point-light cube faces.
+    shadow_passes: Vec<ShadowPass>,
+    /// Main-pass draws in order; shadow passes draw the same list.
+    draws: Vec<Draw>,
+    clear_color: wgpu::Color,
+    tonemapping: Tonemapping,
+}
+
+struct Targets {
+    msaa_view: wgpu::TextureView,
+    depth_view: wgpu::TextureView,
+    /// The resolved HDR frame, read by the tone-mapping pass.
+    hdr_view: wgpu::TextureView,
+    /// The tone-mapped frame (Rgba16Float, like Bevy's main texture), read by the blit pass.
+    post_view: wgpu::TextureView,
+    blit_group: wgpu::BindGroup,
+}
+
+/// A buffer that is rewritten every frame and replaced by a larger one when it runs out.
+struct Growable {
+    buffer: wgpu::Buffer,
+    label: &'static str,
+    usage: wgpu::BufferUsages,
+}
+
+impl Growable {
+    fn new(device: &wgpu::Device, label: &'static str, usage: wgpu::BufferUsages) -> Self {
+        let usage = usage | wgpu::BufferUsages::COPY_DST;
+        Self {
+            buffer: Self::create(device, label, usage, 256),
+            label,
+            usage,
+        }
+    }
+
+    fn create(
+        device: &wgpu::Device,
+        label: &str,
+        usage: wgpu::BufferUsages,
+        size: u64,
+    ) -> wgpu::Buffer {
+        device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(label),
+            size,
+            usage,
+            mapped_at_creation: false,
+        })
+    }
+
+    /// Writes `bytes` (never empty), returning whether the buffer was replaced.
+    fn write(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, bytes: &[u8]) -> bool {
+        let size = bytes.len() as u64;
+        let grown = size > self.buffer.size();
+        if grown {
+            self.buffer = Self::create(device, self.label, self.usage, size.next_power_of_two());
+        }
+        queue.write_buffer(&self.buffer, 0, bytes);
+        grown
+    }
+}
+
+/// A depth texture array of shadow maps with a view per layer.
+struct ShadowArray {
+    size: u32,
+    layers: u32,
+    /// The whole array as the main pass samples it (2D array or cube array).
+    view: wgpu::TextureView,
+    layer_views: Vec<wgpu::TextureView>,
+}
+
+impl ShadowArray {
+    fn new(device: &wgpu::Device, label: &str, size: u32, layers: u32, cube: bool) -> Self {
+        let texture = shadow_maps(device, label, size, layers);
+        Self {
+            size,
+            layers,
+            view: texture.create_view(&wgpu::TextureViewDescriptor {
+                dimension: Some(if cube {
+                    wgpu::TextureViewDimension::CubeArray
+                } else {
+                    wgpu::TextureViewDimension::D2Array
+                }),
+                ..Default::default()
+            }),
+            layer_views: (0..layers)
+                .map(|layer| {
+                    texture.create_view(&wgpu::TextureViewDescriptor {
+                        dimension: Some(wgpu::TextureViewDimension::D2),
+                        base_array_layer: layer,
+                        array_layer_count: Some(1),
+                        ..Default::default()
+                    })
+                })
+                .collect(),
+        }
+    }
+}
+
+struct UploadedEnvironment {
+    diffuse: Arc<Cubemap>,
+    specular: Arc<Cubemap>,
+    diffuse_view: wgpu::TextureView,
+    specular_view: wgpu::TextureView,
+}
+
+/// One depth-only pass into a shadow-map layer.
+struct ShadowPass {
+    /// A spot or point-light view (perspective, clipped depth) rather than a sun cascade.
+    local: bool,
+    /// Layer in the directional array, or in the point array for point-light faces.
+    layer: u32,
+    point: bool,
+    /// Index of the view's matrix in the shadow-view buffer.
+    view: u32,
+}
+
+/// Consecutive instances sharing a pipeline, material and mesh.
+struct Draw {
+    face: usize,
+    phase: Phase,
+    mesh: MeshId,
+    material: MaterialId,
+    instances: Range<u32>,
+}
+
 impl Renderer {
-    /// Creates the pipelines for frames written to `color_format` (tone mapped; an sRGB format
-    /// encodes the output) and uploads the tone-mapping LUTs.
+    /// Creates the pipelines on the consumer's device for frames written to `color_format` (tone
+    /// mapped; an sRGB format encodes the output) and uploads the tone-mapping LUTs. Unclipped
+    /// sun shadow depth uses `DEPTH_CLIP_CONTROL` where the device has it enabled.
     pub fn new(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -277,6 +434,40 @@ impl Renderer {
                 },
             ],
         });
+        // A material: its uniform, then five texture/sampler pairs (base colour, emissive,
+        // metallic-roughness, occlusion, normal map).
+        let mut material_entries = vec![wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        }];
+        for i in 0..5 {
+            material_entries.push(wgpu::BindGroupLayoutEntry {
+                binding: 1 + 2 * i,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            });
+            material_entries.push(wgpu::BindGroupLayoutEntry {
+                binding: 2 + 2 * i,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            });
+        }
+        let material_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("material"),
+            entries: &material_entries,
+        });
         // A shadow pass picks its view's matrix through a dynamic offset.
         let shadow_view_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -295,16 +486,12 @@ impl Renderer {
         let vertex_layout = wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Vertex>() as u64,
             step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3],
-        };
-        let primitive = wgpu::PrimitiveState {
-            cull_mode: Some(wgpu::Face::Back),
-            ..Default::default()
+            attributes: &Vertex::ATTRIBUTES,
         };
         // Reverse Z everywhere: nearer is larger.
-        let depth = |format| wgpu::DepthStencilState {
-            format,
-            depth_write_enabled: Some(true),
+        let depth = |write: bool| wgpu::DepthStencilState {
+            format: DEPTH_FORMAT,
+            depth_write_enabled: Some(write),
             depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
             stencil: wgpu::StencilState::default(),
             bias: wgpu::DepthBiasState::default(),
@@ -312,90 +499,114 @@ impl Renderer {
 
         let shadow_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("sun shadow"),
-                bind_group_layouts: &[Some(&frame_layout), Some(&shadow_view_layout)],
+                label: Some("shadow"),
+                bind_group_layouts: &[
+                    Some(&frame_layout),
+                    Some(&shadow_view_layout),
+                    Some(&material_layout),
+                ],
                 immediate_size: 0,
-            });
-        let local_shadow_pipeline =
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("local shadow"),
-                layout: Some(&shadow_pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &shader,
-                    entry_point: Some("shadow_vs"),
-                    compilation_options: Default::default(),
-                    buffers: &[Some(vertex_layout.clone())],
-                },
-                primitive,
-                depth_stencil: Some(depth(DEPTH_FORMAT)),
-                multisample: wgpu::MultisampleState::default(),
-                fragment: None,
-                multiview_mask: None,
-                cache: None,
             });
         // Unclipped depth like Bevy's directional shadow views: natively where the device has
         // `DEPTH_CLIP_CONTROL`, else clamped in a fragment shader (see `lit.wgsl`).
         let unclipped_depth = device
             .features()
             .contains(wgpu::Features::DEPTH_CLIP_CONTROL);
-        let shadow_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("sun shadow"),
-            layout: Some(&shadow_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some(if unclipped_depth {
-                    "shadow_vs"
-                } else {
-                    "shadow_emulated_vs"
-                }),
-                compilation_options: Default::default(),
-                buffers: &[Some(vertex_layout.clone())],
-            },
-            primitive: wgpu::PrimitiveState {
-                unclipped_depth,
-                ..primitive
-            },
-            depth_stencil: Some(depth(DEPTH_FORMAT)),
-            multisample: wgpu::MultisampleState::default(),
-            fragment: (!unclipped_depth).then(|| wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("shadow_emulated_fs"),
-                compilation_options: Default::default(),
-                targets: &[],
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
+        let mut shadow_pipelines = Vec::new();
+        for local in [false, true] {
+            for face in 0..FACE_VARIANTS {
+                for masked in [false, true] {
+                    let emulated = !local && !unclipped_depth;
+                    let fragment = match (emulated, masked) {
+                        (false, false) => None,
+                        (false, true) => Some("shadow_masked_fs"),
+                        (true, false) => Some("shadow_emulated_fs"),
+                        (true, true) => Some("shadow_emulated_masked_fs"),
+                    };
+                    shadow_pipelines.push(device.create_render_pipeline(
+                        &wgpu::RenderPipelineDescriptor {
+                            label: Some(if local { "local shadow" } else { "sun shadow" }),
+                            layout: Some(&shadow_pipeline_layout),
+                            vertex: wgpu::VertexState {
+                                module: &shader,
+                                entry_point: Some(if emulated {
+                                    "shadow_emulated_vs"
+                                } else {
+                                    "shadow_vs"
+                                }),
+                                compilation_options: Default::default(),
+                                buffers: &[Some(vertex_layout.clone())],
+                            },
+                            primitive: wgpu::PrimitiveState {
+                                unclipped_depth: !local && unclipped_depth,
+                                ..primitive(face)
+                            },
+                            depth_stencil: Some(depth(true)),
+                            multisample: wgpu::MultisampleState::default(),
+                            fragment: fragment.map(|entry_point| wgpu::FragmentState {
+                                module: &shader,
+                                entry_point: Some(entry_point),
+                                compilation_options: Default::default(),
+                                targets: &[],
+                            }),
+                            multiview_mask: None,
+                            cache: None,
+                        },
+                    ));
+                }
+            }
+        }
 
         let lit_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("lit"),
-            bind_group_layouts: &[Some(&frame_layout), Some(&lighting_layout)],
+            bind_group_layouts: &[
+                Some(&frame_layout),
+                Some(&lighting_layout),
+                Some(&material_layout),
+            ],
             immediate_size: 0,
         });
-        let lit_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("lit"),
-            layout: Some(&lit_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("lit_vs"),
-                compilation_options: Default::default(),
-                buffers: &[Some(vertex_layout)],
-            },
-            primitive,
-            depth_stencil: Some(depth(DEPTH_FORMAT)),
-            multisample: wgpu::MultisampleState {
-                count: SAMPLE_COUNT,
-                ..Default::default()
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("lit_fs"),
-                compilation_options: Default::default(),
-                targets: &[Some(HDR_FORMAT.into())],
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
+        let mut lit_pipelines = Vec::new();
+        for face in 0..FACE_VARIANTS {
+            for phase in [Phase::Opaque, Phase::Mask, Phase::Blend] {
+                let blend = phase == Phase::Blend;
+                lit_pipelines.push(device.create_render_pipeline(
+                    &wgpu::RenderPipelineDescriptor {
+                        label: Some("lit"),
+                        layout: Some(&lit_pipeline_layout),
+                        vertex: wgpu::VertexState {
+                            module: &shader,
+                            entry_point: Some("lit_vs"),
+                            compilation_options: Default::default(),
+                            buffers: &[Some(vertex_layout.clone())],
+                        },
+                        primitive: primitive(face),
+                        // Blended fragments test depth but do not write it (Bevy).
+                        depth_stencil: Some(depth(!blend)),
+                        multisample: wgpu::MultisampleState {
+                            count: SAMPLE_COUNT,
+                            ..Default::default()
+                        },
+                        fragment: Some(wgpu::FragmentState {
+                            module: &shader,
+                            entry_point: Some(if phase == Phase::Mask {
+                                "lit_masked_fs"
+                            } else {
+                                "lit_fs"
+                            }),
+                            compilation_options: Default::default(),
+                            targets: &[Some(wgpu::ColorTargetState {
+                                format: HDR_FORMAT,
+                                blend: blend.then_some(wgpu::BlendState::ALPHA_BLENDING),
+                                write_mask: wgpu::ColorWrites::ALL,
+                            })],
+                        }),
+                        multiview_mask: None,
+                        cache: None,
+                    },
+                ));
+            }
+        }
 
         let tonemap_shader =
             device.create_shader_module(wgpu::include_wgsl!("shaders/tonemap.wgsl"));
@@ -546,15 +757,17 @@ impl Renderer {
         );
 
         Self {
+            device: device.clone(),
+            queue: queue.clone(),
             frame_layout,
             shadow_view_layout,
             lighting_layout,
+            material_layout,
             tonemap_layout,
             blit_layout,
             blit_pipeline,
-            shadow_pipeline,
-            local_shadow_pipeline,
-            lit_pipeline,
+            shadow_pipelines,
+            lit_pipelines,
             tonemap_pipelines,
             shadow_sampler,
             shadow_linear_sampler,
@@ -566,16 +779,29 @@ impl Renderer {
         }
     }
 
-    /// Uploads `scene` for a `width`×`height` target.
+    pub fn device(&self) -> &wgpu::Device {
+        &self.device
+    }
+
+    pub fn queue(&self) -> &wgpu::Queue {
+        &self.queue
+    }
+
+    pub(crate) fn material_layout(&self) -> &wgpu::BindGroupLayout {
+        &self.material_layout
+    }
+
+    /// Writes one frame's camera, lights and instances into `viewport`. Only buffers whose
+    /// contents changed size are reallocated; meshes, textures and materials stay in `world`.
     pub fn prepare(
         &self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        viewport: &mut Viewport,
+        world: &World,
         scene: &Scene,
-        width: u32,
-        height: u32,
-    ) -> PreparedScene {
-        let aspect = width as f32 / height as f32;
+        instances: &[Instance],
+    ) {
+        let (device, queue) = (&self.device, &self.queue);
+        let aspect = viewport.width as f32 / viewport.height as f32;
         let cam = &scene.camera;
         let view_from_world = look_at(cam.eye, cam.target);
         let clip_from_view = perspective_infinite_reverse(cam.fov_y, aspect, cam.near);
@@ -657,128 +883,151 @@ impl Renderer {
             }),
             light_counts: UVec4::new(lights.point_count, lights.spot_count, 0, 0),
         };
+        queue.write_buffer(&viewport.frame_buffer, 0, bytemuck::bytes_of(&frame));
 
-        let mut vertices = Vec::new();
-        let mut indices = Vec::new();
-        let mut draws = Vec::new();
-        let mut instances = Vec::new();
-        for mesh in &scene.meshes {
-            let g = Geometry::of(mesh.shape);
-            draws.push((
-                indices.len() as u32,
-                g.indices.len() as u32,
-                vertices.len() as i32,
-            ));
-            vertices.extend(g.vertices);
-            indices.extend(g.indices);
-            let world_from_local =
-                Mat4::from_scale_rotation_translation(mesh.scale, mesh.rotation, mesh.translation);
-            let normal = Mat3::from_mat4(world_from_local).inverse().transpose();
-            let m = mesh.material;
-            instances.push(InstanceData {
-                world_from_local,
-                normal_from_local: [
-                    normal.x_axis.extend(0.0),
-                    normal.y_axis.extend(0.0),
-                    normal.z_axis.extend(0.0),
-                ],
-                base_color: m.base_color.extend(1.0),
-                pbr: Vec4::new(m.metallic, m.perceptual_roughness, m.reflectance, 0.0),
-            });
+        // Instances, grouped into draws: opaque, then alpha-masked (each by pipeline, material
+        // and mesh), then blended from back to front by origin (Bevy's transparent sort).
+        struct Sorted {
+            phase: Phase,
+            face: usize,
+            material: MaterialId,
+            mesh: MeshId,
+            view_z: f32,
+            data: InstanceData,
         }
-        if instances.is_empty() {
-            instances.push(InstanceData::zeroed());
+        let mut sorted: Vec<Sorted> = instances
+            .iter()
+            .map(|inst| {
+                let material = &world.material(inst.material).material;
+                let mesh = world.mesh(inst.mesh);
+                let m = inst.world_from_local;
+                let linear = Mat3::from_mat4(m);
+                let mirrored = linear.determinant() < 0.0;
+                let normal = linear.inverse().transpose();
+                Sorted {
+                    phase: match material.alpha_mode {
+                        AlphaMode::Opaque => Phase::Opaque,
+                        AlphaMode::Mask(_) => Phase::Mask,
+                        AlphaMode::Blend => Phase::Blend,
+                    },
+                    face: face_variant(mirrored, material.double_sided),
+                    material: inst.material,
+                    mesh: inst.mesh,
+                    view_z: (view_from_world * m.w_axis).z,
+                    data: InstanceData {
+                        world_from_local: m,
+                        normal_from_local: [
+                            normal.x_axis.extend(0.0),
+                            normal.y_axis.extend(0.0),
+                            normal.z_axis.extend(0.0),
+                        ],
+                        flags: UVec4::new(u32::from(mesh.has_tangents), u32::from(mirrored), 0, 0),
+                    },
+                }
+            })
+            .collect();
+        sorted.sort_by(|a, b| {
+            a.phase.cmp(&b.phase).then_with(|| {
+                if a.phase == Phase::Blend {
+                    a.view_z.total_cmp(&b.view_z)
+                } else {
+                    (a.face, a.material, a.mesh).cmp(&(b.face, b.material, b.mesh))
+                }
+            })
+        });
+        viewport.draws.clear();
+        for (i, s) in sorted.iter().enumerate() {
+            let i = i as u32;
+            match viewport.draws.last_mut() {
+                Some(d)
+                    if (d.phase, d.face, d.material, d.mesh)
+                        == (s.phase, s.face, s.material, s.mesh) =>
+                {
+                    d.instances.end = i + 1;
+                }
+                _ => viewport.draws.push(Draw {
+                    face: s.face,
+                    phase: s.phase,
+                    mesh: s.mesh,
+                    material: s.material,
+                    instances: i..i + 1,
+                }),
+            }
+        }
+        let mut instance_data: Vec<InstanceData> = sorted.iter().map(|s| s.data).collect();
+        if instance_data.is_empty() {
+            instance_data.push(InstanceData::zeroed());
+        }
+        if viewport
+            .instance_buffer
+            .write(device, queue, bytemuck::cast_slice(&instance_data))
+        {
+            viewport.frame_group = None;
         }
 
-        let frame_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("frame"),
-            contents: bytemuck::bytes_of(&frame),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
-        let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("instances"),
-            contents: bytemuck::cast_slice(&instances),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
-        let frame_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("frame"),
-            layout: &self.frame_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: frame_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: instance_buffer.as_entire_binding(),
-                },
-            ],
-        });
+        let mut lighting_dirty = viewport.lighting_group.is_none();
+        lighting_dirty |=
+            viewport
+                .light_buffer
+                .write(device, queue, bytemuck::cast_slice(&lights.gpu));
 
         // Like Bevy, spot maps share the sun's array (and its size), after the cascades.
-        let directional_layers = cascades.len() + lights.spot_views.len();
-        let shadow_texture = shadow_maps(
-            device,
-            "directional shadow maps",
-            if directional_layers > 0 {
-                scene.shadow_maps.directional
-            } else {
-                1
-            },
-            directional_layers.max(1) as u32,
-        );
-        let shadow_view = shadow_texture.create_view(&wgpu::TextureViewDescriptor {
-            dimension: Some(wgpu::TextureViewDimension::D2Array),
-            ..Default::default()
-        });
-        let cube_count = lights.point_views.len() / 6;
-        let point_texture = shadow_maps(
-            device,
-            "point shadow maps",
-            if cube_count > 0 {
-                scene.shadow_maps.point
-            } else {
-                1
-            },
-            6 * cube_count.max(1) as u32,
-        );
-        let point_view = point_texture.create_view(&wgpu::TextureViewDescriptor {
-            dimension: Some(wgpu::TextureViewDimension::CubeArray),
-            ..Default::default()
-        });
+        let directional_layers = (cascades.len() + lights.spot_views.len()) as u32;
+        let directional = if directional_layers > 0 {
+            (scene.shadow_maps.directional, directional_layers)
+        } else {
+            (1, 1)
+        };
+        let shadow_arrays = &mut viewport.directional_shadows;
+        if (shadow_arrays.size, shadow_arrays.layers) != directional {
+            *shadow_arrays = ShadowArray::new(
+                device,
+                "directional shadow maps",
+                directional.0,
+                directional.1,
+                false,
+            );
+            lighting_dirty = true;
+        }
+        let cube_count = (lights.point_views.len() / 6) as u32;
+        let point = if cube_count > 0 {
+            (scene.shadow_maps.point, 6 * cube_count)
+        } else {
+            (1, 6)
+        };
+        let point_arrays = &mut viewport.point_shadows;
+        if (point_arrays.size, point_arrays.layers) != point {
+            *point_arrays = ShadowArray::new(device, "point shadow maps", point.0, point.1, true);
+            lighting_dirty = true;
+        }
 
         // Shadow views: sun cascades, then spot maps, then point-light faces.
-        let layer_view = |texture: &wgpu::Texture, layer: usize| {
-            texture.create_view(&wgpu::TextureViewDescriptor {
-                dimension: Some(wgpu::TextureViewDimension::D2),
-                base_array_layer: layer as u32,
-                array_layer_count: Some(1),
-                ..Default::default()
-            })
-        };
+        viewport.shadow_passes.clear();
         let mut view_matrices = Vec::new();
-        let mut shadow_passes = Vec::new();
         for (i, (_, c)) in cascades.iter().enumerate() {
-            shadow_passes.push(ShadowPass {
-                target: layer_view(&shadow_texture, i),
-                view: view_matrices.len() as u32,
+            viewport.shadow_passes.push(ShadowPass {
                 local: false,
+                layer: i as u32,
+                point: false,
+                view: view_matrices.len() as u32,
             });
             view_matrices.push(c.clip_from_world);
         }
         for (i, m) in lights.spot_views.iter().enumerate() {
-            shadow_passes.push(ShadowPass {
-                target: layer_view(&shadow_texture, cascades.len() + i),
-                view: view_matrices.len() as u32,
+            viewport.shadow_passes.push(ShadowPass {
                 local: true,
+                layer: (cascades.len() + i) as u32,
+                point: false,
+                view: view_matrices.len() as u32,
             });
             view_matrices.push(*m);
         }
         for (i, m) in lights.point_views.iter().enumerate() {
-            shadow_passes.push(ShadowPass {
-                target: layer_view(&point_texture, i),
-                view: view_matrices.len() as u32,
+            viewport.shadow_passes.push(ShadowPass {
                 local: true,
+                layer: i as u32,
+                point: true,
+                view: view_matrices.len() as u32,
             });
             view_matrices.push(*m);
         }
@@ -787,40 +1036,89 @@ impl Renderer {
             let at = i * SHADOW_VIEW_STRIDE as usize;
             view_bytes[at..at + 64].copy_from_slice(bytemuck::bytes_of(m));
         }
-        let view_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("shadow views"),
-            contents: &view_bytes,
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
-        let shadow_view_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("shadow view"),
-            layout: &self.shadow_view_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 2,
-                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &view_buffer,
-                    offset: 0,
-                    size: wgpu::BufferSize::new(64),
-                }),
-            }],
-        });
-        let light_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("lights"),
-            contents: bytemuck::cast_slice(&lights.gpu),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
-        let environment = scene.environment.as_ref().map(|e| {
-            (
-                upload_cube(device, queue, &e.diffuse),
-                upload_cube(device, queue, &e.specular),
-            )
-        });
-        let (diffuse_view, specular_view) = environment
-            .as_ref()
-            .map_or((&self.no_environment, &self.no_environment), |(d, s)| {
-                (d, s)
+        if viewport
+            .shadow_view_buffer
+            .write(device, queue, &view_bytes)
+        {
+            viewport.shadow_view_group = None;
+        }
+
+        // Environment maps are uploaded once per distinct pair of cube maps.
+        let cached = match (&scene.environment, &viewport.environment) {
+            (Some(e), Some(u)) => {
+                Arc::ptr_eq(&e.diffuse, &u.diffuse) && Arc::ptr_eq(&e.specular, &u.specular)
+            }
+            (None, None) => true,
+            _ => false,
+        };
+        if !cached {
+            viewport.environment = scene.environment.as_ref().map(|e| UploadedEnvironment {
+                diffuse: e.diffuse.clone(),
+                specular: e.specular.clone(),
+                diffuse_view: upload_cube(device, queue, &e.diffuse),
+                specular_view: upload_cube(device, queue, &e.specular),
             });
-        let lighting_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            lighting_dirty = true;
+        }
+
+        if lighting_dirty {
+            viewport.lighting_group = Some(self.lighting_group(viewport));
+        }
+        if viewport.frame_group.is_none() {
+            viewport.frame_group = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("frame"),
+                layout: &self.frame_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: viewport.frame_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: viewport.instance_buffer.buffer.as_entire_binding(),
+                    },
+                ],
+            }));
+        }
+        if viewport.shadow_view_group.is_none() {
+            viewport.shadow_view_group =
+                Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("shadow view"),
+                    layout: &self.shadow_view_layout,
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &viewport.shadow_view_buffer.buffer,
+                            offset: 0,
+                            size: wgpu::BufferSize::new(64),
+                        }),
+                    }],
+                }));
+        }
+        if viewport.tonemap.as_ref().map(|(t, _)| *t) != Some(cam.tonemapping) {
+            viewport.tonemap = Some((
+                cam.tonemapping,
+                self.tonemap_group(viewport, cam.tonemapping),
+            ));
+        }
+        viewport.tonemapping = cam.tonemapping;
+        let c = scene.clear_color;
+        viewport.clear_color = wgpu::Color {
+            r: c.x.into(),
+            g: c.y.into(),
+            b: c.z.into(),
+            a: 1.0,
+        };
+    }
+
+    fn lighting_group(&self, viewport: &Viewport) -> wgpu::BindGroup {
+        let (diffuse_view, specular_view) = viewport
+            .environment
+            .as_ref()
+            .map_or((&self.no_environment, &self.no_environment), |e| {
+                (&e.diffuse_view, &e.specular_view)
+            });
+        self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("lighting"),
             layout: &self.lighting_layout,
             entries: &[
@@ -838,7 +1136,9 @@ impl Renderer {
                 },
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&shadow_view),
+                    resource: wgpu::BindingResource::TextureView(
+                        &viewport.directional_shadows.view,
+                    ),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -846,79 +1146,33 @@ impl Renderer {
                 },
                 wgpu::BindGroupEntry {
                     binding: 6,
-                    resource: light_buffer.as_entire_binding(),
+                    resource: viewport.light_buffer.buffer.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 7,
-                    resource: wgpu::BindingResource::TextureView(&point_view),
+                    resource: wgpu::BindingResource::TextureView(&viewport.point_shadows.view),
                 },
                 wgpu::BindGroupEntry {
                     binding: 8,
                     resource: wgpu::BindingResource::Sampler(&self.shadow_linear_sampler),
                 },
             ],
-        });
+        })
+    }
 
-        let target = |format, label| {
-            device
-                .create_texture(&wgpu::TextureDescriptor {
-                    label: Some(label),
-                    size: wgpu::Extent3d {
-                        width,
-                        height,
-                        depth_or_array_layers: 1,
-                    },
-                    mip_level_count: 1,
-                    sample_count: SAMPLE_COUNT,
-                    dimension: wgpu::TextureDimension::D2,
-                    format,
-                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                    view_formats: &[],
-                })
-                .create_view(&Default::default())
-        };
-        let hdr_target = |label| {
-            device
-                .create_texture(&wgpu::TextureDescriptor {
-                    label: Some(label),
-                    size: wgpu::Extent3d {
-                        width,
-                        height,
-                        depth_or_array_layers: 1,
-                    },
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: HDR_FORMAT,
-                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                        | wgpu::TextureUsages::TEXTURE_BINDING,
-                    view_formats: &[],
-                })
-                .create_view(&Default::default())
-        };
-        let hdr_view = hdr_target("hdr colour");
-        let post_view = hdr_target("tone-mapped colour");
-        let blit_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("blit"),
-            layout: &self.blit_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::TextureView(&post_view),
-            }],
-        });
-        let tonemapping = cam.tonemapping;
+    fn tonemap_group(&self, viewport: &Viewport, tonemapping: Tonemapping) -> wgpu::BindGroup {
         // Like Bevy, operators without a LUT still bind one (the small AgX LUT).
         let lut = match tonemapping {
             Tonemapping::TonyMcMapface => &self.tony_mc_mapface_lut,
             Tonemapping::AcesFitted | Tonemapping::AgX => &self.agx_lut,
         };
-        let tonemap_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("tonemap"),
             layout: &self.tonemap_layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&hdr_view),
+                    resource: wgpu::BindingResource::TextureView(&viewport.targets.hdr_view),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -929,69 +1183,57 @@ impl Renderer {
                     resource: wgpu::BindingResource::Sampler(&self.lut_sampler),
                 },
             ],
-        });
-
-        let c = scene.clear_color;
-        PreparedScene {
-            width,
-            height,
-            clear_color: wgpu::Color {
-                r: c.x.into(),
-                g: c.y.into(),
-                b: c.z.into(),
-                a: 1.0,
-            },
-            frame_group,
-            lighting_group,
-            shadow_view_group,
-            shadow_passes,
-            vertices: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("vertices"),
-                contents: bytemuck::cast_slice(&vertices),
-                usage: wgpu::BufferUsages::VERTEX,
-            }),
-            indices: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("indices"),
-                contents: bytemuck::cast_slice(&indices),
-                usage: wgpu::BufferUsages::INDEX,
-            }),
-            draws,
-            msaa_view: target(HDR_FORMAT, "msaa hdr colour"),
-            depth_view: target(DEPTH_FORMAT, "depth"),
-            hdr_view,
-            tonemap_group,
-            tonemapping,
-            post_view,
-            blit_group,
-        }
+        })
     }
 
-    /// Records one frame that resolves into `target` (a `width`×`height` view of the colour
-    /// format the renderer was created with).
+    /// Records the frame last prepared into `viewport`, ending in `target`: a view of the colour
+    /// format the renderer was created with, `viewport`-sized, fully overwritten. Draw the UI
+    /// into `target` afterwards (`LoadOp::Load`).
     pub fn encode(
         &self,
         encoder: &mut wgpu::CommandEncoder,
-        scene: &PreparedScene,
+        viewport: &Viewport,
+        world: &World,
         target: &wgpu::TextureView,
         timestamps: Option<FrameTimestamps<'_>>,
     ) {
-        let draw = |pass: &mut wgpu::RenderPass<'_>| {
-            pass.set_bind_group(0, &scene.frame_group, &[]);
-            pass.set_vertex_buffer(0, scene.vertices.slice(..));
-            pass.set_index_buffer(scene.indices.slice(..), wgpu::IndexFormat::Uint32);
-            for (instance, &(first, count, base)) in scene.draws.iter().enumerate() {
-                let instance = instance as u32;
-                pass.draw_indexed(first..first + count, base, instance..instance + 1);
+        let frame_group = viewport
+            .frame_group
+            .as_ref()
+            .expect("Renderer::prepare before encode");
+        let draw = |pass: &mut wgpu::RenderPass<'_>,
+                    pipelines: &[wgpu::RenderPipeline],
+                    index: &dyn Fn(&Draw) -> usize| {
+            pass.set_bind_group(0, frame_group, &[]);
+            let (mut mesh_bound, mut material_bound) = (None, None);
+            for d in &viewport.draws {
+                pass.set_pipeline(&pipelines[index(d)]);
+                if material_bound != Some(d.material) {
+                    pass.set_bind_group(2, &world.material(d.material).group, &[]);
+                    material_bound = Some(d.material);
+                }
+                let mesh = world.mesh(d.mesh);
+                if mesh_bound != Some(d.mesh) {
+                    pass.set_vertex_buffer(0, mesh.vertices.slice(..));
+                    pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
+                    mesh_bound = Some(d.mesh);
+                }
+                pass.draw_indexed(0..mesh.index_count, 0, d.instances.clone());
             }
         };
         let query_set = timestamps.map(|t| t.query_set);
 
-        for (i, shadow) in scene.shadow_passes.iter().enumerate() {
+        for (i, shadow) in viewport.shadow_passes.iter().enumerate() {
+            let maps = if shadow.point {
+                &viewport.point_shadows
+            } else {
+                &viewport.directional_shadows
+            };
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("shadow"),
                 color_attachments: &[],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &shadow.target,
+                    view: &maps.layer_views[shadow.layer as usize],
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Clear(0.0),
                         store: wgpu::StoreOp::Store,
@@ -1009,39 +1251,37 @@ impl Renderer {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            pass.set_pipeline(if shadow.local {
-                &self.local_shadow_pipeline
-            } else {
-                &self.shadow_pipeline
-            });
             pass.set_bind_group(
                 1,
-                &scene.shadow_view_group,
+                viewport.shadow_view_group.as_ref(),
                 &[shadow.view * SHADOW_VIEW_STRIDE as u32],
             );
-            draw(&mut pass);
+            draw(&mut pass, &self.shadow_pipelines, &|d: &Draw| {
+                shadow_pipeline_index(shadow.local, d.face, d.phase != Phase::Opaque)
+            });
         }
 
+        let targets = &viewport.targets;
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("lit"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &scene.msaa_view,
+                view: &targets.msaa_view,
                 depth_slice: None,
-                resolve_target: Some(&scene.hdr_view),
+                resolve_target: Some(&targets.hdr_view),
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(scene.clear_color),
+                    load: wgpu::LoadOp::Clear(viewport.clear_color),
                     store: wgpu::StoreOp::Discard,
                 },
             })],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: &scene.depth_view,
+                view: &targets.depth_view,
                 depth_ops: Some(wgpu::Operations {
                     load: wgpu::LoadOp::Clear(0.0),
                     store: wgpu::StoreOp::Discard,
                 }),
                 stencil_ops: None,
             }),
-            timestamp_writes: query_set.filter(|_| scene.shadow_passes.is_empty()).map(
+            timestamp_writes: query_set.filter(|_| viewport.shadow_passes.is_empty()).map(
                 |query_set| wgpu::RenderPassTimestampWrites {
                     query_set,
                     beginning_of_pass_write_index: Some(0),
@@ -1051,15 +1291,16 @@ impl Renderer {
             occlusion_query_set: None,
             multiview_mask: None,
         });
-        pass.set_pipeline(&self.lit_pipeline);
-        pass.set_bind_group(1, &scene.lighting_group, &[]);
-        draw(&mut pass);
+        pass.set_bind_group(1, viewport.lighting_group.as_ref(), &[]);
+        draw(&mut pass, &self.lit_pipelines, &|d: &Draw| {
+            d.face * 3 + d.phase as usize
+        });
         drop(pass);
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("tonemap"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &scene.post_view,
+                view: &targets.post_view,
                 depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
@@ -1072,8 +1313,8 @@ impl Renderer {
             occlusion_query_set: None,
             multiview_mask: None,
         });
-        pass.set_pipeline(&self.tonemap_pipelines[tonemap_index(scene.tonemapping)]);
-        pass.set_bind_group(0, &scene.tonemap_group, &[]);
+        pass.set_pipeline(&self.tonemap_pipelines[tonemap_index(viewport.tonemapping)]);
+        pass.set_bind_group(0, viewport.tonemap.as_ref().map(|(_, g)| g), &[]);
         pass.draw(0..3, 0..1);
         drop(pass);
 
@@ -1099,14 +1340,96 @@ impl Renderer {
             multiview_mask: None,
         });
         pass.set_pipeline(&self.blit_pipeline);
-        pass.set_bind_group(0, &scene.blit_group, &[]);
+        pass.set_bind_group(0, &targets.blit_group, &[]);
         pass.draw(0..3, 0..1);
     }
 }
 
-impl PreparedScene {
+impl Viewport {
+    /// Targets for a `width`×`height` output; call [`Renderer::prepare`] before each frame.
+    pub fn new(renderer: &Renderer, width: u32, height: u32) -> Self {
+        let device = &renderer.device;
+        Self {
+            width,
+            height,
+            targets: Targets::new(renderer, width, height),
+            tonemap: None,
+            frame_buffer: device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("frame"),
+                size: std::mem::size_of::<FrameUniform>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }),
+            instance_buffer: Growable::new(device, "instances", wgpu::BufferUsages::STORAGE),
+            light_buffer: Growable::new(device, "lights", wgpu::BufferUsages::STORAGE),
+            shadow_view_buffer: Growable::new(device, "shadow views", wgpu::BufferUsages::UNIFORM),
+            frame_group: None,
+            shadow_view_group: None,
+            lighting_group: None,
+            directional_shadows: ShadowArray::new(device, "directional shadow maps", 1, 1, false),
+            point_shadows: ShadowArray::new(device, "point shadow maps", 1, 6, true),
+            environment: None,
+            shadow_passes: Vec::new(),
+            draws: Vec::new(),
+            clear_color: wgpu::Color::BLACK,
+            tonemapping: Tonemapping::default(),
+        }
+    }
+
+    /// Recreates the size-dependent targets (after a window resize).
+    pub fn resize(&mut self, renderer: &Renderer, width: u32, height: u32) {
+        if (width, height) != (self.width, self.height) {
+            self.width = width;
+            self.height = height;
+            self.targets = Targets::new(renderer, width, height);
+            self.tonemap = None;
+        }
+    }
+
     pub fn size(&self) -> (u32, u32) {
         (self.width, self.height)
+    }
+}
+
+impl Targets {
+    fn new(renderer: &Renderer, width: u32, height: u32) -> Self {
+        let device = &renderer.device;
+        let texture = |label, format, sample_count, usage| {
+            device
+                .create_texture(&wgpu::TextureDescriptor {
+                    label: Some(label),
+                    size: wgpu::Extent3d {
+                        width,
+                        height,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count,
+                    dimension: wgpu::TextureDimension::D2,
+                    format,
+                    usage,
+                    view_formats: &[],
+                })
+                .create_view(&Default::default())
+        };
+        let attachment = wgpu::TextureUsages::RENDER_ATTACHMENT;
+        let sampled = attachment | wgpu::TextureUsages::TEXTURE_BINDING;
+        let post_view = texture("tone-mapped colour", HDR_FORMAT, 1, sampled);
+        let blit_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("blit"),
+            layout: &renderer.blit_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&post_view),
+            }],
+        });
+        Self {
+            msaa_view: texture("msaa hdr colour", HDR_FORMAT, SAMPLE_COUNT, attachment),
+            depth_view: texture("depth", DEPTH_FORMAT, SAMPLE_COUNT, attachment),
+            hdr_view: texture("hdr colour", HDR_FORMAT, 1, sampled),
+            post_view,
+            blit_group,
+        }
     }
 }
 

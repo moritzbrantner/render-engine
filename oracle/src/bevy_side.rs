@@ -5,6 +5,7 @@
 //! Each Bevy app runs in its own process (`oracle --bevy-side <scenario>`), because a Bevy
 //! renderer cannot be created twice in one process.
 
+use crate::content::Geometry;
 use crate::scenarios::Scenario;
 use bevy::{
     app::{AppExit, ScheduleRunnerPlugin},
@@ -29,9 +30,19 @@ use bevy::{
     },
     window::ExitCondition,
 };
-use render_engine::scene::{
-    Cubemap, FogFalloff as EngineFogFalloff, LightShadows, ShadowFilter, Shape,
-    Tonemapping as EngineTonemapping,
+use bevy::{
+    asset::RenderAssetUsages,
+    image::{ImageSampler, ImageSamplerDescriptor},
+    mesh::{Indices, PrimitiveTopology},
+    render::render_resource::Face,
+};
+use render_engine::{
+    material::{AlphaMode as EngineAlphaMode, TextureData},
+    mesh::{MeshData, Shape},
+    scene::{
+        Cubemap, FogFalloff as EngineFogFalloff, LightShadows, ShadowFilter,
+        Tonemapping as EngineTonemapping,
+    },
 };
 use std::{
     path::PathBuf,
@@ -92,10 +103,70 @@ fn cube_image(cube: &Cubemap) -> Image {
     image
 }
 
+/// The same vertex attributes and indices render-engine uploads, as a Bevy `Mesh`.
+fn mesh(m: &MeshData) -> Mesh {
+    let arrays3 =
+        |v: &[render_engine::glam::Vec3]| v.iter().map(|v| v.to_array()).collect::<Vec<_>>();
+    let arrays4 =
+        |v: &[render_engine::glam::Vec4]| v.iter().map(|v| v.to_array()).collect::<Vec<_>>();
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    )
+    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, arrays3(&m.positions))
+    .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, arrays3(&m.normals))
+    .with_inserted_indices(Indices::U32(m.indices.clone()));
+    if !m.uvs.is_empty() {
+        let uvs: Vec<[f32; 2]> = m.uvs.iter().map(|v| v.to_array()).collect();
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    }
+    if !m.tangents.is_empty() {
+        mesh.insert_attribute(Mesh::ATTRIBUTE_TANGENT, arrays4(&m.tangents));
+    }
+    if !m.colors.is_empty() {
+        mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, arrays4(&m.colors));
+    }
+    mesh
+}
+
+/// The same texels, mip chain and sampler render-engine uploads, as a Bevy `Image`.
+fn texture_image(t: &TextureData) -> Image {
+    let s = t.sampler;
+    let mut image = Image {
+        data: Some(t.levels.concat()),
+        data_order: TextureDataOrder::MipMajor,
+        sampler: ImageSampler::Descriptor(ImageSamplerDescriptor::from(
+            render_engine::wgpu::SamplerDescriptor {
+                address_mode_u: s.address_mode_u,
+                address_mode_v: s.address_mode_v,
+                mag_filter: s.mag_filter,
+                min_filter: s.min_filter,
+                mipmap_filter: s.mipmap_filter,
+                ..default()
+            },
+        )),
+        ..default()
+    };
+    let desc = &mut image.texture_descriptor;
+    desc.size = Extent3d {
+        width: t.width,
+        height: t.height,
+        depth_or_array_layers: 1,
+    };
+    desc.mip_level_count = t.levels.len() as u32;
+    desc.format = t.format;
+    image
+}
+
 pub fn run(scenario: Scenario, timed_frames: u32) -> BevyRun {
     let shared = Shared(Arc::new(Mutex::new(BevyRun::default())));
-    let scene = scenario.scene.clone();
     let (width, height) = (scenario.width, scenario.height);
+    let Scenario {
+        scene,
+        objects,
+        assets,
+        ..
+    } = scenario;
 
     let mut app = App::new();
     app.add_plugins(
@@ -281,26 +352,53 @@ pub fn run(scenario: Scenario, timed_frames: u32) -> BevyRun {
                     ),
                 ));
             }
-            for m in &scene.meshes {
-                let mesh = match m.shape {
-                    Shape::Cuboid(size) => meshes.add(Cuboid::new(size.x, size.y, size.z)),
-                    Shape::Plane(size) => {
+            let mesh_handles: Vec<Handle<Mesh>> =
+                assets.meshes.iter().map(|m| meshes.add(mesh(m))).collect();
+            let image_handles: Vec<Handle<Image>> = assets
+                .textures
+                .iter()
+                .map(|t| images.add(texture_image(t)))
+                .collect();
+            for m in &objects {
+                let mesh = match m.geometry {
+                    Geometry::Mesh(i) => mesh_handles[i].clone(),
+                    Geometry::Shape(Shape::Cuboid(size)) => {
+                        meshes.add(Cuboid::new(size.x, size.y, size.z))
+                    }
+                    Geometry::Shape(Shape::Plane(size)) => {
                         meshes.add(Plane3d::default().mesh().size(size.x, size.y))
                     }
-                    Shape::Sphere {
+                    Geometry::Shape(Shape::Sphere {
                         radius,
                         sectors,
                         stacks,
-                    } => meshes.add(Sphere::new(radius).mesh().uv(sectors, stacks)),
+                    }) => meshes.add(Sphere::new(radius).mesh().uv(sectors, stacks)),
                 };
                 let mat = m.material;
+                let texture = |i: Option<usize>| i.map(|i| image_handles[i].clone());
+                let c = mat.base_color;
                 commands.spawn((
                     Mesh3d(mesh),
                     MeshMaterial3d(materials.add(StandardMaterial {
-                        base_color: linear(mat.base_color),
+                        base_color: Color::linear_rgba(c.x, c.y, c.z, mat.alpha),
+                        base_color_texture: texture(mat.base_color_texture),
+                        emissive: LinearRgba::rgb(mat.emissive.x, mat.emissive.y, mat.emissive.z),
+                        emissive_texture: texture(mat.emissive_texture),
                         metallic: mat.metallic,
                         perceptual_roughness: mat.perceptual_roughness,
+                        metallic_roughness_texture: texture(mat.metallic_roughness_texture),
                         reflectance: mat.reflectance,
+                        normal_map_texture: texture(mat.normal_map_texture),
+                        occlusion_texture: texture(mat.occlusion_texture),
+                        alpha_mode: match mat.alpha_mode {
+                            EngineAlphaMode::Opaque => AlphaMode::Opaque,
+                            EngineAlphaMode::Mask(cutoff) => AlphaMode::Mask(cutoff),
+                            EngineAlphaMode::Blend => AlphaMode::Blend,
+                        },
+                        double_sided: mat.double_sided,
+                        // What Bevy's glTF loader sets for `doubleSided`.
+                        cull_mode: (!mat.double_sided).then_some(Face::Back),
+                        unlit: mat.unlit,
                         ..default()
                     })),
                     Transform {

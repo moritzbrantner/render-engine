@@ -11,9 +11,14 @@ and GPU frame time. See [technical decisions](docs/technical-decisions.md).
 
 ## Shape of the engine
 
-- **Scene in physical units:** `render_engine::scene` describes camera, sun, point and spot
-  lights, ambient light and PBR meshes in Bevy's units (lux, lumens, cd/m², EV100, linear
-  colour), so each scenario has an exact Bevy counterpart.
+- **Consumer-owned frame:** the game keeps its wgpu device, window and UI. Meshes (glTF
+  attributes), textures and `StandardMaterial`s are uploaded once into a `World` under stable
+  handles. Each frame the game passes a list of instances (mesh, material, transform), and the
+  renderer encodes into the game's encoder and colour target. See
+  [consumer integration](docs/consumer-integration.md).
+- **Scene in physical units:** `render_engine::scene` describes the camera, sun, point and spot
+  lights, ambient light, environment map and fog in Bevy's units (lux, lumens, cd/m², EV100,
+  linear colour), so each scenario has an exact Bevy counterpart.
 - **wgpu renderer:** cascaded sun shadows (Bevy's cascade fitting and defaults: up to 4
   cascades with blended overlap, Gaussian 13-tap or hardware 2×2 PCF filtering) and a forward
   PBR pass (Filament/Bevy BRDF, 4× MSAA) into an `Rgba16Float` HDR target, then a tone-mapping
@@ -33,9 +38,20 @@ and GPU frame time. See [technical decisions](docs/technical-decisions.md).
 
 ## Example
 
+The consumer owns the device and the frame: content goes into a `World` once, and every frame
+is a `Scene` (camera and lights) plus a list of instances, encoded into the consumer's target
+(see [consumer integration](docs/consumer-integration.md)). `Headless` runs the same path
+offscreen:
+
 ```rust,no_run
-use glam::{Vec2, Vec3, Vec4};
-use render_engine::{headless::Headless, scene::*};
+use glam::{Mat4, Vec2, Vec3, Vec4};
+use render_engine::{headless::Headless, material::*, mesh::*, renderer::Viewport, scene::*, world::*};
+
+let gpu = Headless::new()?;
+let mut world = World::new(gpu.renderer());
+let ground = world.add_mesh(&MeshData::shape(Shape::Plane(Vec2::splat(20.0))));
+let cube = world.add_mesh(&MeshData::shape(Shape::Cuboid(Vec3::ONE)));
+let white = world.add_material(&StandardMaterial::default());
 
 let scene = Scene {
     camera: Camera { eye: Vec3::new(6.0, 5.0, 8.0), target: Vec3::ZERO, fov_y: 0.785, near: 0.1, ev100: 10.5, shadow_filter: ShadowFilter::Gaussian, tonemapping: Tonemapping::TonyMcMapface },
@@ -46,16 +62,19 @@ let scene = Scene {
         illuminance: 10_000.0,
         shadows: Some(SunShadows::default()),
     }),
+    point_lights: vec![],
+    spot_lights: vec![],
+    shadow_maps: ShadowMapSizes::default(),
     ambient: Ambient { color: Vec3::ONE, brightness: 1500.0 },
     environment: None,
     fog: Some(Fog { color: Vec4::new(0.3, 0.5, 0.8, 1.0), falloff: FogFalloff::from_visibility(60.0), ..Fog::default() }),
-    meshes: vec![
-        MeshInstance::new(Shape::Plane(Vec2::splat(20.0)), Vec3::ZERO, Material::default()),
-        MeshInstance::new(Shape::Cuboid(Vec3::ONE), Vec3::new(0.0, 0.5, 0.0), Material::default()),
-    ],
 };
-let gpu = Headless::new()?;
-let frame = gpu.render(&gpu.prepare(&scene, 1280, 720))?;
+let instances = [
+    Instance { mesh: ground, material: white, world_from_local: Mat4::IDENTITY },
+    Instance { mesh: cube, material: white, world_from_local: Mat4::from_translation(Vec3::new(0.0, 0.5, 0.0)) },
+];
+let mut viewport = Viewport::new(gpu.renderer(), 1280, 720);
+let frame = gpu.render(&mut viewport, &world, &scene, &instances)?;
 # Ok::<(), render_engine::headless::Error>(())
 ```
 
@@ -67,6 +86,7 @@ let frame = gpu.render(&gpu.prepare(&scene, 1280, 720))?;
 | `sun_cascades` | 200 m corridor, 4 cascades (Bevy defaults) with overlap blending, Gaussian filter | 0.0001 / 0.0023 | 0.183 / 0.263 (0.70×) | 35.7 / 18.0 |
 | `fog_modes` (8 views) | 180 m double row of pillars towards a low sun; linear, exponential, exponential squared and atmospheric fog, each without and with shadowed sun inscattering | ≤ 0.0000 / 0.0007 | 0.16–0.25 / 0.25–0.30 (≤ 0.89×) | 22–30 / 16–33 |
 | `point_spot` (3 views) | dusk courtyard: 3 point lights (one with cube shadows, one whose range ends in view), 2 spot lights (one shadowed from above, one pointing up a wall); Gaussian, 2×2 PCF on 512/256 maps, and soft shadows (PCSS) close up | ≤ 0.0000 / 0.0009 | 0.23–0.42 / 0.74–0.92 (≤ 0.45×) | 23–48 / 26–53 |
+| `textured_props` | CC0 glTF props through the consumer API: base-colour, normal and metallic-roughness textures, vertex colours, alpha-masked double-sided bushes (one mirrored) with cut-out shadows, a blended sphere, one crate mesh drawn twice; cascaded sun + IBL | 0.0000 / 0.0007 | 0.323 / 0.573 (0.56×) | 76.4 / 82.2 |
 
 ## Development
 

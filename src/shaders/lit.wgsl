@@ -68,10 +68,30 @@ const LIGHT_SPOT_Y_NEGATIVE: u32 = 2u;
 struct Instance {
     world_from_local: mat4x4<f32>,
     normal_from_local: mat3x3<f32>,
-    base_color: vec4<f32>,
-    // x: metallic, y: perceptual roughness, z: reflectance.
-    pbr: vec4<f32>,
+    // x: 1 when the mesh has tangents, y: 1 when the model matrix mirrors (negative determinant).
+    flags: vec4<u32>,
 }
+
+// Bevy `StandardMaterial` (the glTF core subset), see `world.rs`.
+struct Material {
+    base_color: vec4<f32>,
+    // rgb: emissive radiance (cd/m²), a: how much exposure applies (1).
+    emissive: vec4<f32>,
+    metallic: f32,
+    perceptual_roughness: f32,
+    reflectance: f32,
+    alpha_cutoff: f32,
+    flags: u32,
+}
+
+const MATERIAL_BASE_COLOR_TEXTURE: u32 = 1u;
+const MATERIAL_EMISSIVE_TEXTURE: u32 = 2u;
+const MATERIAL_METALLIC_ROUGHNESS_TEXTURE: u32 = 4u;
+const MATERIAL_OCCLUSION_TEXTURE: u32 = 8u;
+const MATERIAL_NORMAL_MAP: u32 = 16u;
+const MATERIAL_DOUBLE_SIDED: u32 = 32u;
+const MATERIAL_UNLIT: u32 = 64u;
+const MATERIAL_ALPHA_BLEND: u32 = 256u;
 
 @group(0) @binding(0) var<uniform> frame: Frame;
 @group(0) @binding(1) var<storage, read> instances: array<Instance>;
@@ -87,11 +107,36 @@ struct Instance {
 @group(1) @binding(8) var shadow_linear_sampler: sampler;
 // Shadow pass only: the cascade being rendered (dynamic offset).
 @group(1) @binding(2) var<uniform> cascade_clip_from_world: mat4x4<f32>;
+// Both passes: the draw's material. Empty texture slots hold a white texel and are not sampled.
+@group(2) @binding(0) var<uniform> material: Material;
+@group(2) @binding(1) var base_color_texture: texture_2d<f32>;
+@group(2) @binding(2) var base_color_sampler: sampler;
+@group(2) @binding(3) var emissive_texture: texture_2d<f32>;
+@group(2) @binding(4) var emissive_sampler: sampler;
+@group(2) @binding(5) var metallic_roughness_texture: texture_2d<f32>;
+@group(2) @binding(6) var metallic_roughness_sampler: sampler;
+@group(2) @binding(7) var occlusion_texture: texture_2d<f32>;
+@group(2) @binding(8) var occlusion_sampler: sampler;
+@group(2) @binding(9) var normal_map_texture: texture_2d<f32>;
+@group(2) @binding(10) var normal_map_sampler: sampler;
 
 struct VertexIn {
     @builtin(instance_index) instance: u32,
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
+    @location(2) uv: vec2<f32>,
+    @location(3) tangent: vec4<f32>,
+    @location(4) color: vec4<f32>,
+}
+
+// The material's base colour times its texture (Bevy samples it the same way in the main pass
+// and, for alpha-masked casters, the shadow pass).
+fn textured_base_color(uv: vec2<f32>) -> vec4<f32> {
+    var color = material.base_color;
+    if ((material.flags & MATERIAL_BASE_COLOR_TEXTURE) != 0u) {
+        color *= textureSample(base_color_texture, base_color_sampler, uv);
+    }
+    return color;
 }
 
 // ---------------------------------------------------------------- shadow pass
@@ -101,29 +146,55 @@ struct VertexIn {
 // leaves depth unclipped and the rasterizer clamps; otherwise `shadow_emulated_*` clamp in the
 // fragment shader. Clamping per vertex instead would bend the depth of large triangles that
 // reach past the near plane (a ground plane stretching towards a low sun).
-@vertex
-fn shadow_vs(in: VertexIn) -> @builtin(position) vec4<f32> {
-    let world = instances[in.instance].world_from_local * vec4(in.position, 1.0);
-    return cascade_clip_from_world * world;
-}
-
-struct ShadowEmulatedOut {
+//
+// Alpha-masked and blended casters cut their shadows out by the base colour's alpha
+// (`shadow_masked_fs`, Bevy `prepass_alpha_discard`).
+struct ShadowOut {
     @builtin(position) clip: vec4<f32>,
-    @location(0) unclipped_depth: f32,
+    @location(0) uv: vec2<f32>,
+    @location(1) unclipped_depth: f32,
+}
+
+fn shadow_vertex(in: VertexIn) -> ShadowOut {
+    let world = instances[in.instance].world_from_local * vec4(in.position, 1.0);
+    var out: ShadowOut;
+    out.clip = cascade_clip_from_world * world;
+    out.uv = in.uv;
+    out.unclipped_depth = out.clip.z;
+    return out;
 }
 
 @vertex
-fn shadow_emulated_vs(in: VertexIn) -> ShadowEmulatedOut {
-    let world = instances[in.instance].world_from_local * vec4(in.position, 1.0);
-    var out: ShadowEmulatedOut;
-    out.clip = cascade_clip_from_world * world;
-    out.unclipped_depth = out.clip.z;
+fn shadow_vs(in: VertexIn) -> ShadowOut {
+    return shadow_vertex(in);
+}
+
+@vertex
+fn shadow_emulated_vs(in: VertexIn) -> ShadowOut {
+    var out = shadow_vertex(in);
     out.clip.z = min(out.clip.z, 1.0);
     return out;
 }
 
+fn shadow_alpha_discard(uv: vec2<f32>) {
+    if (textured_base_color(uv).a < material.alpha_cutoff) {
+        discard;
+    }
+}
+
 @fragment
-fn shadow_emulated_fs(in: ShadowEmulatedOut) -> @builtin(frag_depth) f32 {
+fn shadow_masked_fs(in: ShadowOut) {
+    shadow_alpha_discard(in.uv);
+}
+
+@fragment
+fn shadow_emulated_fs(in: ShadowOut) -> @builtin(frag_depth) f32 {
+    return min(in.unclipped_depth, 1.0);
+}
+
+@fragment
+fn shadow_emulated_masked_fs(in: ShadowOut) -> @builtin(frag_depth) f32 {
+    shadow_alpha_discard(in.uv);
     return min(in.unclipped_depth, 1.0);
 }
 
@@ -134,8 +205,13 @@ struct VertexOut {
     @location(0) world: vec3<f32>,
     @location(1) normal: vec3<f32>,
     @location(2) @interpolate(flat) instance: u32,
+    @location(3) uv: vec2<f32>,
+    @location(4) tangent: vec4<f32>,
+    @location(5) color: vec4<f32>,
 }
 
+// Bevy `mesh_normal_local_to_world` and `mesh_tangent_local_to_world`: normalised per vertex
+// (MikkTSpace), not again per fragment.
 @vertex
 fn lit_vs(in: VertexIn) -> VertexOut {
     let inst = instances[in.instance];
@@ -143,8 +219,23 @@ fn lit_vs(in: VertexIn) -> VertexOut {
     var out: VertexOut;
     out.clip = frame.clip_from_world * world;
     out.world = world.xyz;
-    out.normal = inst.normal_from_local * in.normal;
+    out.normal = in.normal;
+    if (any(in.normal != vec3(0.0))) {
+        out.normal = normalize(inst.normal_from_local * in.normal);
+    }
+    out.tangent = in.tangent;
+    if (any(in.tangent != vec4(0.0))) {
+        let m = mat3x3(
+            inst.world_from_local[0].xyz,
+            inst.world_from_local[1].xyz,
+            inst.world_from_local[2].xyz,
+        );
+        let sign = select(1.0, -1.0, inst.flags.y != 0u);
+        out.tangent = vec4(normalize(m * in.tangent.xyz), in.tangent.w * sign);
+    }
     out.instance = in.instance;
+    out.uv = in.uv;
+    out.color = in.color;
     return out;
 }
 
@@ -630,16 +721,115 @@ fn environment_map_light(
     return out;
 }
 
+// Every material input of a fragment (Bevy `pbr_input_from_standard_material`). All texture
+// sampling happens here, before any alpha discard, in uniform control flow.
+struct MaterialSample {
+    base_color: vec4<f32>,
+    emissive: vec3<f32>,
+    metallic: f32,
+    perceptual_roughness: f32,
+    diffuse_occlusion: f32,
+    // Tangent-space normal in [-1, 1], when the material has a normal map.
+    Nt: vec3<f32>,
+}
+
+fn sample_material(in: VertexOut) -> MaterialSample {
+    var m: MaterialSample;
+    // Bevy: vertex colour, times the material colour, times the texture.
+    m.base_color = in.color * material.base_color;
+    if ((material.flags & MATERIAL_BASE_COLOR_TEXTURE) != 0u) {
+        m.base_color *= textureSample(base_color_texture, base_color_sampler, in.uv);
+    }
+    m.emissive = material.emissive.rgb;
+    if ((material.flags & MATERIAL_EMISSIVE_TEXTURE) != 0u) {
+        m.emissive *= textureSample(emissive_texture, emissive_sampler, in.uv).rgb;
+    }
+    m.metallic = material.metallic;
+    m.perceptual_roughness = material.perceptual_roughness;
+    if ((material.flags & MATERIAL_METALLIC_ROUGHNESS_TEXTURE) != 0u) {
+        let mr = textureSample(metallic_roughness_texture, metallic_roughness_sampler, in.uv);
+        m.perceptual_roughness *= mr.g;
+        m.metallic *= mr.b;
+    }
+    m.diffuse_occlusion = 1.0;
+    if ((material.flags & MATERIAL_OCCLUSION_TEXTURE) != 0u) {
+        m.diffuse_occlusion = textureSample(occlusion_texture, occlusion_sampler, in.uv).r;
+    }
+    if ((material.flags & MATERIAL_NORMAL_MAP) != 0u) {
+        m.Nt = textureSample(normal_map_texture, normal_map_sampler, in.uv).rgb * 2.0 - 1.0;
+    }
+    return m;
+}
+
+// Opaque and blended materials.
 @fragment
-fn lit_fs(in: VertexOut) -> @location(0) vec4<f32> {
-    let inst = instances[in.instance];
-    let base = inst.base_color.rgb;
-    let metallic = inst.pbr.x;
-    let perceptual_roughness = inst.pbr.y;
-    let reflectance = inst.pbr.z;
+fn lit_fs(in: VertexOut, @builtin(front_facing) is_front: bool) -> @location(0) vec4<f32> {
+    var m = sample_material(in);
+    if ((material.flags & MATERIAL_ALPHA_BLEND) == 0u) {
+        m.base_color.a = 1.0;
+    }
+    return shade(in, is_front, m);
+}
+
+// Alpha-masked materials (Bevy `alpha_discard`).
+@fragment
+fn lit_masked_fs(in: VertexOut, @builtin(front_facing) is_front: bool) -> @location(0) vec4<f32> {
+    var m = sample_material(in);
+    if (m.base_color.a < material.alpha_cutoff) {
+        discard;
+    }
+    m.base_color.a = 1.0;
+    return shade(in, is_front, m);
+}
+
+// Bevy `pbr_fragment` + `apply_pbr_lighting` + `main_pass_post_lighting_processing`. Front faces
+// come from the pipeline, which winds mirrored instances clockwise (Bevy's
+// `winding_corrected_front_facing`).
+fn shade(in: VertexOut, is_front: bool, m: MaterialSample) -> vec4<f32> {
+    let double_sided = (material.flags & MATERIAL_DOUBLE_SIDED) != 0u;
+    let has_tangents = instances[in.instance].flags.x != 0u;
+    let normal_mapped = has_tangents && (material.flags & MATERIAL_NORMAL_MAP) != 0u;
+
+    // Bevy `prepare_world_normal`: back faces of double-sided materials flip the normal, unless
+    // the mesh has tangents or the material a normal map (then the normal map flips it).
+    var world_normal = in.normal;
+    if (double_sided && !is_front && !has_tangents && (material.flags & MATERIAL_NORMAL_MAP) == 0u) {
+        world_normal = -world_normal;
+    }
+
+    var color: vec4<f32>;
+    if ((material.flags & MATERIAL_UNLIT) != 0u) {
+        color = m.base_color;
+    } else {
+        var N = normalize(world_normal);
+        if (normal_mapped) {
+            // Bevy `calculate_tbn_mikktspace` + `apply_normal_mapping`: no renormalisation or
+            // Gram-Schmidt before the map is applied.
+            let T = in.tangent.xyz;
+            let B = in.tangent.w * cross(world_normal, T);
+            var Nt = m.Nt;
+            if (double_sided && !is_front) {
+                Nt = -Nt;
+            }
+            N = normalize(Nt.x * T + Nt.y * B + Nt.z * world_normal);
+        }
+        color = vec4(lit_radiance(in, world_normal, N, m), m.base_color.a);
+    }
+    if (frame.fog_bi.w > 0.5) {
+        return vec4(apply_fog(color.rgb, in.world), color.a);
+    }
+    return color;
+}
+
+// Exposed radiance of a lit fragment with shading normal `N`; shadows are looked up with the
+// interpolated vertex normal, as in Bevy.
+fn lit_radiance(in: VertexOut, world_normal: vec3<f32>, N: vec3<f32>, m: MaterialSample) -> vec3<f32> {
+    let base = m.base_color.rgb;
+    let metallic = m.metallic;
+    let perceptual_roughness = m.perceptual_roughness;
+    let reflectance = material.reflectance;
     let roughness = perceptual_roughness_to_roughness(perceptual_roughness);
 
-    let N = normalize(in.normal);
     let V = normalize(frame.eye.xyz - in.world);
     let NdotV = max(dot(N, V), 0.0001);
 
@@ -665,7 +855,7 @@ fn lit_fs(in: VertexOut) -> @location(0) vec4<f32> {
         let light = lights[i];
         var shadow = 1.0;
         if ((light.flags & LIGHT_SHADOWS) != 0u) {
-            shadow = fetch_point_shadow(light, in.world, N, in.clip.xy);
+            shadow = fetch_point_shadow(light, in.world, world_normal, in.clip.xy);
         }
         direct += point_light(light, surface) * shadow;
     }
@@ -673,7 +863,7 @@ fn lit_fs(in: VertexOut) -> @location(0) vec4<f32> {
         let light = lights[i];
         var shadow = 1.0;
         if ((light.flags & LIGHT_SHADOWS) != 0u) {
-            shadow = fetch_spot_shadow(light, in.world, N, in.clip.xy);
+            shadow = fetch_spot_shadow(light, in.world, world_normal, in.clip.xy);
         }
         direct += spot_light(light, surface) * shadow;
     }
@@ -696,7 +886,7 @@ fn lit_fs(in: VertexOut) -> @location(0) vec4<f32> {
 
         var shadow = 1.0;
         if (frame.flags.y > 0.5) {
-            shadow = sun_shadow(in.world, N);
+            shadow = sun_shadow(in.world, world_normal);
         }
         direct += (diffuse + specular) * NdotL * frame.sun_color.rgb * shadow;
     }
@@ -705,20 +895,20 @@ fn lit_fs(in: VertexOut) -> @location(0) vec4<f32> {
     let specular_ambient = env_brdf_approx(F0, f_ab);
     let specular_occlusion = saturate(dot(F0, vec3(50.0 * 0.33)));
     // Bevy's order: environment diffuse, environment specular, then the uniform ambient light.
+    // The occlusion texture darkens the diffuse environment light and all of the ambient light.
     var indirect = vec3(0.0);
     if (frame.environment.z > 0.5) {
         let env = environment_map_light(
             N, V, perceptual_roughness, roughness, diffuse_color, metallic, f0_dielectric, base, f_ab);
-        indirect += env.diffuse;
+        indirect += env.diffuse * m.diffuse_occlusion;
         indirect += env.specular;
     }
-    indirect += (diffuse_ambient + specular_ambient * specular_occlusion) * frame.ambient_color.rgb;
+    indirect += (diffuse_ambient + specular_ambient * specular_occlusion) * frame.ambient_color.rgb
+        * m.diffuse_occlusion;
 
-    let color = frame.flags.x * (direct + indirect);
-    if (frame.fog_bi.w > 0.5) {
-        return vec4(apply_fog(color, in.world), 1.0);
-    }
-    return vec4(color, 1.0);
+    // Emissive light is scaled by alpha and exposed like the rest (Bevy, `emissive.a` = 1).
+    let emissive = m.emissive * m.base_color.a * mix(1.0, frame.flags.x, material.emissive.a);
+    return frame.flags.x * (direct + indirect) + emissive;
 }
 
 // ---------------------------------------------------------------- distance fog

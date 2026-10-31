@@ -1,13 +1,16 @@
-//! Engine-neutral scene description. The oracle builds the same `Scene` on Bevy and on this
-//! renderer, so every field here has a direct Bevy counterpart (listed per field).
+//! Engine-neutral description of a frame's view and lighting. The oracle builds the same `Scene`
+//! on Bevy and on this renderer, so every field here has a direct Bevy counterpart (listed per
+//! field). The geometry comes separately, as [`Instance`](crate::world::Instance)s of a
+//! [`World`](crate::world::World).
 //!
 //! Units follow Bevy's physical conventions: lengths in metres, directional illuminance in lux,
 //! point and spot light power in lumens, ambient and environment-map brightness in cd/m², exposure as EV100. Colours are linear RGB.
 
-use glam::{Quat, Vec2, Vec3, Vec4};
+use glam::{Vec3, Vec4};
 use std::sync::Arc;
 
-/// Everything one frame needs.
+/// The camera and lighting of one frame: plain values, rebuilt or edited every frame at no
+/// cost. Environment maps are uploaded once per distinct `Arc`.
 #[derive(Clone, Debug)]
 pub struct Scene {
     pub camera: Camera,
@@ -26,7 +29,6 @@ pub struct Scene {
     /// Distance fog over lit geometry (Bevy `DistanceFog` on the camera). The clear colour is not
     /// fogged, as in Bevy; set it to the fog colour for a fogged horizon.
     pub fog: Option<Fog>,
-    pub meshes: Vec<MeshInstance>,
 }
 
 /// Distance fog (Bevy `DistanceFog`), blended into the exposed HDR colour of every lit fragment
@@ -438,70 +440,5 @@ impl std::fmt::Debug for Cubemap {
             .field("format", &self.format)
             .field("mip_levels", &self.levels.len())
             .finish()
-    }
-}
-
-/// A metallic-roughness material (Bevy `StandardMaterial` without textures).
-#[derive(Clone, Copy, Debug)]
-pub struct Material {
-    /// Linear RGB.
-    pub base_color: Vec3,
-    pub metallic: f32,
-    pub perceptual_roughness: f32,
-    /// Dielectric specular reflectance, 0.5 = 4% F0.
-    pub reflectance: f32,
-}
-
-impl Default for Material {
-    /// Bevy's `StandardMaterial` defaults.
-    fn default() -> Self {
-        Self {
-            base_color: Vec3::ONE,
-            metallic: 0.0,
-            perceptual_roughness: 0.5,
-            reflectance: 0.5,
-        }
-    }
-}
-
-/// Built-in shapes, sized like their Bevy primitives.
-#[derive(Clone, Copy, Debug)]
-pub enum Shape {
-    /// Bevy `Cuboid::new(x, y, z)`: full side lengths.
-    Cuboid(Vec3),
-    /// Bevy `Plane3d::default().mesh().size(x, z)`: an XZ plane facing +Y.
-    Plane(Vec2),
-    /// Bevy `Sphere::new(radius).mesh().uv(sectors, stacks)`: a UV sphere with its poles on ±Z
-    /// and smooth normals.
-    Sphere {
-        radius: f32,
-        sectors: u32,
-        stacks: u32,
-    },
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct MeshInstance {
-    pub shape: Shape,
-    pub translation: Vec3,
-    pub rotation: Quat,
-    pub scale: Vec3,
-    pub material: Material,
-}
-
-impl MeshInstance {
-    pub fn new(shape: Shape, translation: Vec3, material: Material) -> Self {
-        Self {
-            shape,
-            translation,
-            rotation: Quat::IDENTITY,
-            scale: Vec3::ONE,
-            material,
-        }
-    }
-
-    pub fn rotated(mut self, rotation: Quat) -> Self {
-        self.rotation = rotation;
-        self
     }
 }
