@@ -1,5 +1,6 @@
 //! The wgpu renderer: one shadow pass per sun cascade, one forward PBR pass with 4× MSAA into an
-//! HDR target, and a tone-mapping pass into the output.
+//! HDR target, a tone-mapping pass into an Rgba16Float target and a blit into the output (Bevy's
+//! tonemapping and upscaling nodes).
 
 use crate::{
     mesh::{Geometry, Vertex},
@@ -67,6 +68,9 @@ pub struct Renderer {
     cascade_layout: wgpu::BindGroupLayout,
     lighting_layout: wgpu::BindGroupLayout,
     tonemap_layout: wgpu::BindGroupLayout,
+    blit_layout: wgpu::BindGroupLayout,
+    /// Copies the tone-mapped Rgba16Float frame into the output (Bevy's upscaling blit).
+    blit_pipeline: wgpu::RenderPipeline,
     shadow_pipeline: wgpu::RenderPipeline,
     lit_pipeline: wgpu::RenderPipeline,
     /// Indexed by [`tonemap_index`].
@@ -110,6 +114,9 @@ pub struct PreparedScene {
     hdr_view: wgpu::TextureView,
     tonemap_group: wgpu::BindGroup,
     tonemapping: Tonemapping,
+    /// The tone-mapped frame (Rgba16Float, like Bevy's main texture), read by the blit pass.
+    post_view: wgpu::TextureView,
+    blit_group: wgpu::BindGroup,
 }
 
 /// Where a frame writes GPU timestamps: index 0 at the start of the first pass, index 1 at the
@@ -354,11 +361,51 @@ impl Renderer {
                         constants: &constants,
                         ..Default::default()
                     },
-                    targets: &[Some(color_format.into())],
+                    targets: &[Some(HDR_FORMAT.into())],
                 }),
                 multiview_mask: None,
                 cache: None,
             })
+        });
+        let blit_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("blit"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            }],
+        });
+        let blit_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("blit"),
+            layout: Some(
+                &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("blit"),
+                    bind_group_layouts: &[Some(&blit_layout)],
+                    immediate_size: 0,
+                }),
+            ),
+            vertex: wgpu::VertexState {
+                module: &tonemap_shader,
+                entry_point: Some("tonemap_vs"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &tonemap_shader,
+                entry_point: Some("blit_fs"),
+                compilation_options: Default::default(),
+                targets: &[Some(color_format.into())],
+            }),
+            multiview_mask: None,
+            cache: None,
         });
         // Bevy's tone-mapping LUT sampler: trilinear, clamped.
         let lut_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -401,6 +448,8 @@ impl Renderer {
             cascade_layout,
             lighting_layout,
             tonemap_layout,
+            blit_layout,
+            blit_pipeline,
             shadow_pipeline,
             lit_pipeline,
             tonemap_pipelines,
@@ -667,23 +716,35 @@ impl Renderer {
                 })
                 .create_view(&Default::default())
         };
-        let hdr_view = device
-            .create_texture(&wgpu::TextureDescriptor {
-                label: Some("hdr colour"),
-                size: wgpu::Extent3d {
-                    width,
-                    height,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: HDR_FORMAT,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                    | wgpu::TextureUsages::TEXTURE_BINDING,
-                view_formats: &[],
-            })
-            .create_view(&Default::default());
+        let hdr_target = |label| {
+            device
+                .create_texture(&wgpu::TextureDescriptor {
+                    label: Some(label),
+                    size: wgpu::Extent3d {
+                        width,
+                        height,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: HDR_FORMAT,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                })
+                .create_view(&Default::default())
+        };
+        let hdr_view = hdr_target("hdr colour");
+        let post_view = hdr_target("tone-mapped colour");
+        let blit_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("blit"),
+            layout: &self.blit_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&post_view),
+            }],
+        });
         let tonemapping = cam.tonemapping;
         // Like Bevy, operators without a LUT still bind one (the small AgX LUT).
         let lut = match tonemapping {
@@ -739,6 +800,8 @@ impl Renderer {
             hdr_view,
             tonemap_group,
             tonemapping,
+            post_view,
+            blit_group,
         }
     }
 
@@ -827,6 +890,27 @@ impl Renderer {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("tonemap"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &scene.post_view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        pass.set_pipeline(&self.tonemap_pipelines[tonemap_index(scene.tonemapping)]);
+        pass.set_bind_group(0, &scene.tonemap_group, &[]);
+        pass.draw(0..3, 0..1);
+        drop(pass);
+
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("blit"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: target,
                 depth_slice: None,
                 resolve_target: None,
@@ -836,7 +920,7 @@ impl Renderer {
                 },
             })],
             depth_stencil_attachment: None,
-            // The frame ends at the tone-mapping pass.
+            // The frame ends at the blit.
             timestamp_writes: query_set.map(|query_set| wgpu::RenderPassTimestampWrites {
                 query_set,
                 beginning_of_pass_write_index: None,
@@ -845,8 +929,8 @@ impl Renderer {
             occlusion_query_set: None,
             multiview_mask: None,
         });
-        pass.set_pipeline(&self.tonemap_pipelines[tonemap_index(scene.tonemapping)]);
-        pass.set_bind_group(0, &scene.tonemap_group, &[]);
+        pass.set_pipeline(&self.blit_pipeline);
+        pass.set_bind_group(0, &scene.blit_group, &[]);
         pass.draw(0..3, 0..1);
     }
 }

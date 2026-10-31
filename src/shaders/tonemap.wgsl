@@ -1,4 +1,5 @@
-// Tone-mapping pass: reads the resolved HDR frame and writes display colour into the (sRGB) output.
+// Tone-mapping pass: reads the resolved HDR frame and writes display colour into an Rgba16Float
+// target, which the blit pass copies into the (sRGB) output.
 //
 // Ported from Bevy 0.20 `bevy_core_pipeline` (`tonemapping.wesl`, `tonemapping_frag.wesl`), MIT or
 // Apache-2.0, see `src/luts/README.md`. Bevy's default colour grading is the identity and
@@ -104,9 +105,19 @@ fn tonemap_fs(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> 
     // Bevy's post-tonemapping saturation at its default of 1.
     let luma = luminance(out);
     out = mix(vec3(luma), out, vec3(1.0));
-    // Bevy stores the tone-mapped frame in its Rgba16Float main texture before the final blit
-    // into the output; round through f16 the same way so 8-bit outputs agree.
-    let rg = unpack2x16float(pack2x16float(out.rg));
-    let ba = unpack2x16float(pack2x16float(vec2(out.b, hdr.a)));
-    return vec4(rg, ba);
+    return vec4(out, hdr.a);
+}
+
+// --- Blit (Bevy's upscaling node, `blit.wesl`) ---
+//
+// Bevy stores the tone-mapped frame in its Rgba16Float main texture and copies it into the
+// output with a non-filtering sampler. Tone mapping into a real Rgba16Float target and copying
+// it here leaves that rounding to the device's own f16 store, as on Bevy: lavapipe's store
+// does not round to nearest like a shader-side `pack2x16float` (D4).
+
+@group(0) @binding(0) var post_texture: texture_2d<f32>;
+
+@fragment
+fn blit_fs(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
+    return textureLoad(post_texture, vec2<i32>(position.xy), 0);
 }
