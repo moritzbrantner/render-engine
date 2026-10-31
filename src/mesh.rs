@@ -33,8 +33,45 @@ impl Geometry {
                 }
             }
             Shape::Plane(size) => g.quad(Vec3::Y, Vec3::new(size.x * 0.5, 0.0, size.y * 0.5)),
+            Shape::Sphere {
+                radius,
+                sectors,
+                stacks,
+            } => g.uv_sphere(radius, sectors, stacks),
         }
         g
+    }
+
+    /// Bevy `SphereMeshBuilder::uv`, vertex for vertex and index for index.
+    fn uv_sphere(&mut self, radius: f32, sectors: u32, stacks: u32) {
+        use std::f32::consts::PI;
+        let sector_step = 2.0 * PI / sectors as f32;
+        let stack_step = PI / stacks as f32;
+        for i in 0..=stacks {
+            let stack_angle = PI / 2.0 - i as f32 * stack_step;
+            let xy = radius * stack_angle.cos();
+            let z = radius * stack_angle.sin();
+            for j in 0..=sectors {
+                let sector_angle = j as f32 * sector_step;
+                let p = Vec3::new(xy * sector_angle.cos(), xy * sector_angle.sin(), z);
+                self.vertices.push(Vertex {
+                    position: p.to_array(),
+                    normal: (p / radius).to_array(),
+                });
+            }
+        }
+        for i in 0..stacks {
+            for j in 0..sectors {
+                let k1 = i * (sectors + 1) + j;
+                let k2 = k1 + sectors + 1;
+                if i != 0 {
+                    self.indices.extend([k1, k2, k1 + 1]);
+                }
+                if i != stacks - 1 {
+                    self.indices.extend([k1 + 1, k2, k2 + 1]);
+                }
+            }
+        }
     }
 
     /// One face with outward normal `n` of a box with half extents `h` (a plane when `h` is 0
@@ -97,5 +134,29 @@ mod tests {
         assert_eq!(g.indices.len(), 6);
         winding_matches_normals(&g);
         assert!(g.vertices.iter().all(|v| v.normal == [0.0, 1.0, 0.0]));
+    }
+
+    #[test]
+    fn uv_sphere_matches_bevy_counts_and_faces_outward() {
+        let (sectors, stacks) = (32, 18);
+        let g = Geometry::of(Shape::Sphere {
+            radius: 0.5,
+            sectors,
+            stacks,
+        });
+        assert_eq!(g.vertices.len() as u32, (sectors + 1) * (stacks + 1));
+        assert_eq!(g.indices.len() as u32, 6 * sectors * (stacks - 1));
+        for tri in g.indices.chunks(3) {
+            let [a, b, c] = [0, 1, 2].map(|i| Vec3::from(g.vertices[tri[i] as usize].position));
+            assert!(
+                (b - a).cross(c - a).dot(a + b + c) > 0.0,
+                "inward face {tri:?}"
+            );
+        }
+        for v in &g.vertices {
+            let p = Vec3::from(v.position);
+            assert!((p.length() - 0.5).abs() < 1e-5);
+            assert!((Vec3::from(v.normal) - p * 2.0).length() < 1e-5);
+        }
     }
 }

@@ -10,6 +10,7 @@
 //!     clear_color: Vec3::new(0.3, 0.5, 0.8),
 //!     sun: Some(Sun { direction: Vec3::new(-0.4, -1.0, -0.3), color: Vec3::ONE, illuminance: 10_000.0, shadows: Some(SunShadows::default()) }),
 //!     ambient: Ambient { color: Vec3::ONE, brightness: 500.0 },
+//!     environment: None,
 //!     meshes: vec![MeshInstance::new(Shape::Plane(Vec2::splat(20.0)), Vec3::ZERO, Material::default())],
 //! };
 //! let gpu = Headless::new()?;
@@ -22,6 +23,7 @@ pub use glam;
 pub use wgpu;
 
 pub mod headless;
+pub mod ktx;
 pub mod mesh;
 pub mod renderer;
 pub mod scene;

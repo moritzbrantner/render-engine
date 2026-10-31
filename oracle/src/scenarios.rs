@@ -3,9 +3,10 @@
 
 use render_engine::glam::{Quat, Vec2, Vec3};
 use render_engine::scene::{
-    Ambient, Camera, Material, MeshInstance, Scene, ShadowFilter, Shape, Sun, SunShadows,
-    Tonemapping,
+    Ambient, Camera, Cubemap, EnvironmentMap, Material, MeshInstance, Scene, ShadowFilter, Shape,
+    Sun, SunShadows, Tonemapping,
 };
+use std::sync::Arc;
 
 pub struct Scenario {
     pub name: &'static str,
@@ -19,8 +20,103 @@ pub struct Scenario {
 pub fn all() -> Vec<Scenario> {
     let mut all = vec![sun_shadows(), sun_cascades()];
     all.extend(tonemap_range());
+    all.extend(ibl_materials());
     all
 }
+
+/// Poly Haven's CC0 "Tiergarten" HDRI (overcast park), prefiltered by `bake_ibl` (see
+/// `assets/ibl/README.md`).
+fn tiergarten(intensity: f32) -> EnvironmentMap {
+    let cube = |bytes: &[u8]| Arc::new(Cubemap::from_ktx2(bytes).expect("committed cube map"));
+    EnvironmentMap {
+        diffuse: cube(include_bytes!("../../assets/ibl/tiergarten_diffuse.ktx2")),
+        specular: cube(include_bytes!("../../assets/ibl/tiergarten_specular.ktx2")),
+        intensity,
+    }
+}
+
+/// Two rows of UV spheres sweeping perceptual roughness 0 → 1, dielectric in front and metallic
+/// behind, on a ground plane under the Tiergarten environment map: once with image-based light
+/// only, once with a shadowing sun as well.
+fn ibl_materials() -> [Scenario; 2] {
+    let mut meshes = vec![MeshInstance::new(
+        Shape::Plane(Vec2::splat(14.0)),
+        Vec3::ZERO,
+        Material {
+            base_color: rgb(0.30, 0.30, 0.28),
+            perceptual_roughness: 0.9,
+            ..Material::default()
+        },
+    )];
+    let roughness = [0.0, 0.15, 0.3, 0.45, 0.6, 0.8, 1.0];
+    for (row, (metallic, base_color)) in [(0.0, rgb(0.75, 0.15, 0.12)), (1.0, rgb(1.0, 0.71, 0.29))]
+        .into_iter()
+        .enumerate()
+    {
+        for (i, &perceptual_roughness) in roughness.iter().enumerate() {
+            meshes.push(MeshInstance::new(
+                Shape::Sphere {
+                    radius: 0.4,
+                    sectors: 64,
+                    stacks: 32,
+                },
+                Vec3::new(i as f32 - 3.0, 0.4, -1.1 * row as f32),
+                Material {
+                    base_color,
+                    metallic,
+                    perceptual_roughness,
+                    ..Material::default()
+                },
+            ));
+        }
+    }
+    let scene = Scene {
+        camera: Camera {
+            eye: Vec3::new(0.0, 2.2, 5.5),
+            target: Vec3::new(0.0, 0.3, -0.6),
+            fov_y: 45f32.to_radians(),
+            near: 0.1,
+            ev100: 10.8,
+            shadow_filter: ShadowFilter::Gaussian,
+            tonemapping: Tonemapping::TonyMcMapface,
+        },
+        clear_color: rgb(0.45, 0.50, 0.55),
+        sun: None,
+        ambient: Ambient {
+            color: Vec3::ONE,
+            brightness: 0.0,
+        },
+        environment: Some(tiergarten(IBL_INTENSITY)),
+        meshes,
+    };
+    let mut sunlit = scene.clone();
+    sunlit.sun = Some(Sun {
+        direction: Vec3::new(0.6, -1.0, -0.5).normalize(),
+        color: rgb(1.0, 0.95, 0.88),
+        illuminance: 10_000.0,
+        shadows: Some(SunShadows::single_cascade(20.0)),
+    });
+    sunlit.camera.ev100 = 11.5;
+    [
+        Scenario {
+            name: "ibl_materials",
+            capability: "environment map (IBL)",
+            width: 1280,
+            height: 720,
+            scene,
+        },
+        Scenario {
+            name: "ibl_materials_sun",
+            capability: "IBL + sun + shadow",
+            width: 1280,
+            height: 720,
+            scene: sunlit,
+        },
+    ]
+}
+
+/// cd/m² scale of the Tiergarten maps.
+const IBL_INTENSITY: f32 = 2000.0;
 
 /// The `sun_shadows` scene at a noon exposure (EV100 10.5, bright highlights on the gold box)
 /// and three stops dimmer (EV100 13.5, dusk-like shadows near black), each with Tony McMapface and
@@ -113,6 +209,7 @@ fn sun_shadows() -> Scenario {
                 color: rgb(0.75, 0.85, 1.0),
                 brightness: 1500.0,
             },
+            environment: None,
             meshes,
         },
     }
@@ -196,6 +293,7 @@ fn sun_cascades() -> Scenario {
                 color: rgb(0.75, 0.85, 1.0),
                 brightness: 1500.0,
             },
+            environment: None,
             meshes,
         },
     }

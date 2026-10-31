@@ -26,6 +26,7 @@ fn scene(shadows: bool, tonemapping: Tonemapping) -> Scene {
             color: Vec3::ONE,
             brightness: 0.0,
         },
+        environment: None,
         meshes: vec![
             MeshInstance::new(
                 Shape::Plane(Vec2::splat(20.0)),
@@ -76,4 +77,36 @@ fn sky_ground_and_sun_shadow() {
         assert!(bright > 100, "{tonemapping:?} lit ground {bright}");
         assert!(dark < 10, "{tonemapping:?} shadowed ground {dark}");
     }
+}
+
+#[test]
+fn environment_map_lights_a_sphere_without_sun_or_ambient() {
+    let cube = |bytes: &[u8]| std::sync::Arc::new(Cubemap::from_ktx2(bytes).unwrap());
+    let diffuse = cube(include_bytes!("../assets/ibl/tiergarten_diffuse.ktx2"));
+    let specular = cube(include_bytes!("../assets/ibl/tiergarten_specular.ktx2"));
+    assert_eq!((diffuse.size, diffuse.levels.len()), (32, 1));
+    assert_eq!((specular.size, specular.levels.len()), (256, 9));
+
+    let mut s = scene(false, Tonemapping::TonyMcMapface);
+    s.sun = None;
+    s.meshes = vec![MeshInstance::new(
+        Shape::Sphere {
+            radius: 1.0,
+            sectors: 32,
+            stacks: 16,
+        },
+        Vec3::ZERO,
+        Material::default(),
+    )];
+    let gpu = Headless::new().expect("a wgpu adapter");
+    let (w, h) = (64, 64);
+    let dark = gpu.render(&gpu.prepare(&s, w, h)).unwrap();
+    s.environment = Some(EnvironmentMap {
+        diffuse,
+        specular,
+        intensity: 2000.0,
+    });
+    let lit = gpu.render(&gpu.prepare(&s, w, h)).unwrap();
+    let (unlit, bright) = (pixel(&dark, w / 2, h / 2)[1], pixel(&lit, w / 2, h / 2)[1]);
+    assert!(unlit < 5 && bright > 60, "sphere centre {unlit} → {bright}");
 }

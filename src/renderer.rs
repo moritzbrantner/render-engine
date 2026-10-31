@@ -3,7 +3,7 @@
 
 use crate::{
     mesh::{Geometry, Vertex},
-    scene::{MAX_CASCADES, Scene, ShadowFilter, Tonemapping},
+    scene::{Cubemap, MAX_CASCADES, Scene, ShadowFilter, Tonemapping},
 };
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat3, Mat4, Vec3, Vec4};
@@ -36,6 +36,9 @@ struct FrameUniform {
     /// x exposure, y 1 when the sun casts shadows, z 1 when there is a sun, w 1 for Gaussian
     /// filtering.
     flags: Vec4,
+    /// x environment-map intensity (cd/m²), y smallest specular mip level, z 1 when there is an
+    /// environment map.
+    environment: Vec4,
 }
 
 #[repr(C)]
@@ -52,13 +55,17 @@ struct InstanceData {
 pub struct Renderer {
     frame_layout: wgpu::BindGroupLayout,
     cascade_layout: wgpu::BindGroupLayout,
-    shadow_layout: wgpu::BindGroupLayout,
+    lighting_layout: wgpu::BindGroupLayout,
     tonemap_layout: wgpu::BindGroupLayout,
     shadow_pipeline: wgpu::RenderPipeline,
     lit_pipeline: wgpu::RenderPipeline,
     /// Indexed by [`tonemap_index`].
     tonemap_pipelines: [wgpu::RenderPipeline; 3],
     shadow_sampler: wgpu::Sampler,
+    /// Bevy's default image sampler (trilinear, clamped), which Bevy uses for environment maps.
+    environment_sampler: wgpu::Sampler,
+    /// A black 1² cube bound when the scene has no environment map.
+    no_environment: wgpu::TextureView,
     tony_mc_mapface_lut: wgpu::TextureView,
     agx_lut: wgpu::TextureView,
     lut_sampler: wgpu::Sampler,
@@ -79,7 +86,7 @@ pub struct PreparedScene {
     height: u32,
     clear_color: wgpu::Color,
     frame_group: wgpu::BindGroup,
-    shadow_group: wgpu::BindGroup,
+    lighting_group: wgpu::BindGroup,
     cascade_group: wgpu::BindGroup,
     /// One depth view per cascade (render attachments); empty without sun shadows.
     cascade_views: Vec<wgpu::TextureView>,
@@ -135,9 +142,28 @@ impl Renderer {
                 },
             ],
         });
-        let shadow_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("sun shadow"),
+        let cube = |binding| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                view_dimension: wgpu::TextureViewDimension::Cube,
+                multisampled: false,
+            },
+            count: None,
+        };
+        // Main pass: sun shadow maps and the environment map.
+        let lighting_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("lighting"),
             entries: &[
+                cube(3),
+                cube(4),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::FRAGMENT,
@@ -213,7 +239,7 @@ impl Renderer {
 
         let lit_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("lit"),
-            bind_group_layouts: &[Some(&frame_layout), Some(&shadow_layout)],
+            bind_group_layouts: &[Some(&frame_layout), Some(&lighting_layout)],
             immediate_size: 0,
         });
         let lit_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -325,15 +351,35 @@ impl Renderer {
             ..Default::default()
         });
 
+        // Bevy `ImageSamplerDescriptor::linear()`.
+        let environment_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("environment map"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
+            ..Default::default()
+        });
+        let no_environment = upload_cube(
+            device,
+            queue,
+            &Cubemap {
+                size: 1,
+                format: wgpu::TextureFormat::Rgba16Float,
+                levels: vec![vec![0; 6 * 8]],
+            },
+        );
+
         Self {
             frame_layout,
             cascade_layout,
-            shadow_layout,
+            lighting_layout,
             tonemap_layout,
             shadow_pipeline,
             lit_pipeline,
             tonemap_pipelines,
             shadow_sampler,
+            environment_sampler,
+            no_environment,
             tony_mc_mapface_lut: load_lut(device, queue, TONY_MC_MAPFACE_LUT),
             agx_lut: load_lut(device, queue, AGX_LUT),
             lut_sampler,
@@ -344,6 +390,7 @@ impl Renderer {
     pub fn prepare(
         &self,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         scene: &Scene,
         width: u32,
         height: u32,
@@ -404,6 +451,9 @@ impl Renderer {
                 f32::from(u8::from(sun.is_some())),
                 f32::from(u8::from(cam.shadow_filter == ShadowFilter::Gaussian)),
             ),
+            environment: scene.environment.as_ref().map_or(Vec4::ZERO, |e| {
+                Vec4::new(e.intensity, (e.specular.levels.len() - 1) as f32, 1.0, 0.0)
+            }),
         };
 
         let mut vertices = Vec::new();
@@ -515,10 +565,33 @@ impl Renderer {
                 }),
             }],
         });
-        let shadow_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("sun shadow"),
-            layout: &self.shadow_layout,
+        let environment = scene.environment.as_ref().map(|e| {
+            (
+                upload_cube(device, queue, &e.diffuse),
+                upload_cube(device, queue, &e.specular),
+            )
+        });
+        let (diffuse_view, specular_view) = environment
+            .as_ref()
+            .map_or((&self.no_environment, &self.no_environment), |(d, s)| {
+                (d, s)
+            });
+        let lighting_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("lighting"),
+            layout: &self.lighting_layout,
             entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(diffuse_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::TextureView(specular_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::Sampler(&self.environment_sampler),
+                },
                 wgpu::BindGroupEntry {
                     binding: 0,
                     resource: wgpu::BindingResource::TextureView(&shadow_view),
@@ -601,7 +674,7 @@ impl Renderer {
                 a: 1.0,
             },
             frame_group,
-            shadow_group,
+            lighting_group,
             cascade_group,
             cascade_views,
             vertices: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -701,7 +774,7 @@ impl Renderer {
             multiview_mask: None,
         });
         pass.set_pipeline(&self.lit_pipeline);
-        pass.set_bind_group(1, &scene.shadow_group, &[]);
+        pass.set_bind_group(1, &scene.lighting_group, &[]);
         draw(&mut pass);
         drop(pass);
 
@@ -738,54 +811,56 @@ impl PreparedScene {
     }
 }
 
-/// Uploads one of Bevy's tone-mapping LUTs: a zstd-supercompressed single-level 3D KTX2 file in
-/// `R16G16B16A16_SFLOAT` or `E5B9G9R9_UFLOAT_PACK32`.
+/// Uploads one of Bevy's tone-mapping LUTs: a zstd-supercompressed single-level 3D KTX2 file.
 fn load_lut(device: &wgpu::Device, queue: &wgpu::Queue, ktx2: &[u8]) -> wgpu::TextureView {
-    use std::io::Read;
-    let reader = ktx2::Reader::new(ktx2).expect("embedded LUT is valid KTX2");
-    let header = reader.header();
-    let (format, texel_bytes) = match header.format {
-        Some(ktx2::Format::R16G16B16A16_SFLOAT) => (wgpu::TextureFormat::Rgba16Float, 8),
-        Some(ktx2::Format::E5B9G9R9_UFLOAT_PACK32) => (wgpu::TextureFormat::Rgb9e5Ufloat, 4),
-        other => panic!("unsupported LUT format {other:?}"),
-    };
-    let level = reader.levels().next().expect("LUT has a level");
-    let mut texels = Vec::with_capacity(level.uncompressed_byte_length as usize);
-    match header.supercompression_scheme {
-        Some(ktx2::SupercompressionScheme::Zstandard) => {
-            ruzstd::decoding::StreamingDecoder::new(level.data)
-                .expect("LUT zstd frame")
-                .read_to_end(&mut texels)
-                .expect("LUT decompresses");
-        }
-        None => texels.extend_from_slice(level.data),
-        Some(other) => panic!("unsupported LUT supercompression {other:?}"),
-    }
-    let size = wgpu::Extent3d {
-        width: header.pixel_width,
-        height: header.pixel_height,
-        depth_or_array_layers: header.pixel_depth,
-    };
+    let lut = crate::ktx::decode(ktx2).expect("embedded LUT is a supported KTX2 file");
     let texture = device.create_texture_with_data(
         queue,
         &wgpu::TextureDescriptor {
             label: Some("tonemapping lut"),
-            size,
+            size: wgpu::Extent3d {
+                width: lut.width,
+                height: lut.height,
+                depth_or_array_layers: lut.depth,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D3,
-            format,
+            format: lut.format,
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         },
         wgpu::util::TextureDataOrder::LayerMajor,
-        &texels,
-    );
-    debug_assert_eq!(
-        texels.len(),
-        (size.width * size.height * size.depth_or_array_layers * texel_bytes) as usize
+        &lut.levels[0],
     );
     texture.create_view(&Default::default())
+}
+
+/// Uploads a cube map with all its mip levels.
+fn upload_cube(device: &wgpu::Device, queue: &wgpu::Queue, cube: &Cubemap) -> wgpu::TextureView {
+    let texture = device.create_texture_with_data(
+        queue,
+        &wgpu::TextureDescriptor {
+            label: Some("environment map"),
+            size: wgpu::Extent3d {
+                width: cube.size,
+                height: cube.size,
+                depth_or_array_layers: 6,
+            },
+            mip_level_count: cube.levels.len() as u32,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: cube.format,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        },
+        wgpu::util::TextureDataOrder::MipMajor,
+        &cube.levels.concat(),
+    );
+    texture.create_view(&wgpu::TextureViewDescriptor {
+        dimension: Some(wgpu::TextureViewDimension::Cube),
+        ..Default::default()
+    })
 }
 
 /// Right-handed view matrix with +Y up (the inverse of Bevy `Transform::looking_at(target, Y)`).

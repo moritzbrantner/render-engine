@@ -2,8 +2,9 @@
 //
 // The BRDF follows Bevy 0.20 `bevy_pbr` (itself Filament): Burley diffuse, GGX distribution,
 // height-correlated Smith visibility, Schlick Fresnel with the f90 specular-occlusion trick, the
-// multiscatter energy compensation and the polynomial F_AB environment approximation for ambient
-// light. Output is exposed linear HDR colour; `tonemap.wgsl` maps it for display.
+// multiscatter energy compensation, the polynomial F_AB environment approximation for ambient
+// light and Bevy's split-sum environment-map light (prefiltered diffuse + specular cube maps with
+// multiscattering). Output is exposed linear HDR colour; `tonemap.wgsl` maps it for display.
 
 const PI: f32 = 3.141592653589793;
 
@@ -28,6 +29,9 @@ struct Frame {
     // x: exposure, y: 1 when the sun casts shadows, z: 1 when there is a sun, w: 1 for the
     // Gaussian shadow filter (else hardware 2×2).
     flags: vec4<f32>,
+    // x: environment-map intensity (cd/m²), y: smallest specular mip level, z: 1 when there is an
+    // environment map.
+    environment: vec4<f32>,
 }
 
 struct Instance {
@@ -43,6 +47,9 @@ struct Instance {
 // Main pass only.
 @group(1) @binding(0) var shadow_maps: texture_depth_2d_array;
 @group(1) @binding(1) var shadow_sampler: sampler_comparison;
+@group(1) @binding(3) var diffuse_environment_map: texture_cube<f32>;
+@group(1) @binding(4) var specular_environment_map: texture_cube<f32>;
+@group(1) @binding(5) var environment_map_sampler: sampler;
 // Shadow pass only: the cascade being rendered (dynamic offset).
 @group(1) @binding(2) var<uniform> cascade_clip_from_world: mat4x4<f32>;
 
@@ -208,6 +215,77 @@ fn sun_shadow(world: vec3<f32>, normal: vec3<f32>) -> f32 {
     return shadow;
 }
 
+// Bevy `radiance_sample_direction` ("Moving Frostbite to PBR 3.0", listing 22).
+fn radiance_sample_direction(N: vec3<f32>, R: vec3<f32>, roughness: f32) -> vec3<f32> {
+    let smoothness = saturate(1.0 - roughness);
+    let lerp_factor = smoothness * (sqrt(smoothness) + roughness);
+    return mix(N, R, lerp_factor);
+}
+
+struct Multiscatter {
+    FssEss: vec3<f32>,
+    FmsEms: vec3<f32>,
+    Edss: vec3<f32>,
+}
+
+// Bevy `compute_multiscatter` (Fdez-Agüera 2019).
+fn compute_multiscatter(F0: vec3<f32>, f_ab: vec2<f32>, Ems: f32, specular_occlusion: f32) -> Multiscatter {
+    let FssEss = (F0 * f_ab.x + f_ab.y) * specular_occlusion;
+    let Favg = F0 + (1.0 - F0) / 21.0;
+    let FmsEms = FssEss * Favg / (1.0 - Ems * Favg) * Ems;
+    return Multiscatter(FssEss, FmsEms, 1.0 - (FssEss + FmsEms));
+}
+
+struct EnvironmentLight {
+    diffuse: vec3<f32>,
+    specular: vec3<f32>,
+}
+
+// Bevy `environment_map_light` for a view environment map (no light probes, no rotation).
+fn environment_map_light(
+    N: vec3<f32>,
+    V: vec3<f32>,
+    perceptual_roughness: f32,
+    roughness: f32,
+    diffuse_color: vec3<f32>,
+    metallic: f32,
+    F0_dielectric: vec3<f32>,
+    F0_metallic: vec3<f32>,
+    f_ab: vec2<f32>,
+) -> EnvironmentLight {
+    let intensity = frame.environment.x;
+    let R = reflect(-V, N);
+    let radiance_level = perceptual_roughness * frame.environment.y;
+    // Cube maps are left-handed, so z is negated.
+    var irradiance_dir = N;
+    irradiance_dir.z = -irradiance_dir.z;
+    let irradiance = textureSampleLevel(
+        diffuse_environment_map, environment_map_sampler, irradiance_dir, 0.0).rgb * intensity;
+    var radiance_dir = radiance_sample_direction(N, R, roughness);
+    radiance_dir.z = -radiance_dir.z;
+    let radiance = textureSampleLevel(
+        specular_environment_map, environment_map_sampler, radiance_dir, radiance_level).rgb * intensity;
+
+    var out: EnvironmentLight;
+    if (all(irradiance == vec3(0.0)) && all(radiance == vec3(0.0))) {
+        out.diffuse = vec3(0.0);
+        out.specular = vec3(0.0);
+        return out;
+    }
+    let F0_surface = mix(F0_dielectric, F0_metallic, metallic);
+    let specular_occlusion = saturate(dot(F0_surface, vec3(50.0 * 0.33)));
+    // Dielectric and metallic separately, then mixed: multiscattering is nonlinear in F0.
+    let Ems = 1.0 - (f_ab.x + f_ab.y);
+    let ms_dielectric = compute_multiscatter(F0_dielectric, f_ab, Ems, specular_occlusion);
+    let ms_metallic = compute_multiscatter(F0_metallic, f_ab, Ems, specular_occlusion);
+    let FssEss = mix(ms_dielectric.FssEss, ms_metallic.FssEss, metallic);
+    let FmsEms = mix(ms_dielectric.FmsEms, ms_metallic.FmsEms, metallic);
+    let kD = diffuse_color * ms_dielectric.Edss;
+    out.diffuse = (FmsEms + kD) * irradiance;
+    out.specular = FssEss * radiance;
+    return out;
+}
+
 @fragment
 fn lit_fs(in: VertexOut) -> @location(0) vec4<f32> {
     let inst = instances[in.instance];
@@ -254,7 +332,15 @@ fn lit_fs(in: VertexOut) -> @location(0) vec4<f32> {
     let diffuse_ambient = env_brdf_approx(diffuse_color, F_AB(1.0, NdotV));
     let specular_ambient = env_brdf_approx(F0, f_ab);
     let specular_occlusion = saturate(dot(F0, vec3(50.0 * 0.33)));
-    let indirect = (diffuse_ambient + specular_ambient * specular_occlusion) * frame.ambient_color.rgb;
+    // Bevy's order: environment diffuse, environment specular, then the uniform ambient light.
+    var indirect = vec3(0.0);
+    if (frame.environment.z > 0.5) {
+        let env = environment_map_light(
+            N, V, perceptual_roughness, roughness, diffuse_color, metallic, f0_dielectric, base, f_ab);
+        indirect += env.diffuse;
+        indirect += env.specular;
+    }
+    indirect += (diffuse_ambient + specular_ambient * specular_occlusion) * frame.ambient_color.rgb;
 
     return vec4(frame.flags.x * (direct + indirect), 1.0);
 }
