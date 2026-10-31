@@ -1,13 +1,15 @@
-//! Parity scenarios. Each one is a `render_engine::scene::Scene`; the Bevy side translates it
-//! field by field (see `bevy_side.rs`).
+//! Parity scenarios. Each one is a `render_engine::scene::Scene` plus its objects; the Bevy side
+//! translates both field by field (see `bevy_side.rs`).
 
+use crate::content::{Assets, Geometry, Material, MeshInstance};
 use render_engine::glam::{Quat, Vec2, Vec3, Vec4};
+use render_engine::material::AlphaMode;
+use render_engine::mesh::Shape;
 use render_engine::scene::{
-    Ambient, Camera, Cubemap, EnvironmentMap, Fog, FogFalloff, LightShadows, Material,
-    MeshInstance, PointLight, Scene, ShadowFilter, ShadowMapSizes, Shape, SpotLight, Sun,
-    SunShadows, Tonemapping,
+    Ambient, Camera, Cubemap, EnvironmentMap, Fog, FogFalloff, LightShadows, PointLight, Scene,
+    ShadowFilter, ShadowMapSizes, SpotLight, Sun, SunShadows, Tonemapping,
 };
-use std::sync::Arc;
+use std::{path::Path, sync::Arc};
 
 pub struct Scenario {
     pub name: &'static str,
@@ -16,6 +18,9 @@ pub struct Scenario {
     pub width: u32,
     pub height: u32,
     pub scene: Scene,
+    pub objects: Vec<MeshInstance>,
+    /// Mesh and texture data the objects refer to.
+    pub assets: Assets,
 }
 
 pub fn all() -> Vec<Scenario> {
@@ -24,7 +29,131 @@ pub fn all() -> Vec<Scenario> {
     all.extend(ibl_materials());
     all.extend(fog_modes());
     all.extend(point_spot());
+    all.push(textured_props());
     all
+}
+
+/// CC0 glTF props (Quaternius, `assets/props/`) with base-colour, normal and
+/// metallic-roughness textures on a ground plane: an anvil and a cauldron in the shared metal
+/// trim sheet, a crate in wood and metal, two alpha-masked, double-sided bushes (one mirrored)
+/// and a blended glass ball, under a cascaded sun and the Tiergarten environment map. The crate
+/// appears twice from one mesh upload.
+fn textured_props() -> Scenario {
+    let mut assets = Assets::default();
+    let mut objects = vec![MeshInstance::new(
+        Shape::Plane(Vec2::splat(10.0)),
+        Vec3::ZERO,
+        Material {
+            base_color: rgb(0.32, 0.30, 0.26),
+            perceptual_roughness: 0.9,
+            ..Material::default()
+        },
+    )];
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../assets/props");
+    let placements: [(&str, Vec3, f32, Vec3); 6] = [
+        ("Anvil.gltf", Vec3::new(-1.1, 0.0, 0.5), 25.0, Vec3::ONE),
+        (
+            "Cauldron.gltf",
+            Vec3::new(1.0, 0.0, 0.2),
+            0.0,
+            Vec3::splat(0.9),
+        ),
+        (
+            "FarmCrate_Empty.gltf",
+            Vec3::new(-0.2, 0.0, -0.6),
+            -15.0,
+            Vec3::splat(1.4),
+        ),
+        (
+            "FarmCrate_Empty.gltf",
+            Vec3::new(-0.15, 0.32, -0.6),
+            10.0,
+            Vec3::splat(1.4),
+        ),
+        (
+            "Bush_Common.gltf",
+            Vec3::new(-2.0, 0.0, -1.6),
+            0.0,
+            Vec3::splat(0.8),
+        ),
+        // Mirrored: the renderer flips the winding (and the tangent sign).
+        (
+            "Bush_Common.gltf",
+            Vec3::new(1.9, 0.0, -1.4),
+            40.0,
+            Vec3::new(-0.7, 0.7, 0.7),
+        ),
+    ];
+    let mut loaded: Vec<(&str, Vec<crate::content::Primitive>)> = Vec::new();
+    for (file, translation, yaw, scale) in placements {
+        if !loaded.iter().any(|(f, _)| *f == file) {
+            let prims = assets.load_gltf(&dir.join(file));
+            loaded.push((file, prims));
+        }
+        let (_, prims) = loaded.iter().find(|(f, _)| *f == file).unwrap();
+        for p in prims {
+            let local = p.node_transform.to_scale_rotation_translation();
+            assert_eq!(local.1, Quat::IDENTITY, "props have untransformed nodes");
+            objects.push(MeshInstance {
+                geometry: Geometry::Mesh(p.mesh),
+                translation,
+                rotation: Quat::from_rotation_y(yaw.to_radians()),
+                scale,
+                material: p.material,
+            });
+        }
+    }
+    objects.push(MeshInstance::new(
+        Shape::Sphere {
+            radius: 0.3,
+            sectors: 48,
+            stacks: 24,
+        },
+        Vec3::new(0.3, 0.3, 1.3),
+        Material {
+            base_color: rgb(0.55, 0.75, 0.9),
+            alpha: 0.35,
+            perceptual_roughness: 0.1,
+            alpha_mode: AlphaMode::Blend,
+            ..Material::default()
+        },
+    ));
+    let scene = Scene {
+        camera: Camera {
+            eye: Vec3::new(2.4, 1.9, 3.6),
+            target: Vec3::new(-0.1, 0.35, -0.2),
+            fov_y: 45f32.to_radians(),
+            near: 0.1,
+            ev100: 11.5,
+            shadow_filter: ShadowFilter::Gaussian,
+            tonemapping: Tonemapping::TonyMcMapface,
+        },
+        clear_color: rgb(0.45, 0.50, 0.55),
+        sun: Some(Sun {
+            direction: Vec3::new(0.5, -1.0, -0.7).normalize(),
+            color: rgb(1.0, 0.95, 0.88),
+            illuminance: 10_000.0,
+            shadows: Some(SunShadows::default()),
+        }),
+        ambient: Ambient {
+            color: Vec3::ONE,
+            brightness: 0.0,
+        },
+        point_lights: Vec::new(),
+        spot_lights: Vec::new(),
+        shadow_maps: ShadowMapSizes::default(),
+        environment: Some(tiergarten(IBL_INTENSITY)),
+        fog: None,
+    };
+    Scenario {
+        name: "textured_props",
+        capability: "consumer meshes + textured StandardMaterial",
+        width: 1280,
+        height: 720,
+        scene,
+        objects,
+        assets,
+    }
 }
 
 /// A dusk courtyard under low ambient light: a shadow-casting lantern hanging among PBR boxes, a
@@ -167,7 +296,6 @@ fn point_spot() -> [Scenario; 3] {
         },
         environment: None,
         fog: None,
-        meshes,
     };
     // Coarse maps, so the 2×2 filter's texel steps cover enough pixels to gate.
     let mut hardware = scene.clone();
@@ -200,6 +328,8 @@ fn point_spot() -> [Scenario; 3] {
             width: 1280,
             height: 720,
             scene,
+            objects: meshes.clone(),
+            assets: Default::default(),
         },
         Scenario {
             name: "point_spot_hardware",
@@ -207,6 +337,8 @@ fn point_spot() -> [Scenario; 3] {
             width: 1280,
             height: 720,
             scene: hardware,
+            objects: meshes.clone(),
+            assets: Default::default(),
         },
         Scenario {
             name: "point_spot_soft",
@@ -214,6 +346,8 @@ fn point_spot() -> [Scenario; 3] {
             width: 1280,
             height: 720,
             scene: soft,
+            objects: meshes,
+            assets: Default::default(),
         },
     ]
 }
@@ -277,7 +411,6 @@ fn fog_modes() -> Vec<Scenario> {
         shadow_maps: ShadowMapSizes::default(),
         environment: None,
         fog: None,
-        meshes,
     };
     let falloffs = [
         (
@@ -322,6 +455,8 @@ fn fog_modes() -> Vec<Scenario> {
             width: 1280,
             height: 720,
             scene: scene.clone(),
+            objects: meshes.clone(),
+            assets: Default::default(),
         });
         scene.fog = Some(Fog {
             directional_light_color: Vec4::new(1.0, 0.85, 0.6, 0.5),
@@ -334,6 +469,8 @@ fn fog_modes() -> Vec<Scenario> {
             width: 1280,
             height: 720,
             scene,
+            objects: meshes.clone(),
+            assets: Default::default(),
         });
     }
     out
@@ -406,7 +543,6 @@ fn ibl_materials() -> [Scenario; 2] {
         shadow_maps: ShadowMapSizes::default(),
         environment: Some(tiergarten(IBL_INTENSITY)),
         fog: None,
-        meshes,
     };
     let mut sunlit = scene.clone();
     sunlit.sun = Some(Sun {
@@ -423,6 +559,8 @@ fn ibl_materials() -> [Scenario; 2] {
             width: 1280,
             height: 720,
             scene,
+            objects: meshes.clone(),
+            assets: Default::default(),
         },
         Scenario {
             name: "ibl_materials_sun",
@@ -430,6 +568,8 @@ fn ibl_materials() -> [Scenario; 2] {
             width: 1280,
             height: 720,
             scene: sunlit,
+            objects: meshes,
+            assets: Default::default(),
         },
     ]
 }
@@ -507,6 +647,8 @@ fn sun_shadows() -> Scenario {
         capability: "sun+shadow+ambient",
         width: 1280,
         height: 720,
+        objects: meshes,
+        assets: Default::default(),
         scene: Scene {
             camera: Camera {
                 eye: Vec3::new(6.5, 5.0, 8.0),
@@ -533,7 +675,6 @@ fn sun_shadows() -> Scenario {
             shadow_maps: ShadowMapSizes::default(),
             environment: None,
             fog: None,
-            meshes,
         },
     }
 }
@@ -591,6 +732,8 @@ fn sun_cascades() -> Scenario {
         capability: "sun+cascaded shadows (Gaussian)",
         width: 1280,
         height: 720,
+        objects: meshes,
+        assets: Default::default(),
         scene: Scene {
             camera: Camera {
                 eye: Vec3::new(0.0, 3.0, 8.0),
@@ -621,7 +764,6 @@ fn sun_cascades() -> Scenario {
             shadow_maps: ShadowMapSizes::default(),
             environment: None,
             fog: None,
-            meshes,
         },
     }
 }

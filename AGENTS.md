@@ -24,10 +24,12 @@ never depends on Bevy outside `oracle/`.
 
 | Path | Role |
 | --- | --- |
-| `src/` | The `render-engine` crate: `scene`, `renderer` (wgpu passes), `headless` (offscreen + GPU timing) |
+| `src/` | The `render-engine` crate: `world` (consumer meshes/textures/materials behind handles), `mesh`, `material`, `scene` (camera + lights per frame), `renderer` (wgpu passes, `Viewport`), `headless` (offscreen + GPU timing) |
 | `src/shaders/` | WGSL shaders |
 | `oracle/` | Bevy oracle (own manifest/lockfile): each scenario on Bevy and render-engine, FLIP + GPU-time gates |
 | `assets/ibl/` | CC0 HDRI and its prefiltered environment cube maps (`oracle/src/bin/bake_ibl.rs`; provenance in its README) |
+| `assets/props/` | CC0 glTF props for `textured_props` (provenance in its README) |
+| `docs/consumer-integration.md` | How a consumer (the mmorpg native client) drives the engine |
 | `site/` | Report page over the last oracle run (`scripts/build-pages.sh` → `pages-dist/`) |
 
 ```sh

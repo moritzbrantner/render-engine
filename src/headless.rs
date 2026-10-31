@@ -6,8 +6,9 @@
 //! and `WGPU_ADAPTER_NAME` picks an adapter whose name contains the value.
 
 use crate::{
-    renderer::{FrameTimestamps, PreparedScene, Renderer},
+    renderer::{FrameTimestamps, Renderer, Viewport},
     scene::Scene,
+    world::{Instance, World},
 };
 
 /// The colour format of offscreen frames (tone mapped and sRGB-encoded, like a Bevy image target).
@@ -91,9 +92,9 @@ impl Headless {
         })
     }
 
-    pub fn prepare(&self, scene: &Scene, width: u32, height: u32) -> PreparedScene {
-        self.renderer
-            .prepare(&self.device, &self.queue, scene, width, height)
+    /// The renderer on this device, for creating a [`World`] and [`Viewport`]s.
+    pub fn renderer(&self) -> &Renderer {
+        &self.renderer
     }
 
     fn target(&self, width: u32, height: u32) -> wgpu::Texture {
@@ -113,9 +114,17 @@ impl Headless {
         })
     }
 
-    /// Renders one frame and reads it back.
-    pub fn render(&self, scene: &PreparedScene) -> Result<Frame, Error> {
-        let (width, height) = scene.size();
+    /// Renders one frame of `instances` under `scene` and reads it back, through the same
+    /// [`Renderer::prepare`] and [`Renderer::encode`] a windowed consumer calls.
+    pub fn render(
+        &self,
+        viewport: &mut Viewport,
+        world: &World,
+        scene: &Scene,
+        instances: &[Instance],
+    ) -> Result<Frame, Error> {
+        self.renderer.prepare(viewport, world, scene, instances);
+        let (width, height) = viewport.size();
         let target = self.target(width, height);
         let view = target.create_view(&Default::default());
         let row = (width * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
@@ -126,7 +135,8 @@ impl Headless {
             mapped_at_creation: false,
         });
         let mut encoder = self.device.create_command_encoder(&Default::default());
-        self.renderer.encode(&mut encoder, scene, &view, None);
+        self.renderer
+            .encode(&mut encoder, viewport, world, &view, None);
         encoder.copy_texture_to_buffer(
             target.as_image_copy(),
             wgpu::TexelCopyBufferInfo {
@@ -155,11 +165,19 @@ impl Headless {
 
     /// Renders `frames` frames and returns each frame's GPU time in milliseconds (first pass
     /// start to last pass end, from timestamp queries).
-    pub fn gpu_frame_times(&self, scene: &PreparedScene, frames: usize) -> Result<Vec<f64>, Error> {
+    pub fn gpu_frame_times(
+        &self,
+        viewport: &mut Viewport,
+        world: &World,
+        scene: &Scene,
+        instances: &[Instance],
+        frames: usize,
+    ) -> Result<Vec<f64>, Error> {
         if !self.timestamps {
             return Err(Error::NoTimestamps);
         }
-        let (width, height) = scene.size();
+        self.renderer.prepare(viewport, world, scene, instances);
+        let (width, height) = viewport.size();
         let target = self.target(width, height);
         let view = target.create_view(&Default::default());
         let query_set = self.device.create_query_set(&wgpu::QuerySetDescriptor {
@@ -185,7 +203,8 @@ impl Headless {
             let mut encoder = self.device.create_command_encoder(&Default::default());
             self.renderer.encode(
                 &mut encoder,
-                scene,
+                viewport,
+                world,
                 &view,
                 Some(FrameTimestamps {
                     query_set: &query_set,

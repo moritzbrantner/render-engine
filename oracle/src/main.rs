@@ -16,9 +16,10 @@
 //! ```
 
 mod bevy_side;
+mod content;
 mod scenarios;
 
-use render_engine::headless::Headless;
+use render_engine::{headless::Headless, renderer::Viewport};
 use std::{path::PathBuf, process::ExitCode};
 
 /// Mean FLIP error (0 = identical, 1 = maximally different) above which a scenario fails.
@@ -222,8 +223,9 @@ fn main() -> ExitCode {
                 continue;
             }
         };
-        let prepared = gpu.prepare(&s.scene, s.width, s.height);
-        let ours = match gpu.render(&prepared) {
+        let (world, instances) = content::upload(gpu.renderer(), &s.assets, &s.objects);
+        let mut viewport = Viewport::new(gpu.renderer(), s.width, s.height);
+        let ours = match gpu.render(&mut viewport, &world, &s.scene, &instances) {
             Ok(f) => f,
             Err(e) => {
                 println!(
@@ -251,9 +253,15 @@ fn main() -> ExitCode {
         }
 
         let engine_ms = if o.timing {
-            gpu.gpu_frame_times(&prepared, o.frames as usize)
-                .ok()
-                .and_then(median)
+            gpu.gpu_frame_times(
+                &mut viewport,
+                &world,
+                &s.scene,
+                &instances,
+                o.frames as usize,
+            )
+            .ok()
+            .and_then(median)
         } else {
             None
         };

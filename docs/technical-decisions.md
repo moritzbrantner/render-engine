@@ -120,7 +120,21 @@ upgrade that changes a default shows up as a deliberate scenario change:
   render-engine loops over the whole list in Bevy's order (point lights, then spot lights, each
   with the shadow casters first, then the sun). Outside its range a light contributes exactly
   zero in both, so the sums agree; clustering waits until the GPU-time gate asks for it. The
-  temporal shadow filter (it needs TAA) and light textures are out of scope.
+  temporal shadow filter (it needs TAA) and light textures are out of scope;
+- consumer meshes and textured materials: `textured_props` reads CC0 glTF props
+  (`assets/props/`) once in the oracle (`content.rs`, following Bevy's glTF loader: base
+  colour, normal, metallic-roughness, occlusion and emissive textures, alpha mode, double-sided,
+  `COLOR_0`, MikkTSpace tangents through the same `bevy_mikktspace` crate when a normal map needs
+  them) and gives both sides the same vertex attributes, texels, box-filtered mip chains and
+  samplers. Bevy gets `Mesh`, `Image` and `StandardMaterial` assets built from that data
+  rather than `bevy_gltf`'s scene spawner, which keeps the translation field by field like
+  every other scenario. The props use alpha mask (in the main and the shadow pass), a blended
+  sphere and a mirrored instance. render-engine ports `pbr_input_from_standard_material`,
+  `apply_normal_mapping`, `alpha_discard` and `prepass_alpha_discard`. It normalises normals
+  and tangents per vertex and leaves the interpolated normal unnormalised for the shadow
+  biases, as Bevy does. Mirrored instances get a clockwise pipeline instead of Bevy's
+  `winding_corrected_front_facing`; for double-sided materials the two agree, and single-sided
+  mirrored meshes keep their outside faces.
 
 Later scenarios lift these one at a time (temporal filtering, sky).
 
@@ -135,8 +149,13 @@ starts after that.
 
 render-engine owns render passes, lights, shadows, sky/fog/ambient, tone mapping and (later)
 particle simulation and rendering. Games own scene content, ECS, asset loading, the game loop,
-gameplay and the day clock that drives the sun. The engine exposes coarse per-frame data (scene,
-lights, instances) and renders into a target the consumer provides.
+gameplay and the day clock that drives the sun. The consumer owns the wgpu device, queue and
+frame. It uploads meshes, textures and materials once into a `World` (stable handles,
+incremental `set_*` updates), describes each frame as a `Scene` (camera and lights) plus a list
+of instances (mesh, material, transform), and has `Renderer::encode` record into its encoder and
+colour target. Its UI draws on top afterwards. The engine keeps its MSAA, HDR, depth and
+shadow targets in a `Viewport`. The headless path uses the same calls. See
+[consumer integration](consumer-integration.md).
 
 ## D8 — Web path: a three.js port gated by the same oracle
 
