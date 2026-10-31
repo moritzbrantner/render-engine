@@ -10,8 +10,9 @@ the way [physics-engine](https://github.com/moritzbrantner/physics-engine) is bu
 Rapier:
 
 - **Lighting:** `bevy_pbr` (Bevy 0.20.1) is the visual reference.
-- **Particles:** `bevy_hanabi` (0.19.0, GPU particles) is the reference once the particle track
-  starts.
+- **Particles:** `bevy_hanabi` (GPU particles) is the reference. Its latest release (0.19.0) is
+  built on Bevy 0.19, and its Bevy 0.20 port (djeedai/bevy_hanabi#576) is only on `main`. The
+  oracle therefore pins a `main` commit (`d277555d4a`) and moves to the first 0.20 release once it ships (D9).
 
 Both stay on their latest stable releases. Bevy is a dev/oracle dependency only (`oracle/`); the
 engine itself never depends on Bevy, and the games do not ship it.
@@ -187,7 +188,7 @@ Later scenarios lift these one at a time (temporal filtering).
 Lighting scenarios come first because mmorpg#529 is waiting on them: cascaded shadows,
 point/spot lights, ambient/IBL, time-of-day sky, fog. Then the mmorpg native integration and the
 web path. The particle track (bevy_hanabi oracle, emitters, GPU simulation, lit/soft particles)
-starts after that.
+starts after that. Its oracle side and parity rules are in D9.
 
 ## D7 — Ownership boundary
 
@@ -209,6 +210,65 @@ chunks where they don't. Each web scenario is checked against the **same Bevy or
 scenarios** through a headless Chromium side with the same FLIP thresholds (D3); GPU time is
 advisory there. Option A (render-engine compiled to WASM/WebGPU) stays available later for
 particles only, if three.js GPU particles cannot meet the gate. Scope of the first step: #11.
+
+## D9 — Particle parity: seeded replay, then statistics
+
+Decided in #12. Particles are random, so an image comparison only works while both sides draw the
+same random numbers for the same particles. Each particle scenario (`oracle/src/particles.rs`)
+therefore runs at a **fixed timestep** of exactly 1/64 s. Every age and time is a multiple of a
+power of two and adds up exactly in `f32`, so a fixed lifetime ends on the same frame on both
+sides. Each scenario also has a **fixed seed** and fixed capture frames. The Bevy side is
+Bevy 0.20.1 with `bevy_hanabi` (D1). The spawners start only once every effect's pipelines are
+ready, and the frame before the first spawn is captured as the empty background ("plate").
+Each capture is judged by one of two tiers:
+
+| Tier | Captures | Gate |
+| --- | --- | --- |
+| **Exact** (seeded replay) | before any particle slot is recycled (until the first particle dies) | the lighting FLIP gate (D3): mean ≤ 0.005, p99 ≤ 0.05 |
+| **Statistical** | after slots are recycled | per scenario: alpha coverage, spatial histogram and colour histogram distances under the scenario's `StatThresholds` |
+| **Population**, every frame | all | alive-particle count and age statistics identical per emitter and frame |
+
+- **Why the exact tier ends at the first death.** hanabi seeds each particle's random stream
+  with `pcg_hash(slot ^ spawner_seed)` (`vfx_init.wesl`). `spawner_seed` is a CPU-side value
+  that changes every frame (`StdRng::seed_from_u64(previous)` from the effect's `prng_seed`), and
+  `slot` is the particle's index in the effect's buffer. Until a particle dies, a frame's spawns
+  take the next free slots in a fixed order. render-engine can then reproduce the slot, the
+  seed chain, `pcg_hash`, `to_float01` and the order in which the init modifiers draw from the
+  stream, and get the same particles. Once particles die, the update pass returns their slots
+  through GPU atomics, so which new particle gets which slot depends on hanabi's thread
+  scheduling. render-engine cannot reproduce that, even though Bevy happens to repeat it
+  bit-for-bit on the RTX 3060 Ti and on lavapipe (`--calibrate`, "rerun" rows).
+- **Blending.** The first scenario blends additively. Additive blending does not depend on the
+  draw order, and hanabi draws in its alive-list order, which also comes from atomics. Alpha-blended
+  scenarios will need to sort, either both sides by the same key or with per-scenario
+  statistical gates only.
+- **Statistics** (`ImageStats`, both images against their own plate): *alpha coverage* is the
+  share of pixels where some channel changed by more than 2/255, compared as the relative
+  difference. The *spatial histogram* adds up, per cell of a 16 × 9 grid, each pixel's largest
+  channel change. The *colour histogram* counts covered pixels over a 4 × 4 × 4 RGB grid. Both
+  histograms are normalised and compared by total-variation distance (half the L1 distance).
+- **Population.** hanabi spawns on the CPU (`EffectSpawner::spawn_count`, deterministic at a fixed
+  timestep), and its init pass runs before the update pass in the same frame. A particle spawned
+  on frame `s` therefore has age `(k − s + 1)·dt` after frame `k` and is alive while that is below
+  its lifetime (`particles::population`). The report has every emitter's spawned and alive counts
+  and its mean and maximum age per frame. Reading hanabi's GPU counter back is not needed: the spawn counts and
+  fixed lifetimes determine it.
+- **Thresholds per scenario, from calibration.** `oracle --calibrate` runs each particle
+  scenario on Bevy against itself: a rerun, eight other seeds and gravity × 1.25. The
+  statistical thresholds are about 1.5× the largest distance any other seed reaches, and must
+  still reject the gravity change. For `particles_fountain` at 2.0 s, seed noise reaches
+  coverage 0.107, spatial 0.104 and colour 0.083, so the gate is 0.16 / 0.15 / 0.12. Gravity ×
+  1.25 scores spatial 0.203, which fails. The coverage and colour distances stay within seed
+  noise under that change; the spatial histogram catches it. In the exact tier, every other seed
+  scores FLIP mean ≥ 0.023 and p99 ≥ 0.92, so the FLIP gate rejects any difference in the random
+  stream. The numbers are the same on the RTX 3060 Ti and on lavapipe to three decimals.
+- **GPU time.** The Bevy side records the sum of its top-level render diagnostic spans per
+  simulation frame, as for lighting. hanabi's compute passes (`hanabi:init`, `hanabi:update`)
+  write no timestamps, so this covers rendering but not simulation. Timing simulation as well
+  belongs to the GPU-simulation work (#14).
+- **Engine side.** render-engine has no particles yet (#13). Each particle scenario is in the
+  report with its Bevy captures and population, marked as a known gap (`"known_gap": 13`). It
+  does not fail the run until #13 adds the engine side and the gates above apply.
 
 ## Standing rules
 

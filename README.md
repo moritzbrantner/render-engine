@@ -34,6 +34,11 @@ and GPU frame time. See [technical decisions](docs/technical-decisions.md).
   render-engine, headless. It fails when mean FLIP > 0.005 or p99 FLIP > 0.05, or — on a GPU —
   when render-engine's GPU frame time (median of its fastest timing round) is more than 10%
   slower than Bevy's.
+- **Particle oracle:** particle scenarios run on Bevy with `bevy_hanabi` at a fixed timestep and
+  seed. Captures before any particle dies need an exact image match (FLIP). Later captures need
+  matching coverage, spatial and colour statistics, and alive counts must match on every frame
+  ([D9](docs/technical-decisions.md#d9--particle-parity-seeded-replay-then-statistics)).
+  render-engine's emitters are next (#13).
 - **CI without a GPU:** CI renders both sides on lavapipe (software Vulkan); the image gate is
   enforced there, GPU time is advisory. Locally on a GPU both gates apply.
 - **Report site:** <https://moritzbrantner.github.io/render-engine/>, published from CI on

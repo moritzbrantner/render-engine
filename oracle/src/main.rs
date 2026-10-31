@@ -17,10 +17,16 @@
 //! oracle --only sun_shadows      run only these scenarios
 //! oracle --no-timing             image gate only
 //! oracle --out DIR               write <scenario>.{bevy,engine,flip}.png and report.json (default target/oracle)
+//! oracle --calibrate             particle scenarios only: Bevy against itself (rerun, other seed,
+//!                                gravity ×1.25), to calibrate the particle gates (D9)
 //! ```
+//!
+//! Particle scenarios (`particles.rs`, D9) are judged per capture: exact captures by the FLIP
+//! gate, statistical captures by `particles::StatDistance`, every frame by the alive count.
 
 mod bevy_side;
 mod content;
+mod particles;
 mod scenarios;
 
 use render_engine::{headless::Headless, renderer::Viewport};
@@ -48,6 +54,8 @@ struct Options {
     out: PathBuf,
     bevy_side: Option<String>,
     frames: u32,
+    calibrate: bool,
+    variant: bevy_side::ParticleVariant,
 }
 
 fn options() -> Result<Options, String> {
@@ -58,6 +66,8 @@ fn options() -> Result<Options, String> {
         out: PathBuf::from("target/oracle"),
         bevy_side: None,
         frames: TIMED_FRAMES,
+        calibrate: false,
+        variant: bevy_side::ParticleVariant::default(),
     };
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -74,6 +84,20 @@ fn options() -> Result<Options, String> {
                     .next()
                     .and_then(|n| n.parse().ok())
                     .ok_or("--frames needs a number")?
+            }
+            "--calibrate" => o.calibrate = true,
+            "--seed" => {
+                o.variant.seed = Some(
+                    args.next()
+                        .and_then(|n| n.parse().ok())
+                        .ok_or("--seed needs a number")?,
+                )
+            }
+            "--gravity-scale" => {
+                o.variant.gravity_scale = args
+                    .next()
+                    .and_then(|n| n.parse().ok())
+                    .ok_or("--gravity-scale needs a number")?
             }
             other => return Err(format!("unknown argument {other}")),
         }
@@ -101,6 +125,9 @@ fn save_png(path: &std::path::Path, w: u32, h: u32, rgba: &[u8]) -> Result<(), S
 
 /// Child process: render one scenario on Bevy, write `<name>.bevy.png` and `<name>.bevy.json`.
 fn bevy_child(name: &str, o: &Options) -> Result<(), String> {
+    if let Some(scenario) = particles::all().into_iter().find(|s| s.name == name) {
+        return bevy_particles_child(scenario, o);
+    }
     let scenario = scenarios::all()
         .into_iter()
         .find(|s| s.name == name)
@@ -112,6 +139,265 @@ fn bevy_child(name: &str, o: &Options) -> Result<(), String> {
     let json = serde_json::json!({ "gpu_ms": run.gpu_ms, "spans": run.spans });
     std::fs::write(o.out.join(format!("{name}.bevy.json")), json.to_string())
         .map_err(|e| e.to_string())
+}
+
+/// Child process for a particle scenario: `<name>.plate.bevy.png`, `<name>.<capture>.bevy.png`
+/// and `<name>.bevy.json` (spawns per emitter and frame, GPU times).
+fn bevy_particles_child(s: particles::ParticleScenario, o: &Options) -> Result<(), String> {
+    let (name, w, h) = (s.name, s.width, s.height);
+    let captures = s.captures.clone();
+    let run = bevy_side::run_particles(s, o.variant);
+    std::fs::create_dir_all(&o.out).map_err(|e| e.to_string())?;
+    let plate = run.plate.ok_or("Bevy produced no plate")?;
+    save_png(&o.out.join(format!("{name}.plate.bevy.png")), w, h, &plate)?;
+    for c in &captures {
+        let (_, rgba) = run
+            .captures
+            .iter()
+            .find(|(f, _)| *f == c.frame)
+            .ok_or_else(|| format!("no capture at frame {}", c.frame))?;
+        save_png(
+            &o.out.join(format!("{name}.{}.bevy.png", c.label())),
+            w,
+            h,
+            rgba,
+        )?;
+    }
+    let json =
+        serde_json::json!({ "spawns": run.spawns, "gpu_ms": run.gpu_ms, "spans": run.spans });
+    std::fs::write(o.out.join(format!("{name}.bevy.json")), json.to_string())
+        .map_err(|e| e.to_string())
+}
+
+/// One particle capture compared against the reference: the FLIP numbers always, the statistics
+/// always, and the gate of its tier.
+struct ParticleCompare {
+    flip: Flip,
+    stats: particles::StatDistance,
+    passed: bool,
+}
+
+fn compare_particles(
+    s: &particles::ParticleScenario,
+    tier: particles::Tier,
+    reference: (&[u8], &[u8]),
+    test: (&[u8], &[u8]),
+) -> ParticleCompare {
+    let (w, h) = (s.width, s.height);
+    let flip = flip(w, h, reference.1, test.1);
+    let stats = particles::StatDistance::new(
+        &particles::ImageStats::new(w, h, reference.1, reference.0),
+        &particles::ImageStats::new(w, h, test.1, test.0),
+    );
+    let passed = match tier {
+        particles::Tier::Exact => flip.mean <= FLIP_MEAN_MAX && flip.p99 <= FLIP_P99_MAX,
+        particles::Tier::Statistical => stats.passes(s.stat_max),
+    };
+    ParticleCompare {
+        flip,
+        stats,
+        passed,
+    }
+}
+
+/// Alive count and ages per frame and emitter, as JSON for the report.
+fn population_json(s: &particles::ParticleScenario, spawns: &[Vec<u32>]) -> serde_json::Value {
+    serde_json::Value::Array(
+        s.emitters
+            .iter()
+            .zip(spawns)
+            .map(|(e, spawns)| {
+                let p = particles::population(spawns, e.lifetime, e.capacity);
+                serde_json::json!({
+                    "emitter": e.name,
+                    "lifetime": e.lifetime,
+                    "capacity": e.capacity,
+                    "spawned": spawns,
+                    "alive": p.iter().map(|p| p.alive).collect::<Vec<_>>(),
+                    "mean_age": p.iter().map(|p| p.mean_age).collect::<Vec<_>>(),
+                    "max_age": p.iter().map(|p| p.max_age).collect::<Vec<_>>(),
+                })
+            })
+            .collect(),
+    )
+}
+
+/// The particle scenarios: Bevy + bevy_hanabi as the reference; render-engine's side is not
+/// implemented yet (#13), so each scenario is reported as a known gap and does not fail the run.
+fn particle_scenarios(o: &Options) -> (Vec<serde_json::Value>, bool) {
+    let mut report = Vec::new();
+    let mut failed = false;
+    for s in particles::all()
+        .iter()
+        .filter(|s| o.only.is_empty() || o.only.iter().any(|n| n == s.name))
+    {
+        let run = match bevy_side::run_particles_in_child(s, &o.out, Default::default()) {
+            Ok(r) => r,
+            Err(e) => {
+                println!("{:<24} {:<20} bevy failed: {e}", s.name, "particles");
+                failed = true;
+                continue;
+            }
+        };
+        let population = population_json(s, &run.spawns);
+        for c in &s.captures {
+            let alive: u32 = s
+                .emitters
+                .iter()
+                .zip(&run.spawns)
+                .map(|(e, sp)| {
+                    particles::population(sp, e.lifetime, e.capacity)
+                        .get(c.frame as usize - 1)
+                        .map_or(0, |p| p.alive)
+                })
+                .sum();
+            println!(
+                "{:<24} {:<20} {:>9} {:>9} {:>12} {:>12} {:>7}  KNOWN GAP: engine side (#13); t = {:.3} s ({}), Bevy alive {alive}",
+                format!("{}@{}", s.name, c.label()),
+                "particles",
+                "-",
+                "-",
+                "-",
+                "-",
+                "-",
+                c.time(),
+                c.tier.id(),
+            );
+        }
+        let bevy_ms = median(&run.gpu_ms);
+        report.push(serde_json::json!({
+            "scenario": s.name,
+            "capability": s.capability,
+            "feature": "particles",
+            "width": s.width,
+            "height": s.height,
+            "dt": particles::DT,
+            "seed": s.seed,
+            "stat_max": {
+                "coverage": s.stat_max.coverage,
+                "spatial": s.stat_max.spatial,
+                "colour": s.stat_max.colour,
+            },
+            "decision": "d9--particle-parity-seeded-replay-then-statistics",
+            "captures": s.captures.iter().zip(&run.captures).map(|(c, (_, rgba))| serde_json::json!({
+                "label": c.label(),
+                "frame": c.frame,
+                "time": c.time(),
+                "tier": c.tier.id(),
+                "bevy_coverage": particles::ImageStats::new(
+                    s.width,
+                    s.height,
+                    rgba,
+                    run.plate.as_deref().unwrap_or_default(),
+                ).coverage,
+                "flip_mean": null,
+                "flip_p99": null,
+                "stats": null,
+                "passed": null,
+            })).collect::<Vec<_>>(),
+            "population": population,
+            "engine_gpu_ms": null,
+            "bevy_gpu_ms": bevy_ms,
+            "bevy_spans": run.spans,
+            "known_gap": 13,
+            "result": "known gap: render-engine side not implemented yet (#13)",
+            "passed": null,
+        }));
+    }
+    (report, failed)
+}
+
+/// Other seeds `--calibrate` compares each particle scenario against.
+const CALIBRATION_SEEDS: u32 = 8;
+
+/// `--calibrate`: each particle scenario on Bevy against itself, to show what the gates accept
+/// (a rerun, other seeds) and reject (gravity ×1.25).
+fn calibrate(o: &Options) -> ExitCode {
+    println!(
+        "{:<32} {:<14} {:<12} {:>9} {:>9} {:>9} {:>9} {:>9} {:>7}  result",
+        "capture",
+        "variant",
+        "tier",
+        "FLIP mean",
+        "FLIP p99",
+        "coverage",
+        "spatial",
+        "colour",
+        "alive"
+    );
+    for s in particles::all()
+        .iter()
+        .filter(|s| o.only.is_empty() || o.only.iter().any(|n| n == s.name))
+    {
+        let dir = |tag: &str| o.out.join("calibrate").join(tag);
+        let base = match bevy_side::run_particles_in_child(s, &dir("base"), Default::default()) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("{}: {e}", s.name);
+                return ExitCode::FAILURE;
+            }
+        };
+        let mut variants = vec![("rerun".to_string(), bevy_side::ParticleVariant::default())];
+        variants.extend((1..=CALIBRATION_SEEDS).map(|k| {
+            (
+                format!("seed+{k}"),
+                bevy_side::ParticleVariant {
+                    seed: Some(s.seed.wrapping_add(k)),
+                    gravity_scale: 1.0,
+                },
+            )
+        }));
+        variants.push((
+            "gravity×1.25".to_string(),
+            bevy_side::ParticleVariant {
+                seed: None,
+                gravity_scale: 1.25,
+            },
+        ));
+        for (tag, variant) in variants {
+            let tag = tag.as_str();
+            let run = match bevy_side::run_particles_in_child(s, &dir(tag), variant) {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("{} {tag}: {e}", s.name);
+                    return ExitCode::FAILURE;
+                }
+            };
+            let same_population =
+                population_json(s, &base.spawns) == population_json(s, &run.spawns);
+            let (bp, rp) = (base.plate.as_deref(), run.plate.as_deref());
+            for (c, ((_, b), (_, r))) in s
+                .captures
+                .iter()
+                .zip(base.captures.iter().zip(&run.captures))
+            {
+                let cmp = compare_particles(
+                    s,
+                    c.tier,
+                    (bp.unwrap_or_default(), b),
+                    (rp.unwrap_or_default(), r),
+                );
+                println!(
+                    "{:<32} {:<14} {:<12} {:>9.4} {:>9.4} {:>9.4} {:>9.4} {:>9.4} {:>7}  {}",
+                    format!("{}@{}", s.name, c.label()),
+                    tag,
+                    c.tier.id(),
+                    cmp.flip.mean,
+                    cmp.flip.p99,
+                    cmp.stats.coverage,
+                    cmp.stats.spatial,
+                    cmp.stats.colour,
+                    if same_population { "same" } else { "DIFF" },
+                    if cmp.passed && same_population {
+                        "accepted"
+                    } else {
+                        "rejected"
+                    },
+                );
+            }
+        }
+    }
+    ExitCode::SUCCESS
 }
 
 struct Flip {
@@ -167,23 +453,28 @@ fn main() -> ExitCode {
         };
     }
     let scenarios = scenarios::all();
+    let particle_names: Vec<&str> = particles::all().iter().map(|s| s.name).collect();
     if o.list {
         for s in &scenarios {
             println!("{:<24} {}", s.name, s.capability);
         }
+        for s in particles::all() {
+            println!("{:<24} {}", s.name, s.capability);
+        }
         return ExitCode::SUCCESS;
     }
-    if let Some(unknown) = o
-        .only
-        .iter()
-        .find(|n| !scenarios.iter().any(|s| s.name == n.as_str()))
-    {
+    if let Some(unknown) = o.only.iter().find(|n| {
+        !scenarios.iter().any(|s| s.name == n.as_str()) && !particle_names.contains(&n.as_str())
+    }) {
         eprintln!("unknown scenario {unknown} (see --list)");
         return ExitCode::FAILURE;
     }
     if let Err(e) = std::fs::create_dir_all(&o.out) {
         eprintln!("cannot create {}: {e}", o.out.display());
         return ExitCode::FAILURE;
+    }
+    if o.calibrate {
+        return calibrate(&o);
     }
 
     let gpu = match Headless::new() {
@@ -362,6 +653,8 @@ fn main() -> ExitCode {
             "passed": image_ok && !timing_missing && !(slow && gate_timing),
         }));
     }
+    let (particle_report, particles_failed) = particle_scenarios(&o);
+    failed |= particles_failed;
     let report = serde_json::json!({
         "adapter": gpu.adapter.name,
         "software": software,
@@ -377,6 +670,7 @@ fn main() -> ExitCode {
             "decision": f.decision(),
         })),
         "scenarios": report,
+        "particles": particle_report,
     });
     if let Err(e) = std::fs::write(o.out.join("report.json"), format!("{report:#}")) {
         eprintln!("cannot write report.json: {e}");

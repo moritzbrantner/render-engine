@@ -6,7 +6,9 @@
 //! renderer cannot be created twice in one process.
 
 use crate::content::Geometry;
+use crate::particles::{self, Emitter, ParticleScenario, Spawn, Velocity as ParticleVelocity};
 use crate::scenarios::Scenario;
+use bevy::time::TimeUpdateStrategy;
 use bevy::{
     app::{AppExit, ScheduleRunnerPlugin},
     camera::{Exposure, Hdr, RenderTarget},
@@ -38,6 +40,7 @@ use bevy::{
     mesh::{Indices, PrimitiveTopology},
     render::render_resource::Face,
 };
+use bevy_hanabi as hanabi;
 use render_engine::{
     material::{AlphaMode as EngineAlphaMode, TextureData},
     mesh::{MeshData, Shape},
@@ -160,16 +163,8 @@ fn texture_image(t: &TextureData) -> Image {
     image
 }
 
-pub fn run(scenario: Scenario, timed_frames: u32) -> BevyRun {
-    let shared = Shared(Arc::new(Mutex::new(BevyRun::default())));
-    let (width, height) = (scenario.width, scenario.height);
-    let Scenario {
-        scene,
-        objects,
-        assets,
-        ..
-    } = scenario;
-
+/// A windowless Bevy app that renders as fast as it can, with GPU timestamp spans.
+fn headless_app() -> App {
     let mut app = App::new();
     app.add_plugins(
         DefaultPlugins
@@ -194,23 +189,66 @@ pub fn run(scenario: Scenario, timed_frames: u32) -> BevyRun {
     .add_plugins((
         ScheduleRunnerPlugin::run_loop(Duration::ZERO),
         RenderDiagnosticsPlugin,
-    ))
-    .insert_resource(shared.clone())
-    .insert_resource(Plan {
-        frame: 0,
-        timed_frames,
-    })
-    .insert_resource(GlobalAmbientLight {
-        color: linear(scene.ambient.color),
-        brightness: scene.ambient.brightness,
-        ..default()
-    })
-    .insert_resource(DirectionalLightShadowMap {
-        size: scene.shadow_maps.directional as usize,
-    })
-    .insert_resource(PointLightShadowMap {
-        size: scene.shadow_maps.point as usize,
-    });
+    ));
+    app
+}
+
+/// Sum of the frame's top-level GPU spans (`render/<span>/elapsed_gpu`) and their paths, or
+/// `None` before the first spans arrive.
+fn frame_gpu_ms(store: &DiagnosticsStore) -> Option<(f64, Vec<String>)> {
+    let mut total = 0.0;
+    let mut spans = Vec::new();
+    for d in store.iter() {
+        let path = d.path().as_str();
+        let parts: Vec<&str> = path.split('/').collect();
+        // Only top-level spans (`render/<span>/elapsed_gpu`); nested spans are inside them.
+        if parts.len() == 3
+            && parts[0] == "render"
+            && parts[2] == "elapsed_gpu"
+            && let Some(latest) = d.measurement()
+        {
+            // Spans that share a name in one frame (the early and the late
+            // `per_view_shadow_pass`) arrive as several measurements stamped with the same
+            // sync time; `measurement()` alone would keep only the last of them.
+            let ms: f64 = d
+                .measurements()
+                .filter(|m| m.time == latest.time)
+                .map(|m| m.value)
+                .sum();
+            total += ms;
+            spans.push(path.to_string());
+        }
+    }
+    (!spans.is_empty()).then_some((total, spans))
+}
+
+pub fn run(scenario: Scenario, timed_frames: u32) -> BevyRun {
+    let shared = Shared(Arc::new(Mutex::new(BevyRun::default())));
+    let (width, height) = (scenario.width, scenario.height);
+    let Scenario {
+        scene,
+        objects,
+        assets,
+        ..
+    } = scenario;
+
+    let mut app = headless_app();
+    app.insert_resource(shared.clone())
+        .insert_resource(Plan {
+            frame: 0,
+            timed_frames,
+        })
+        .insert_resource(GlobalAmbientLight {
+            color: linear(scene.ambient.color),
+            brightness: scene.ambient.brightness,
+            ..default()
+        })
+        .insert_resource(DirectionalLightShadowMap {
+            size: scene.shadow_maps.directional as usize,
+        })
+        .insert_resource(PointLightShadowMap {
+            size: scene.shadow_maps.point as usize,
+        });
 
     app.add_systems(
         Startup,
@@ -504,31 +542,8 @@ fn drive(
     }
     // Diagnostics lag a few frames behind; record after the screenshot settled.
     if plan.frame > WARMUP_FRAMES + 10 {
-        let mut total = 0.0;
-        let mut spans = Vec::new();
-        for d in store.iter() {
-            let path = d.path().as_str();
-            let parts: Vec<&str> = path.split('/').collect();
-            // Only top-level spans (`render/<span>/elapsed_gpu`); nested spans are inside them.
-            if parts.len() == 3
-                && parts[0] == "render"
-                && parts[2] == "elapsed_gpu"
-                && let Some(latest) = d.measurement()
-            {
-                // Spans that share a name in one frame (the early and the late
-                // `per_view_shadow_pass`) arrive as several measurements stamped with the same
-                // sync time; `measurement()` alone would keep only the last of them.
-                let ms: f64 = d
-                    .measurements()
-                    .filter(|m| m.time == latest.time)
-                    .map(|m| m.value)
-                    .sum();
-                total += ms;
-                spans.push(path.to_string());
-            }
-        }
         let mut run = shared.0.lock().unwrap();
-        if !spans.is_empty() {
+        if let Some((total, spans)) = frame_gpu_ms(&store) {
             run.gpu_ms.push(total);
             run.spans = spans;
         }
@@ -572,4 +587,354 @@ pub fn run_in_child(
         })
         .unwrap_or_default();
     Ok((dir.join(format!("{name}.bevy.png")), gpu_ms, spans))
+}
+
+/// What a particle scenario's Bevy run produced.
+#[derive(Default)]
+pub struct ParticleRun {
+    /// The view one frame before the first spawn (the empty background).
+    pub plate: Option<Vec<u8>>,
+    /// `(simulation frame, RGBA8)` per capture.
+    pub captures: Vec<(u32, Vec<u8>)>,
+    /// Particles spawned per emitter and simulation frame (hanabi's `EffectSpawner::spawn_count`).
+    pub spawns: Vec<Vec<u32>>,
+    /// GPU milliseconds per simulation frame (sum of the top-level render diagnostic spans).
+    pub gpu_ms: Vec<f64>,
+    pub spans: Vec<String>,
+}
+
+#[derive(Resource, Clone)]
+struct ParticleShared(Arc<Mutex<ParticleRun>>);
+
+#[derive(Resource)]
+struct ParticlePlan {
+    frame: u32,
+    /// Simulation frame (1 = the frame the spawners start); 0 while warming up.
+    sim_frame: u32,
+    captures: Vec<u32>,
+    emitters: usize,
+}
+
+/// Variations of a particle scenario for calibrating the statistics gate (`oracle --calibrate`).
+#[derive(Clone, Copy, Debug)]
+pub struct ParticleVariant {
+    /// Replaces the scenario's PRNG seed.
+    pub seed: Option<u32>,
+    /// Scales every emitter's gravity.
+    pub gravity_scale: f32,
+}
+
+impl Default for ParticleVariant {
+    fn default() -> Self {
+        ParticleVariant {
+            seed: None,
+            gravity_scale: 1.0,
+        }
+    }
+}
+
+/// The emitter as a hanabi effect: the same spawner, init, update and render modifiers, in the
+/// order #13 replays them (the init modifiers draw from the particle's random stream in this
+/// order: position, then velocity).
+fn effect_asset(e: &Emitter, seed: u32, gravity_scale: f32) -> hanabi::EffectAsset {
+    use hanabi::{Attribute, SetAttributeModifier};
+    let w = hanabi::ExprWriter::new();
+    let init_position = hanabi::SetPositionSphereModifier {
+        center: w.lit(v3(e.position)).expr(),
+        radius: w.lit(e.radius).expr(),
+        dimension: hanabi::ShapeDimension::Volume,
+    };
+    enum InitVelocity {
+        Radial(hanabi::SetVelocitySphereModifier),
+        Jitter(SetAttributeModifier),
+    }
+    let init_velocity = match e.velocity {
+        ParticleVelocity::Radial { speed } => {
+            InitVelocity::Radial(hanabi::SetVelocitySphereModifier {
+                center: w.lit(v3(e.position)).expr(),
+                speed: w.lit(speed).expr(),
+            })
+        }
+        ParticleVelocity::Jitter { base, spread } => {
+            let r = w.rand(hanabi::VectorType::VEC3F);
+            let v = r * w.lit(v3(spread * 2.0)) + w.lit(v3(base - spread));
+            InitVelocity::Jitter(SetAttributeModifier::new(Attribute::VELOCITY, v.expr()))
+        }
+    };
+    let init_age = SetAttributeModifier::new(Attribute::AGE, w.lit(0.0f32).expr());
+    let init_lifetime = SetAttributeModifier::new(Attribute::LIFETIME, w.lit(e.lifetime).expr());
+    let gravity = hanabi::AccelModifier::new(w.lit(v3(e.gravity * gravity_scale)).expr());
+    let round = hanabi::RoundModifier {
+        roundness: w.lit(1.0f32).expr(),
+    };
+    let mut color = hanabi::Gradient::new();
+    for &(t, c) in &e.color {
+        color.add_key(t, Vec4::from_array(c.to_array()));
+    }
+    let mut size = hanabi::Gradient::new();
+    for &(t, s) in &e.size {
+        size.add_key(t, Vec3::splat(s));
+    }
+    let spawner = match e.spawn {
+        Spawn::Burst { count } => hanabi::SpawnerSettings::once((count as f32).into()),
+        Spawn::Rate { per_second } => hanabi::SpawnerSettings::rate(per_second.into()),
+    };
+    let mut asset = hanabi::EffectAsset::new(e.capacity, spawner, w.finish())
+        .with_name(e.name)
+        .with_alpha_mode(hanabi::AlphaMode::Add)
+        .with_simulation_condition(hanabi::SimulationCondition::Always)
+        .init(init_position);
+    asset = match init_velocity {
+        InitVelocity::Radial(m) => asset.init(m),
+        InitVelocity::Jitter(m) => asset.init(m),
+    };
+    asset.prng_seed = seed;
+    asset
+        .init(init_age)
+        .init(init_lifetime)
+        .update(gravity)
+        .render(hanabi::OrientModifier::new(
+            hanabi::OrientMode::ParallelCameraDepthPlane,
+        ))
+        .render(hanabi::ColorOverLifetimeModifier {
+            gradient: color,
+            blend: hanabi::ColorBlendMode::Overwrite,
+            mask: hanabi::ColorBlendMask::RGBA,
+        })
+        .render(hanabi::SizeOverLifetimeModifier {
+            gradient: size,
+            screen_space_size: false,
+        })
+        .render(round)
+}
+
+/// Renders a particle scenario on Bevy + bevy_hanabi at the fixed timestep `particles::DT`.
+/// After warm-up (and once every effect's pipelines are ready) it captures the empty plate,
+/// starts all spawners on the next frame and captures each `Capture::frame`.
+pub fn run_particles(scenario: ParticleScenario, variant: ParticleVariant) -> ParticleRun {
+    let shared = ParticleShared(Arc::new(Mutex::new(ParticleRun {
+        spawns: vec![Vec::new(); scenario.emitters.len()],
+        ..default()
+    })));
+    let (width, height) = (scenario.width, scenario.height);
+    let mut app = headless_app();
+    app.add_plugins(hanabi::HanabiPlugin)
+        // hanabi seeds its CPU sampler from the OS; the scenarios only use constant CPU values,
+        // but keep it fixed anyway.
+        .insert_resource(hanabi::Random(rand_pcg::Pcg32::new(
+            0xcafe_f00d_d15e_a5e5,
+            0,
+        )))
+        .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(
+            particles::DT as f64,
+        )))
+        .insert_resource(shared.clone())
+        .insert_resource(ParticlePlan {
+            frame: 0,
+            sim_frame: 0,
+            captures: scenario.captures.iter().map(|c| c.frame).collect(),
+            emitters: scenario.emitters.len(),
+        });
+    let seed = variant.seed.unwrap_or(scenario.seed);
+    app.add_systems(
+        Startup,
+        move |mut commands: Commands,
+              mut images: ResMut<Assets<Image>>,
+              mut effects: ResMut<Assets<hanabi::EffectAsset>>| {
+            let target = images.add(Image::new_target_texture(
+                width,
+                height,
+                TextureFormat::Rgba8UnormSrgb,
+                None,
+            ));
+            commands.insert_resource(TargetImage(target.clone()));
+            let cam = scenario.camera;
+            commands.spawn((
+                Camera3d::default(),
+                Camera {
+                    clear_color: ClearColorConfig::Custom(linear(scenario.clear_color)),
+                    ..default()
+                },
+                RenderTarget::Image(target.into()),
+                Projection::Perspective(PerspectiveProjection {
+                    fov: cam.fov_y,
+                    near: cam.near,
+                    ..default()
+                }),
+                Exposure { ev100: cam.ev100 },
+                Hdr,
+                match cam.tonemapping {
+                    EngineTonemapping::AcesFitted => Tonemapping::AcesFitted,
+                    EngineTonemapping::TonyMcMapface => Tonemapping::TonyMcMapface,
+                    EngineTonemapping::AgX => Tonemapping::AgX,
+                },
+                DebandDither::Disabled,
+                Msaa::Sample4,
+                Transform::from_translation(v3(cam.eye)).looking_at(v3(cam.target), Vec3::Y),
+            ));
+            for (i, e) in scenario.emitters.iter().enumerate() {
+                let asset = effect_asset(e, seed.wrapping_add(i as u32), variant.gravity_scale);
+                let spawner = hanabi::EffectSpawner::new(&asset.spawner).with_active(false);
+                commands.spawn((
+                    hanabi::ParticleEffect::new(effects.add(asset)),
+                    spawner,
+                    EmitterIndex(i),
+                    Transform::default(),
+                ));
+            }
+        },
+    )
+    .add_systems(Update, drive_particles)
+    .add_systems(Last, record_frame);
+
+    app.run();
+    let mut run = shared.0.lock().unwrap();
+    std::mem::take(&mut *run)
+}
+
+#[derive(Component)]
+struct EmitterIndex(usize);
+
+fn screenshot(commands: &mut Commands, target: &TargetImage, shared: &ParticleShared, frame: u32) {
+    let shared = shared.clone();
+    commands.spawn(Screenshot::image(target.0.clone())).observe(
+        move |captured: On<ScreenshotCaptured>| {
+            let rgba = captured
+                .image
+                .clone()
+                .try_into_dynamic()
+                .expect("screenshot converts to an image")
+                .to_rgba8()
+                .into_raw();
+            let mut run = shared.0.lock().unwrap();
+            if frame == 0 {
+                run.plate = Some(rgba);
+            } else {
+                run.captures.push((frame, rgba));
+            }
+        },
+    );
+}
+
+fn drive_particles(
+    mut commands: Commands,
+    mut plan: ResMut<ParticlePlan>,
+    target: Option<Res<TargetImage>>,
+    shared: Res<ParticleShared>,
+    compiled: Query<&hanabi::CompiledParticleEffect>,
+    mut spawners: Query<&mut hanabi::EffectSpawner>,
+    mut exit: MessageWriter<AppExit>,
+) {
+    plan.frame += 1;
+    let Some(target) = target else { return };
+    if plan.sim_frame == 0 {
+        let ready = compiled.iter().filter(|c| c.is_ready()).count() == plan.emitters;
+        if plan.frame == WARMUP_FRAMES && !ready {
+            // Keep warming up until every effect can spawn.
+            plan.frame -= 1;
+        } else if plan.frame == WARMUP_FRAMES {
+            screenshot(&mut commands, &target, &shared, 0);
+        } else if plan.frame > WARMUP_FRAMES {
+            spawners.iter_mut().for_each(|mut s| s.active = true);
+            plan.sim_frame = 1;
+        }
+    } else {
+        plan.sim_frame += 1;
+    }
+    if plan.sim_frame == 0 {
+        return;
+    }
+    if plan.captures.contains(&plan.sim_frame) {
+        screenshot(&mut commands, &target, &shared, plan.sim_frame);
+    }
+    let run = shared.0.lock().unwrap();
+    let last = plan.captures.iter().copied().max().unwrap_or(0);
+    if plan.sim_frame > last && run.plate.is_some() && run.captures.len() == plan.captures.len() {
+        exit.write(AppExit::Success);
+    }
+}
+
+/// After hanabi ticked the spawners (`PostUpdate`): this simulation frame's spawn counts, and
+/// the latest frame's GPU time.
+fn record_frame(
+    plan: Res<ParticlePlan>,
+    shared: Res<ParticleShared>,
+    store: Res<DiagnosticsStore>,
+    spawners: Query<(&hanabi::EffectSpawner, &EmitterIndex)>,
+) {
+    if plan.sim_frame == 0 || plan.sim_frame > plan.captures.iter().copied().max().unwrap_or(0) {
+        return;
+    }
+    let mut run = shared.0.lock().unwrap();
+    if let Some((total, spans)) = frame_gpu_ms(&store) {
+        run.gpu_ms.push(total);
+        run.spans = spans;
+    }
+    for (s, i) in &spawners {
+        run.spawns[i.0].push(s.spawn_count);
+    }
+}
+
+/// Runs a particle scenario's Bevy side in a child process (`--bevy-side` with the variant's
+/// `--seed`/`--gravity-scale`) and reads its output back from `dir`.
+pub fn run_particles_in_child(
+    scenario: &ParticleScenario,
+    dir: &std::path::Path,
+    variant: ParticleVariant,
+) -> Result<ParticleRun, String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let mut cmd = std::process::Command::new(exe);
+    cmd.args(["--bevy-side", scenario.name, "--out"]).arg(dir);
+    if let Some(seed) = variant.seed {
+        cmd.args(["--seed", &seed.to_string()]);
+    }
+    cmd.args(["--gravity-scale", &variant.gravity_scale.to_string()]);
+    let status = cmd.status().map_err(|e| e.to_string())?;
+    if !status.success() {
+        return Err(format!("bevy side exited with {status}"));
+    }
+    let read = |file: String| -> Result<Vec<u8>, String> {
+        Ok(image::open(dir.join(&file))
+            .map_err(|e| format!("{file}: {e}"))?
+            .to_rgba8()
+            .into_raw())
+    };
+    let json = std::fs::read_to_string(dir.join(format!("{}.bevy.json", scenario.name)))
+        .map_err(|e| e.to_string())?;
+    let value: serde_json::Value = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+    let numbers = |v: &serde_json::Value| -> Vec<f64> {
+        v.as_array()
+            .map(|a| a.iter().filter_map(|v| v.as_f64()).collect())
+            .unwrap_or_default()
+    };
+    Ok(ParticleRun {
+        plate: Some(read(format!("{}.plate.bevy.png", scenario.name))?),
+        captures: scenario
+            .captures
+            .iter()
+            .map(|c| {
+                Ok((
+                    c.frame,
+                    read(format!("{}.{}.bevy.png", scenario.name, c.label()))?,
+                ))
+            })
+            .collect::<Result<_, String>>()?,
+        spawns: value["spawns"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .map(|e| numbers(e).into_iter().map(|n| n as u32).collect())
+                    .collect()
+            })
+            .unwrap_or_default(),
+        gpu_ms: numbers(&value["gpu_ms"]),
+        spans: value["spans"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default(),
+    })
 }

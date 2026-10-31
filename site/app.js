@@ -76,6 +76,41 @@ function gpuTable(gpu, names) {
   </table></div>`;
 }
 
+// Alive particles per frame, one line per emitter, as an inline SVG chart.
+function aliveChart(s) {
+  const pops = s.population || [];
+  const frames = Math.max(1, ...pops.map(p => p.alive.length));
+  const top = Math.max(1, ...pops.flatMap(p => p.alive));
+  const W = 320, H = 96, pad = 4;
+  const x = i => pad + (i / Math.max(1, frames - 1)) * (W - 2 * pad);
+  const y = v => H - pad - (v / top) * (H - 2 * pad);
+  const lines = pops.map((p, k) => `<polyline class="series s${k % 2}" points="${p.alive.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ')}"/>`).join('');
+  const marks = (s.captures || []).map(c => `<line class="mark" x1="${x(c.frame - 1).toFixed(1)}" x2="${x(c.frame - 1).toFixed(1)}" y1="${pad}" y2="${H - pad}"/>`).join('');
+  const legend = pops.map((p, k) => `<span class="key s${k % 2}">${esc(p.emitter)}: ${p.alive.length ? p.alive[p.alive.length - 1] : 0} alive at the end, lifetime ${p.lifetime.toFixed(3)} s</span>`).join('');
+  return `<figure class="alive"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Alive particles per frame">${marks}${lines}</svg>
+    <figcaption>Alive particles per frame (peak ${top}); vertical lines mark the captures. ${legend}</figcaption></figure>`;
+}
+
+function particleSection(ci) {
+  const list = ci.particles || [];
+  if (!list.length) return '';
+  const gap = s => s.known_gap ? `<span class="status gap">Known gap: render-engine side (<a href="${REPO}/issues/${s.known_gap}">#${s.known_gap}</a>)</span>` : status(s);
+  return `<section class="section" id="particles">
+    <h2>Particles</h2>
+    <p>Bevy with <code>bevy_hanabi</code> at a fixed 1/64 s timestep and a fixed seed. A capture taken before any particle dies needs an exact image match (the FLIP gate above). Later captures are compared by coverage, spatial and colour statistics, and the alive count has to match on every frame. <a href="${REPO}/blob/main/docs/technical-decisions.md#d9--particle-parity-seeded-replay-then-statistics">Decision record</a>.</p>
+    ${list.map(s => `<div class="particle">
+      <header><h3>${esc(s.scenario)}</h3>${gap(s)}</header>
+      <p class="cap">${esc(s.capability)} · seed ${s.seed} · statistics gate: coverage ≤ ${g(s.stat_max.coverage)}, spatial ≤ ${g(s.stat_max.spatial)}, colour ≤ ${g(s.stat_max.colour)}</p>
+      <div class="grid">${s.captures.map(c => `<figure class="card">
+        <div class="thumb"><img loading="lazy" src="oracle/${esc(s.scenario)}.${esc(c.label)}.bevy.png" alt="${esc(s.scenario)} at ${c.time} s, Bevy"></div>
+        <figcaption class="body"><div class="row"><h3>t = ${c.time.toFixed(2)} s</h3><span class="tier">${esc(c.tier)}</span></div>
+        <p class="cap">Bevy coverage ${(c.bevy_coverage * 100).toFixed(2)}% of pixels · frame ${c.frame}</p></figcaption>
+      </figure>`).join('')}</div>
+      ${aliveChart(s)}
+    </div>`).join('')}
+  </section>`;
+}
+
 function runInfo(build, gpu) {
   const parts = [];
   if (build?.sha) parts.push(`Built from <a href="${REPO}/commit/${esc(build.sha)}">${esc(build.sha.slice(0, 7))}</a>${build.date ? ` on ${esc(build.date)}` : ''}${build.run_url ? ` by <a href="${esc(build.run_url)}">this CI run</a>` : ''}.`);
@@ -124,6 +159,7 @@ export function renderIndex({ ci, gpu, build }) {
           </div>
         </a>`).join('')}</div>
     </section>`).join('')}
+    ${particleSection(ci)}
     <section class="section" id="gpu-time">
       <h2>GPU time</h2>
       <p>GPU frame time (the sum of the frame's pass spans, on both sides): the median over ${gpu?.frames ?? 200} frames of each side's fastest timing round, rounds alternating between Bevy and render-engine; the gate is ${(gpu?.gpu_margin ?? ci.gpu_margin).toFixed(2)}× Bevy, marked on each bar. Measured locally on ${esc(gpu?.adapter ?? 'the RTX 3060 Ti')}. CI has no GPU, so these numbers come from the latest committed local run, not from the CI run that built this page.</p>
