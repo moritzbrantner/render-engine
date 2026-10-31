@@ -11,6 +11,7 @@
 use crate::{
     material::AlphaMode,
     scene::{Cubemap, FogFalloff, LightShadows, MAX_CASCADES, Scene, ShadowFilter, Tonemapping},
+    sky::{SkyPipelines, SkyTargets},
     world::{Instance, MaterialId, MeshId, Vertex, World},
 };
 use bytemuck::{Pod, Zeroable};
@@ -73,6 +74,14 @@ struct FrameUniform {
     fog_bi: Vec4,
     /// x point lights, y spot lights (the spot lights follow the point lights in the list).
     light_counts: UVec4,
+    /// Unit direction towards the moon, w 1 when there is a moon.
+    moon_direction_to_light: Vec4,
+    moon_color: Vec4,
+    world_to_atmosphere: Mat4,
+    /// x planet radius, y atmosphere radius, z 1 with a sky, w 1 when the moon is shaded first.
+    atmosphere: Vec4,
+    /// x sun disc, y moon disc angular size.
+    disks: Vec4,
 }
 
 /// One point or spot light, laid out like Bevy's `GpuClusteredLight`.
@@ -140,6 +149,8 @@ enum Phase {
     Opaque = 0,
     Mask = 1,
     Blend = 2,
+    /// Past the last phase (an exclusive range bound).
+    End = 3,
 }
 
 /// Fixed GPU state on the consumer's device: pipelines, layouts and samplers.
@@ -172,6 +183,10 @@ pub struct Renderer {
     tony_mc_mapface_lut: wgpu::TextureView,
     agx_lut: wgpu::TextureView,
     lut_sampler: wgpu::Sampler,
+    /// The atmosphere's LUT, environment and fullscreen passes.
+    sky: SkyPipelines,
+    /// A 1² transmittance LUT bound when the scene has no sky.
+    no_transmittance: wgpu::TextureView,
 }
 
 /// The tone-mapping shader's `METHOD` constant.
@@ -208,6 +223,8 @@ pub struct Viewport {
     directional_shadows: ShadowArray,
     point_shadows: ShadowArray,
     environment: Option<UploadedEnvironment>,
+    /// The sky's LUTs and environment cubes while the scene has a sky.
+    sky: Option<SkyTargets>,
     /// Every shadow pass in order: sun cascades, spot maps, point-light cube faces.
     shadow_passes: Vec<ShadowPass>,
     /// Main-pass draws in order; shadow passes draw the same list.
@@ -336,7 +353,9 @@ struct Draw {
 impl Renderer {
     /// Creates the pipelines on the consumer's device for frames written to `color_format` (tone
     /// mapped; an sRGB format encodes the output) and uploads the tone-mapping LUTs. Unclipped
-    /// sun shadow depth uses `DEPTH_CLIP_CONTROL` where the device has it enabled.
+    /// sun shadow depth uses `DEPTH_CLIP_CONTROL` where the device has it enabled; the sky
+    /// blends with `DUAL_SOURCE_BLENDING` where enabled (as Bevy does) and needs
+    /// `FLOAT32_FILTERABLE`.
     pub fn new(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -430,6 +449,22 @@ impl Renderer {
                     binding: 1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 9,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 10,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
             ],
@@ -776,6 +811,24 @@ impl Renderer {
             tony_mc_mapface_lut: load_lut(device, queue, TONY_MC_MAPFACE_LUT),
             agx_lut: load_lut(device, queue, AGX_LUT),
             lut_sampler,
+            sky: SkyPipelines::new(device, queue),
+            no_transmittance: device
+                .create_texture_with_data(
+                    queue,
+                    &wgpu::TextureDescriptor {
+                        label: Some("no transmittance"),
+                        size: wgpu::Extent3d::default(),
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: wgpu::TextureFormat::Rgba16Float,
+                        usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                        view_formats: &[],
+                    },
+                    wgpu::util::TextureDataOrder::LayerMajor,
+                    &[0; 8],
+                )
+                .create_view(&Default::default()),
         }
     }
 
@@ -834,6 +887,13 @@ impl Renderer {
 
         let lights = LocalLights::new(scene, cascades.len());
 
+        assert!(
+            !(scene.environment.is_some()
+                && scene.sky.is_some_and(|s| s.environment_intensity.is_some())),
+            "a sky with environment light replaces Scene::environment; set one of them"
+        );
+        let (sky_lights, moon_first) = crate::sky::directional_lights(scene);
+        let sky_environment = scene.sky.and_then(|s| s.environment_intensity);
         let sun = scene.sun;
         let frame = FrameUniform {
             clip_from_world: clip_from_view * view_from_world,
@@ -859,9 +919,15 @@ impl Renderer {
                 f32::from(u8::from(sun.is_some())),
                 f32::from(u8::from(cam.shadow_filter == ShadowFilter::Gaussian)),
             ),
-            environment: scene.environment.as_ref().map_or(Vec4::ZERO, |e| {
-                Vec4::new(e.intensity, (e.specular.levels.len() - 1) as f32, 1.0, 0.0)
-            }),
+            environment: match (&scene.environment, sky_environment) {
+                (Some(e), _) => {
+                    Vec4::new(e.intensity, (e.specular.levels.len() - 1) as f32, 1.0, 0.0)
+                }
+                (None, Some(intensity)) => {
+                    Vec4::new(intensity, (crate::sky::SPECULAR_MIPS - 1) as f32, 1.0, 0.0)
+                }
+                (None, None) => Vec4::ZERO,
+            },
             fog_color: scene.fog.map_or(Vec4::ZERO, |f| f.color),
             fog_directional_light_color: scene
                 .fog
@@ -882,6 +948,22 @@ impl Renderer {
                 FogFalloff::Atmospheric { inscattering, .. } => inscattering.extend(4.0),
             }),
             light_counts: UVec4::new(lights.point_count, lights.spot_count, 0, 0),
+            moon_direction_to_light: scene
+                .moon
+                .map_or(Vec4::ZERO, |m| (-m.direction.normalize()).extend(1.0)),
+            moon_color: scene
+                .moon
+                .map_or(Vec4::ZERO, |m| (m.color * m.illuminance).extend(1.0)),
+            world_to_atmosphere: crate::sky::world_to_atmosphere(),
+            atmosphere: Vec4::new(
+                crate::sky::INNER_RADIUS,
+                crate::sky::OUTER_RADIUS,
+                f32::from(u8::from(scene.sky.is_some())),
+                f32::from(u8::from(moon_first)),
+            ),
+            disks: scene.sky.map_or(Vec4::ZERO, |s| {
+                Vec4::new(s.sun_disk.angular_size, s.moon_disk.angular_size, 0.0, 0.0)
+            }),
         };
         queue.write_buffer(&viewport.frame_buffer, 0, bytemuck::bytes_of(&frame));
 
@@ -1061,6 +1143,33 @@ impl Renderer {
             lighting_dirty = true;
         }
 
+        match (&scene.sky, viewport.sky.is_some()) {
+            (Some(_), false) => {
+                viewport.sky = Some(SkyTargets::new(device, &self.sky));
+                lighting_dirty = true;
+            }
+            (None, true) => {
+                viewport.sky = None;
+                lighting_dirty = true;
+            }
+            _ => {}
+        }
+        if let (Some(sky), Some(targets)) = (&scene.sky, &mut viewport.sky) {
+            targets.prepare(
+                device,
+                queue,
+                &self.sky,
+                sky,
+                &sky_lights,
+                cam,
+                // The camera transform itself, as Bevy's view uniform has it.
+                Mat4::from_translation(cam.eye)
+                    * Mat4::from_mat3(looking_to(cam.target - cam.eye, Vec3::Y)),
+                clip_from_view,
+                &viewport.targets.depth_view,
+            );
+        }
+
         if lighting_dirty {
             viewport.lighting_group = Some(self.lighting_group(viewport));
         }
@@ -1112,12 +1221,15 @@ impl Renderer {
     }
 
     fn lighting_group(&self, viewport: &Viewport) -> wgpu::BindGroup {
-        let (diffuse_view, specular_view) = viewport
-            .environment
+        let (diffuse_view, specular_view) = match (&viewport.environment, &viewport.sky) {
+            (Some(e), _) => (&e.diffuse_view, &e.specular_view),
+            (None, Some(sky)) => (&sky.diffuse_view, &sky.specular_view),
+            (None, None) => (&self.no_environment, &self.no_environment),
+        };
+        let transmittance = viewport
+            .sky
             .as_ref()
-            .map_or((&self.no_environment, &self.no_environment), |e| {
-                (&e.diffuse_view, &e.specular_view)
-            });
+            .map_or(&self.no_transmittance, |s| &s.transmittance_view);
         self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("lighting"),
             layout: &self.lighting_layout,
@@ -1155,6 +1267,14 @@ impl Renderer {
                 wgpu::BindGroupEntry {
                     binding: 8,
                     resource: wgpu::BindingResource::Sampler(&self.shadow_linear_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 9,
+                    resource: wgpu::BindingResource::TextureView(transmittance),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 10,
+                    resource: wgpu::BindingResource::Sampler(&self.sky.lut_sampler),
                 },
             ],
         })
@@ -1203,10 +1323,11 @@ impl Renderer {
             .expect("Renderer::prepare before encode");
         let draw = |pass: &mut wgpu::RenderPass<'_>,
                     pipelines: &[wgpu::RenderPipeline],
+                    phases: Range<Phase>,
                     index: &dyn Fn(&Draw) -> usize| {
             pass.set_bind_group(0, frame_group, &[]);
             let (mut mesh_bound, mut material_bound) = (None, None);
-            for d in &viewport.draws {
+            for d in viewport.draws.iter().filter(|d| phases.contains(&d.phase)) {
                 pass.set_pipeline(&pipelines[index(d)]);
                 if material_bound != Some(d.material) {
                     pass.set_bind_group(2, &world.material(d.material).group, &[]);
@@ -1222,8 +1343,22 @@ impl Renderer {
             }
         };
         let query_set = timestamps.map(|t| t.query_set);
+        // The frame's start timestamp goes to whichever pass comes first.
+        let mut start = query_set;
+        if let Some(sky) = &viewport.sky {
+            sky.encode_luts(encoder, &self.sky, start.take());
+        }
+        let mut render_start = || {
+            start
+                .take()
+                .map(|query_set| wgpu::RenderPassTimestampWrites {
+                    query_set,
+                    beginning_of_pass_write_index: Some(0),
+                    end_of_pass_write_index: None,
+                })
+        };
 
-        for (i, shadow) in viewport.shadow_passes.iter().enumerate() {
+        for shadow in &viewport.shadow_passes {
             let maps = if shadow.point {
                 &viewport.point_shadows
             } else {
@@ -1240,14 +1375,7 @@ impl Renderer {
                     }),
                     stencil_ops: None,
                 }),
-                // The frame starts at the first shadow pass.
-                timestamp_writes: query_set.filter(|_| i == 0).map(|query_set| {
-                    wgpu::RenderPassTimestampWrites {
-                        query_set,
-                        beginning_of_pass_write_index: Some(0),
-                        end_of_pass_write_index: None,
-                    }
-                }),
+                timestamp_writes: render_start(),
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
@@ -1256,46 +1384,83 @@ impl Renderer {
                 viewport.shadow_view_group.as_ref(),
                 &[shadow.view * SHADOW_VIEW_STRIDE as u32],
             );
-            draw(&mut pass, &self.shadow_pipelines, &|d: &Draw| {
-                shadow_pipeline_index(shadow.local, d.face, d.phase != Phase::Opaque)
-            });
+            draw(
+                &mut pass,
+                &self.shadow_pipelines,
+                Phase::Opaque..Phase::End,
+                &|d: &Draw| shadow_pipeline_index(shadow.local, d.face, d.phase != Phase::Opaque),
+            );
         }
 
+        // The main pass. With a sky it is split like Bevy's: opaque and alpha-masked draws, the
+        // sky over them (reading their depth), then the blended draws.
         let targets = &viewport.targets;
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("lit"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &targets.msaa_view,
-                depth_slice: None,
-                resolve_target: Some(&targets.hdr_view),
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(viewport.clear_color),
-                    store: wgpu::StoreOp::Discard,
-                },
-            })],
-            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: &targets.depth_view,
-                depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(0.0),
-                    store: wgpu::StoreOp::Discard,
-                }),
-                stencil_ops: None,
-            }),
-            timestamp_writes: query_set.filter(|_| viewport.shadow_passes.is_empty()).map(
-                |query_set| wgpu::RenderPassTimestampWrites {
-                    query_set,
-                    beginning_of_pass_write_index: Some(0),
-                    end_of_pass_write_index: None,
-                },
-            ),
-            occlusion_query_set: None,
-            multiview_mask: None,
-        });
-        pass.set_bind_group(1, viewport.lighting_group.as_ref(), &[]);
-        draw(&mut pass, &self.lit_pipelines, &|d: &Draw| {
-            d.face * 3 + d.phase as usize
-        });
-        drop(pass);
+        let part = |label, clear, depth, resolve| MainPass {
+            label,
+            clear,
+            depth,
+            resolve,
+        };
+        let clear_color = viewport.clear_color;
+        let lit_index = |d: &Draw| d.face * 3 + d.phase as usize;
+        match &viewport.sky {
+            None => {
+                let mut pass = begin_main_pass(
+                    encoder,
+                    targets,
+                    clear_color,
+                    part("lit", true, true, true),
+                    render_start(),
+                );
+                pass.set_bind_group(1, viewport.lighting_group.as_ref(), &[]);
+                draw(
+                    &mut pass,
+                    &self.lit_pipelines,
+                    Phase::Opaque..Phase::End,
+                    &lit_index,
+                );
+            }
+            Some(sky) => {
+                let mut pass = begin_main_pass(
+                    encoder,
+                    targets,
+                    clear_color,
+                    part("lit opaque", true, true, false),
+                    render_start(),
+                );
+                pass.set_bind_group(1, viewport.lighting_group.as_ref(), &[]);
+                draw(
+                    &mut pass,
+                    &self.lit_pipelines,
+                    Phase::Opaque..Phase::Blend,
+                    &lit_index,
+                );
+                drop(pass);
+                let mut pass = begin_main_pass(
+                    encoder,
+                    targets,
+                    clear_color,
+                    part("render sky", false, false, false),
+                    None,
+                );
+                sky.draw(&mut pass, &self.sky);
+                drop(pass);
+                let mut pass = begin_main_pass(
+                    encoder,
+                    targets,
+                    clear_color,
+                    part("lit transparent", false, true, true),
+                    None,
+                );
+                pass.set_bind_group(1, viewport.lighting_group.as_ref(), &[]);
+                draw(
+                    &mut pass,
+                    &self.lit_pipelines,
+                    Phase::Blend..Phase::End,
+                    &lit_index,
+                );
+            }
+        }
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("tonemap"),
@@ -1369,6 +1534,7 @@ impl Viewport {
             directional_shadows: ShadowArray::new(device, "directional shadow maps", 1, 1, false),
             point_shadows: ShadowArray::new(device, "point shadow maps", 1, 6, true),
             environment: None,
+            sky: None,
             shadow_passes: Vec::new(),
             draws: Vec::new(),
             clear_color: wgpu::Color::BLACK,
@@ -1383,6 +1549,9 @@ impl Viewport {
             self.height = height;
             self.targets = Targets::new(renderer, width, height);
             self.tonemap = None;
+            if let Some(sky) = &mut self.sky {
+                sky.depth_changed();
+            }
         }
     }
 
@@ -1425,12 +1594,70 @@ impl Targets {
         });
         Self {
             msaa_view: texture("msaa hdr colour", HDR_FORMAT, SAMPLE_COUNT, attachment),
-            depth_view: texture("depth", DEPTH_FORMAT, SAMPLE_COUNT, attachment),
+            // The sky pass reads the depth of the opaque draws.
+            depth_view: texture("depth", DEPTH_FORMAT, SAMPLE_COUNT, sampled),
             hdr_view: texture("hdr colour", HDR_FORMAT, 1, sampled),
             post_view,
             blit_group,
         }
     }
+}
+
+/// How one part of the main pass treats the MSAA colour and depth targets.
+struct MainPass {
+    label: &'static str,
+    /// Clear colour and depth (else load them).
+    clear: bool,
+    /// Attach the depth target.
+    depth: bool,
+    /// Resolve into the HDR frame and discard the MSAA targets (else store them for the next
+    /// part).
+    resolve: bool,
+}
+
+fn begin_main_pass<'a>(
+    encoder: &'a mut wgpu::CommandEncoder,
+    targets: &'a Targets,
+    clear_color: wgpu::Color,
+    p: MainPass,
+    timestamp_writes: Option<wgpu::RenderPassTimestampWrites<'a>>,
+) -> wgpu::RenderPass<'a> {
+    let store = if p.resolve {
+        wgpu::StoreOp::Discard
+    } else {
+        wgpu::StoreOp::Store
+    };
+    encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: Some(p.label),
+        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+            view: &targets.msaa_view,
+            depth_slice: None,
+            resolve_target: p.resolve.then_some(&targets.hdr_view),
+            ops: wgpu::Operations {
+                load: if p.clear {
+                    wgpu::LoadOp::Clear(clear_color)
+                } else {
+                    wgpu::LoadOp::Load
+                },
+                store,
+            },
+        })],
+        depth_stencil_attachment: p.depth.then_some(wgpu::RenderPassDepthStencilAttachment {
+            view: &targets.depth_view,
+            depth_ops: Some(wgpu::Operations {
+                load: if p.clear {
+                    wgpu::LoadOp::Clear(0.0)
+                } else {
+                    wgpu::LoadOp::Load
+                },
+                store,
+            }),
+            stencil_ops: None,
+        }),
+        timestamp_writes,
+        occlusion_query_set: None,
+        multiview_mask: None,
+    })
 }
 
 /// Uploads one of Bevy's tone-mapping LUTs: a zstd-supercompressed single-level 3D KTX2 file.

@@ -18,6 +18,15 @@ pub struct Scene {
     /// `ClearColorConfig::Custom`). Tone mapped with the frame but not exposed, as in Bevy.
     pub clear_color: Vec3,
     pub sun: Option<Sun>,
+    /// A second, unshadowed directional light (Bevy: another `DirectionalLight` without shadow
+    /// maps), for moonlight. It lights the scene and, with a [`Sky`], scatters in the sky and
+    /// shows as a disc.
+    pub moon: Option<Moon>,
+    /// A physically based sky over everything not drawn, with aerial perspective over what is
+    /// (Bevy `Atmosphere` + `AtmosphereSettings` on the camera). The sun and moon colours are
+    /// filtered by the atmosphere's transmittance, so give them their light above the
+    /// atmosphere (Bevy `lux::RAW_SUNLIGHT` for the sun).
+    pub sky: Option<Sky>,
     /// Point and spot lights are shaded in list order, shadow-casting lights first (Bevy sorts
     /// its clustered lights the same way). Every shadow-casting light renders its own maps.
     pub point_lights: Vec<PointLight>,
@@ -165,6 +174,130 @@ pub struct Sun {
     /// Lux.
     pub illuminance: f32,
     pub shadows: Option<SunShadows>,
+}
+
+/// An unshadowed directional light: the moon (Bevy `DirectionalLight` with
+/// `shadow_maps_enabled: false`).
+#[derive(Clone, Copy, Debug)]
+pub struct Moon {
+    /// Direction the light travels.
+    pub direction: Vec3,
+    pub color: Vec3,
+    /// Lux.
+    pub illuminance: f32,
+}
+
+/// Bevy `lux::RAW_SUNLIGHT`: sunlight above the atmosphere, the sun's illuminance under a
+/// [`Sky`].
+pub const RAW_SUNLIGHT: f32 = 130_000.0;
+
+/// Hillaire's physically based atmosphere, as Bevy 0.20 renders it: transmittance,
+/// multiscattering, sky-view and aerial-view LUTs, recomputed every frame from the sun and moon
+/// directions. The planet and medium are Bevy's Earth (`Atmosphere::earth` with
+/// `ScatteringMedium::earth(256, 256)`, the planet centre 6 360 km below the world origin),
+/// with Bevy's default `AtmosphereSettings`.
+///
+/// Needs `wgpu::Features::FLOAT32_FILTERABLE` on the device (the medium LUTs are `Rgba32Float`,
+/// as in Bevy).
+#[derive(Clone, Copy, Debug)]
+pub struct Sky {
+    /// Average albedo of the planet's surface, for light reflected into the sky (Bevy
+    /// `Atmosphere::ground_albedo`).
+    pub ground_albedo: Vec3,
+    /// The sun's visible disc (Bevy `SunDisk` on the sun).
+    pub sun_disk: SunDisk,
+    /// The moon's visible disc (Bevy `SunDisk` on the moon light).
+    pub moon_disk: SunDisk,
+    /// Ambient and reflected light from the sky: each frame the sky is rendered into a 128²
+    /// cube map and filtered into diffuse and specular maps on the GPU (Bevy
+    /// `AtmosphereEnvironmentMapLight` with this `intensity`, which drives a
+    /// `GeneratedEnvironmentMapLight`). `None` leaves ambient light to `Scene::ambient` and
+    /// `Scene::environment`; with `Some`, `Scene::environment` must be `None`.
+    pub environment_intensity: Option<f32>,
+}
+
+impl Default for Sky {
+    /// Bevy's Earth defaults, its sun disc, a moon disc and the sky's environment light at
+    /// intensity 1.
+    fn default() -> Self {
+        Self {
+            ground_albedo: Vec3::splat(0.3),
+            sun_disk: SunDisk::EARTH,
+            moon_disk: SunDisk::MOON,
+            environment_intensity: Some(1.0),
+        }
+    }
+}
+
+/// The visible disc of a directional light in the sky (Bevy `SunDisk`). It changes how the disc
+/// looks, not the light's illuminance; the disc's radiance is the illuminance over its solid
+/// angle.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SunDisk {
+    /// Angular diameter in radians.
+    pub angular_size: f32,
+    /// Brightness multiplier; 0 hides the disc.
+    pub intensity: f32,
+}
+
+impl SunDisk {
+    /// Bevy `SunDisk::EARTH`: the sun seen from Earth (about 32′).
+    pub const EARTH: Self = Self {
+        angular_size: 0.00930842,
+        intensity: 1.0,
+    };
+    /// The moon seen from Earth (about 31′).
+    pub const MOON: Self = Self {
+        angular_size: 0.00904,
+        intensity: 1.0,
+    };
+    /// No disc (Bevy `SunDisk::OFF`).
+    pub const OFF: Self = Self {
+        angular_size: 0.0,
+        intensity: 0.0,
+    };
+}
+
+/// Sun and moon directions for a time of day, for games that move them along a fixed path. The
+/// game owns the clock; this only maps an hour to directions. The sun rises in the east (+X) at
+/// 06:00, culminates towards the south (+Z) at `noon_elevation` at 12:00 and sets in the west
+/// at 18:00; the moon follows the same path `moon_lag_hours` behind it.
+#[derive(Clone, Copy, Debug)]
+pub struct DayCycle {
+    /// Radians above the horizon at noon.
+    pub noon_elevation: f32,
+    /// Hours the moon trails the sun (12 puts it opposite).
+    pub moon_lag_hours: f32,
+}
+
+impl Default for DayCycle {
+    fn default() -> Self {
+        Self {
+            noon_elevation: 60f32.to_radians(),
+            moon_lag_hours: 12.0,
+        }
+    }
+}
+
+impl DayCycle {
+    /// Unit direction towards the sun at `hours` (any value; the path repeats every 24 h).
+    pub fn to_sun(&self, hours: f32) -> Vec3 {
+        let angle = (hours - 6.0) / 12.0 * std::f32::consts::PI;
+        let noon = Vec3::new(0.0, self.noon_elevation.sin(), self.noon_elevation.cos());
+        Vec3::X * angle.cos() + noon * angle.sin()
+    }
+
+    /// Unit direction towards the moon at `hours`.
+    pub fn to_moon(&self, hours: f32) -> Vec3 {
+        self.to_sun(hours - self.moon_lag_hours)
+    }
+
+    /// The hour between noon and midnight at which the sun stands `elevation` radians above
+    /// (or, negative, below) the horizon; clamped to noon and midnight.
+    pub fn afternoon_hour(&self, elevation: f32) -> f32 {
+        let s = (elevation.sin() / self.noon_elevation.sin()).clamp(-1.0, 1.0);
+        6.0 + 12.0 * (std::f32::consts::PI - s.asin()) / std::f32::consts::PI
+    }
 }
 
 /// Shadow-map resolutions shared by every light of a kind (Bevy's `DirectionalLightShadowMap`

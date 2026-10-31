@@ -106,7 +106,8 @@ upgrade that changes a default shows up as a deliberate scenario change:
   `bake_ibl`: the glTF IBL Sampler's split-sum layout that Bevy documents (GGX specular with
   perceptual roughness `mip / (mips - 1)`, Lambertian diffuse), written as zstd `rgb9e5` KTX2 by
   KTX-Software. Both sides therefore sample identical cube maps; render-engine owns the
-  sampling and the BRDF terms. Bevy's runtime `GeneratedEnvironmentMapLight` is not used;
+  sampling and the BRDF terms. These scenarios do not use Bevy's runtime
+  `GeneratedEnvironmentMapLight`; the sky does (below);
 - distance fog: a `DistanceFog` on the camera with the scenario's colour, falloff and
   directional-light colour/exponent (`fog_modes`: every `FogFalloff`, each without and with sun
   inscattering, clear colour = fog colour). render-engine ports `apply_fog` and `fog.wesl`
@@ -134,9 +135,30 @@ upgrade that changes a default shows up as a deliberate scenario change:
   and tangents per vertex and leaves the interpolated normal unnormalised for the shadow
   biases, as Bevy does. Mirrored instances get a clockwise pipeline instead of Bevy's
   `winding_corrected_front_facing`; for double-sided materials the two agree, and single-sided
-  mirrored meshes keep their outside faces.
+  mirrored meshes keep their outside faces;
+- time-of-day sky: an `Atmosphere::earth` with `ScatteringMedium::earth(256, 256)` (placed by
+  Bevy's hook 6 360 km below the origin), `AtmosphereSettings::default()` (LUT mode) and an
+  `AtmosphereEnvironmentMapLight` (128², intensity 1) on the camera, a `SunDisk` on each
+  directional light, raw sunlight (`lux::RAW_SUNLIGHT`) and a second, unshadowed directional
+  light for the moon (`sky_day_cycle_*`: sun at 60°, 15°, 2° and −10° on one `DayCycle`, the
+  moon in the night view). render-engine ports the atmosphere passes term by term
+  (`src/shaders/sky/`): the CPU-built medium LUTs (`Rgba32Float`, so a sky needs
+  `FLOAT32_FILTERABLE`), the transmittance, multiscattering, sky-view and aerial-view LUTs every
+  frame, the fullscreen `render_sky` pass between the opaque and the blended draws (reading the
+  MSAA depth's first sample, dual-source blending where the device has it, as Bevy chooses),
+  and the sun and moon transmittance and visible-disc share in the main pass. Ambient light
+  follows the sky through Bevy's own runtime filter: the sky-view LUT rendered into a 128² cube,
+  its mip chain, the GGX radiance filter per mip (hash noise; the oracle has no
+  `bluenoise_texture`) and the 1024-sample irradiance cube, all ported from
+  `GeneratedEnvironmentMapLight`, so both sides filter identically. The mip chain matters:
+  Bevy's single-pass downsampler samples the first level at the centre of each block's first
+  texel (`(uv + 0.5) * inverse_input_size`), i.e. it point-samples rather than averages; a box
+  filter there scored mean 0.0015–0.0062 / p99 0.024–0.034, the port of it 0.0001 / ≤ 0.0034.
+  Bevy filters one frame behind (its filter runs before the atmosphere passes); render-engine
+  filters the current frame's sky, which agrees once Bevy has warmed up and does not lag in a
+  running day cycle. Bevy's raymarched mode, volumetric fog and stars are out of scope.
 
-Later scenarios lift these one at a time (temporal filtering, sky).
+Later scenarios lift these one at a time (temporal filtering).
 
 ## D6 — Order: lighting first, then particles
 

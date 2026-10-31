@@ -38,6 +38,8 @@ fn scene(shadows: bool, tonemapping: Tonemapping) -> Scene {
         shadow_maps: ShadowMapSizes::default(),
         environment: None,
         fog: None,
+        moon: None,
+        sky: None,
     }
 }
 
@@ -212,4 +214,65 @@ fn masked_texture_cuts_out_and_instances_move_per_frame() {
         right[2] > 150 && right[1] < 100,
         "mirrored cut-out half: {right:?}"
     );
+}
+
+#[test]
+fn sky_follows_the_time_of_day() {
+    let gpu = Headless::new().expect("a wgpu adapter");
+    let mut world = World::new(gpu.renderer());
+    let ground = world.add_mesh(&MeshData::shape(Shape::Plane(Vec2::splat(200.0))));
+    let grey = world.add_material(&StandardMaterial::default());
+    let instances = [at(ground, grey, Vec3::ZERO)];
+    let cycle = DayCycle::default();
+    // Looking west, level, from 2 m: the upper half is sky, the lower half ground.
+    let at_hour = |hours: f32, ev100: f32| {
+        let mut s = scene(true, Tonemapping::TonyMcMapface);
+        s.camera.eye = Vec3::new(0.0, 2.0, 0.0);
+        s.camera.target = Vec3::new(-10.0, 2.0, 0.0);
+        s.camera.ev100 = ev100;
+        s.clear_color = Vec3::ZERO;
+        s.sun = Some(Sun {
+            direction: -cycle.to_sun(hours),
+            color: Vec3::ONE,
+            illuminance: RAW_SUNLIGHT,
+            shadows: Some(SunShadows::default()),
+        });
+        s.sky = Some(Sky::default());
+        s
+    };
+    let (w, h) = (160, 90);
+    let mut viewport = Viewport::new(gpu.renderer(), w, h);
+    let noon = gpu
+        .render(&mut viewport, &world, &at_hour(12.0, 14.5), &instances)
+        .unwrap();
+    let sunset = gpu
+        .render(
+            &mut viewport,
+            &world,
+            &at_hour(cycle.afternoon_hour(1f32.to_radians()), 11.0),
+            &instances,
+        )
+        .unwrap();
+    let top = pixel(&noon, w / 2, 2);
+    assert!(top[2] > top[0] + 40, "noon sky is blue: {top:?}");
+    let horizon = pixel(&sunset, w / 2, h / 2 - 3);
+    assert!(
+        horizon[0] > horizon[2] + 40,
+        "sunset horizon towards the sun is warm: {horizon:?}"
+    );
+    let lit_ground = pixel(&noon, w / 2, h - 2);
+    assert!(
+        lit_ground[0] > 30,
+        "the sun and sky light the ground: {lit_ground:?}"
+    );
+
+    // Without a sky the same viewport falls back to the clear colour.
+    let mut plain = at_hour(12.0, 14.5);
+    plain.sky = None;
+    plain.clear_color = Vec3::new(0.0, 0.0, 1.0);
+    let plain = gpu
+        .render(&mut viewport, &world, &plain, &instances)
+        .unwrap();
+    let top = pixel(&plain, w / 2, 0);
+    assert!(top[2] > 150 && top[0] < 50, "clear colour again: {top:?}");
 }

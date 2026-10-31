@@ -13,15 +13,20 @@ the mmorpg native client (`crates/mmorpg-client`), the first consumer.
 | `renderer::Renderer` | one per device and output format | pipelines, samplers, tone-mapping LUTs |
 | `world::World` | one per device, for as long as the content lives | meshes, textures and materials behind stable handles (`MeshId`, `TextureId`, `MaterialId`) |
 | `renderer::Viewport` | one per output surface | the engine's targets for one size, plus per-frame buffers (instances, lights, shadow maps) that it reuses and grows |
-| `scene::Scene` | rebuilt every frame (plain values) | camera, sun, point and spot lights, ambient light, environment map, fog |
+| `scene::Scene` | rebuilt every frame (plain values) | camera, sun, moon, sky, point and spot lights, ambient light, environment map, fog |
 | `world::Instance` | a list rebuilt every frame | `{ mesh, material, world_from_local }`, one per drawn copy |
 
 ## Setup
 
 ```rust
 // The consumer's own device. Request DEPTH_CLIP_CONTROL where the adapter has it, so sun
-// shadows use unclipped depth natively (otherwise a fragment-shader fallback is used).
-let features = adapter.features() & wgpu::Features::DEPTH_CLIP_CONTROL;
+// shadows use unclipped depth natively (otherwise a fragment-shader fallback is used), and
+// DUAL_SOURCE_BLENDING (the sky's per-channel transmittance, else its mean). A `Scene::sky`
+// needs FLOAT32_FILTERABLE (Bevy's Rgba32Float medium LUTs); `prepare` panics without it.
+let features = adapter.features()
+    & (wgpu::Features::DEPTH_CLIP_CONTROL
+        | wgpu::Features::DUAL_SOURCE_BLENDING
+        | wgpu::Features::FLOAT32_FILTERABLE);
 let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor {
     required_features: features,
     ..Default::default()
@@ -101,10 +106,17 @@ Procedural `mmorpg-presentation` geometry keeps its per-vertex colours in `MeshD
 let frame = surface.get_current_texture()?;
 let view = frame.texture.create_view(&Default::default());
 
+// The game's clock (Greyhaven's day cycle) gives the hour; the engine only needs directions.
+let cycle = DayCycle { noon_elevation: 60f32.to_radians(), moon_lag_hours: 12.0 };
 let scene = Scene {
     camera: Camera { eye, target, fov_y, near: 0.2, ev100, shadow_filter, tonemapping },
-    clear_color, sun: Some(sun), point_lights, spot_lights,
-    shadow_maps: ShadowMapSizes::default(), ambient, environment, fog,
+    clear_color: Vec3::ZERO,
+    sun: Some(Sun { direction: -cycle.to_sun(hour), color: Vec3::ONE, illuminance: RAW_SUNLIGHT, shadows }),
+    moon: Some(Moon { direction: -cycle.to_moon(hour), color: moon_tint, illuminance: 0.3 }),
+    sky: Some(Sky::default()),       // sky, aerial perspective and the sky's ambient light
+    ambient: Ambient { color: Vec3::ONE, brightness: 0.0 },
+    environment: None,                // the sky's own environment light replaces it
+    point_lights, spot_lights, shadow_maps: ShadowMapSizes::default(), fog: None,
 };
 let instances: Vec<Instance> = draws.iter().map(|d| Instance {
     mesh: mesh_ids[&d.resource_key],
@@ -128,6 +140,14 @@ frame.present();
 - **Units.** `Scene` uses Bevy's physical units: illuminance in lux, light power in lumens,
   ambient light in cd/m², exposure as EV100. The client's day cycle (`Environment::at`) has to
   produce these instead of today's unitless intensities.
+- **Sky and day cycle.** With `Scene::sky`, the sun's illuminance is its light above the
+  atmosphere (`RAW_SUNLIGHT`): the atmosphere's transmittance reddens and dims it towards the
+  horizon and the disc's share above the horizon fades it out, so the client sets directions,
+  not colour curves. The moon is a second, unshadowed directional light with its own disc. The
+  sky also lights the scene: each frame it is filtered into diffuse and specular cube maps (Bevy
+  `AtmosphereEnvironmentMapLight`), so leave `ambient` at 0 and `environment` at `None`. Only
+  exposure is left to the client; the oracle's `sky_day_cycle_*` views use EV100 14.5 at noon,
+  13.5 with the sun at 15°, 11 at 2° and 3.5 at night (sun 10° below the horizon).
 - **Depth.** The engine's depth buffer is reverse-Z and 4× MSAA, and stays internal. Picking
   keeps working because it uses CPU rays (`PickRay`) and does not read the depth buffer.
 - **Headless.** `headless::Headless::render(&mut viewport, &world, &scene, &instances)` runs the
@@ -136,7 +156,7 @@ frame.present();
 
 ## Not covered yet
 
-- A sky pass (#6). Until it lands, `clear_color` is the background.
+- Stars, clouds and moon phases: the sky is Bevy's clear atmosphere; the moon is a full disc.
 - GPU skinning. Skin on the CPU and call `set_mesh`.
 - Clustered lights. Every point and spot light is evaluated for every fragment.
 - glTF features outside the core metallic-roughness model: texture transforms, a second UV set,

@@ -12,9 +12,11 @@ use bevy::{
     camera::{Exposure, Hdr, RenderTarget},
     diagnostic::DiagnosticsStore,
     light::{
-        CascadeShadowConfigBuilder, DirectionalLightShadowMap, EnvironmentMapLight,
-        GlobalAmbientLight, PointLightShadowMap, ShadowFilteringMethod,
+        Atmosphere, AtmosphereEnvironmentMapLight, CascadeShadowConfigBuilder,
+        DirectionalLightShadowMap, EnvironmentMapLight, GlobalAmbientLight, PointLightShadowMap,
+        ShadowFilteringMethod, SunDisk, atmosphere::ScatteringMedium,
     },
+    pbr::AtmosphereSettings,
     prelude::*,
     render::{
         RenderPlugin,
@@ -215,7 +217,8 @@ pub fn run(scenario: Scenario, timed_frames: u32) -> BevyRun {
         move |mut commands: Commands,
               mut images: ResMut<Assets<Image>>,
               mut meshes: ResMut<Assets<Mesh>>,
-              mut materials: ResMut<Assets<StandardMaterial>>| {
+              mut materials: ResMut<Assets<StandardMaterial>>,
+              mut media: ResMut<Assets<ScatteringMedium>>| {
             let target = images.add(Image::new_target_texture(
                 width,
                 height,
@@ -285,6 +288,24 @@ pub fn run(scenario: Scenario, timed_frames: u32) -> BevyRun {
                     },
                 });
             }
+            let disk = |d: render_engine::scene::SunDisk| SunDisk {
+                angular_size: d.angular_size,
+                intensity: d.intensity,
+            };
+            if let Some(sky) = scene.sky {
+                camera.insert(AtmosphereSettings::default());
+                if let Some(intensity) = sky.environment_intensity {
+                    camera.insert(AtmosphereEnvironmentMapLight {
+                        intensity,
+                        ..default()
+                    });
+                }
+                // Bevy's Earth atmosphere, placed by its hook 6 360 km below the origin.
+                commands.spawn(Atmosphere {
+                    ground_albedo: v3(sky.ground_albedo),
+                    ..Atmosphere::earth(media.add(ScatteringMedium::earth(256, 256)))
+                });
+            }
             if let Some(sun) = scene.sun {
                 let mut light = commands.spawn((
                     DirectionalLight {
@@ -295,6 +316,9 @@ pub fn run(scenario: Scenario, timed_frames: u32) -> BevyRun {
                     },
                     Transform::default().looking_to(v3(sun.direction), Vec3::Y),
                 ));
+                if let Some(sky) = scene.sky {
+                    light.insert(disk(sky.sun_disk));
+                }
                 if let Some(s) = sun.shadows {
                     light.insert((CascadeShadowConfigBuilder {
                         num_cascades: s.num_cascades,
@@ -308,6 +332,22 @@ pub fn run(scenario: Scenario, timed_frames: u32) -> BevyRun {
                         l.shadow_depth_bias = s.depth_bias;
                         l.shadow_normal_bias = s.normal_bias;
                     });
+                }
+            }
+            // Spawned after the sun: Bevy orders unshadowed directional lights first, then by
+            // entity.
+            if let Some(moon) = scene.moon {
+                let mut light = commands.spawn((
+                    DirectionalLight {
+                        color: linear(moon.color),
+                        illuminance: moon.illuminance,
+                        shadow_maps_enabled: false,
+                        ..default()
+                    },
+                    Transform::default().looking_to(v3(moon.direction), Vec3::Y),
+                ));
+                if let Some(sky) = scene.sky {
+                    light.insert(disk(sky.moon_disk));
                 }
             }
             // Shadow settings default to Bevy's for lights without shadows.

@@ -41,6 +41,17 @@ struct Frame {
     fog_bi: vec4<f32>,
     // x: point lights, y: spot lights (after the point lights in `lights`).
     light_counts: vec4<u32>,
+    // xyz: unit direction towards the moon, w: 1 when there is a moon.
+    moon_direction_to_light: vec4<f32>,
+    // rgb: moon colour × illuminance (lux).
+    moon_color: vec4<f32>,
+    // The sky's atmosphere (Bevy `Atmosphere`): world to atmosphere space.
+    world_to_atmosphere: mat4x4<f32>,
+    // x: planet radius, y: atmosphere radius (m), z: 1 with a sky, w: 1 when the moon is
+    // shaded before the sun (Bevy's directional-light order).
+    atmosphere: vec4<f32>,
+    // x: sun disc, y: moon disc angular size (radians).
+    disks: vec4<f32>,
 }
 
 // A point or spot light, laid out like Bevy's `ClusteredLight`.
@@ -105,6 +116,9 @@ const MATERIAL_ALPHA_BLEND: u32 = 256u;
 @group(1) @binding(7) var point_shadow_maps: texture_depth_cube_array;
 // Non-comparison sampler for the soft-shadow blocker search.
 @group(1) @binding(8) var shadow_linear_sampler: sampler;
+// The sky's transmittance LUT (a 1² placeholder without a sky).
+@group(1) @binding(9) var atmosphere_transmittance_texture: texture_2d<f32>;
+@group(1) @binding(10) var atmosphere_transmittance_sampler: sampler;
 // Shadow pass only: the cascade being rendered (dynamic offset).
 @group(1) @binding(2) var<uniform> cascade_clip_from_world: mat4x4<f32>;
 // Both passes: the draw's material. Empty texture slots hold a white texel and are not sampled.
@@ -867,28 +881,24 @@ fn lit_radiance(in: VertexOut, world_normal: vec3<f32>, N: vec3<f32>, m: Materia
         }
         direct += spot_light(light, surface) * shadow;
     }
+    // Directional lights in Bevy's order: unshadowed first, then by spawn order (sun, moon).
+    let has_moon = frame.moon_direction_to_light.w > 0.5;
+    let moon_first = frame.atmosphere.w > 0.5;
+    if (has_moon && moon_first) {
+        direct += directional_light(
+            frame.moon_direction_to_light.xyz, frame.moon_color.rgb, frame.disks.y, surface);
+    }
     if (frame.flags.z > 0.5) {
-        let L = frame.direction_to_light.xyz;
-        let H = normalize(L + V);
-        let NdotL = saturate(dot(N, L));
-        let NdotH = saturate(dot(N, H));
-        let LdotH = saturate(dot(L, H));
-
-        let f90 = 0.5 + 2.0 * roughness * LdotH * LdotH;
-        let fd = F_Schlick(1.0, f90, NdotL) * F_Schlick(1.0, f90, NdotV) * (1.0 / PI);
-        let diffuse = diffuse_color * fd;
-
-        let D = D_GGX(roughness, NdotH);
-        let Vis = V_SmithGGXCorrelated(roughness, NdotV, NdotL);
-        let F = fresnel(F0, LdotH);
-        var specular = (D * Vis) * F;
-        specular *= 1.0 + F0 * (1.0 / (f_ab.x + f_ab.y) - 1.0);
-
         var shadow = 1.0;
         if (frame.flags.y > 0.5) {
             shadow = sun_shadow(in.world, world_normal);
         }
-        direct += (diffuse + specular) * NdotL * frame.sun_color.rgb * shadow;
+        direct += directional_light(
+            frame.direction_to_light.xyz, frame.sun_color.rgb, frame.disks.x, surface) * shadow;
+    }
+    if (has_moon && !moon_first) {
+        direct += directional_light(
+            frame.moon_direction_to_light.xyz, frame.moon_color.rgb, frame.disks.y, surface);
     }
 
     let diffuse_ambient = env_brdf_approx(diffuse_color, F_AB(1.0, NdotV));
@@ -909,6 +919,98 @@ fn lit_radiance(in: VertexOut, world_normal: vec3<f32>, N: vec3<f32>, m: Materia
     // Emissive light is scaled by alpha and exposed like the rest (Bevy, `emissive.a` = 1).
     let emissive = m.emissive * m.base_color.a * mix(1.0, frame.flags.x, material.emissive.a);
     return frame.flags.x * (direct + indirect) + emissive;
+}
+
+// ---------------------------------------------------------------- directional lights
+
+// Bevy `directional_light` (without the shadow): Burley diffuse and GGX specular with the
+// multiscatter compensation, filtered by the sky's transmittance and the share of the disc
+// above the horizon when there is a sky.
+fn directional_light(L: vec3<f32>, light_color: vec3<f32>, disk_size: f32, s: Surface) -> vec3<f32> {
+    let H = normalize(L + s.V);
+    let NdotL = saturate(dot(s.N, L));
+    let NdotH = saturate(dot(s.N, H));
+    let LdotH = saturate(dot(L, H));
+
+    let f90 = 0.5 + 2.0 * s.roughness * LdotH * LdotH;
+    let fd = F_Schlick(1.0, f90, NdotL) * F_Schlick(1.0, f90, s.NdotV) * (1.0 / PI);
+    let diffuse = s.diffuse_color * fd;
+
+    let D = D_GGX(s.roughness, NdotH);
+    let Vis = V_SmithGGXCorrelated(s.roughness, s.NdotV, NdotL);
+    let F = fresnel(s.F0, LdotH);
+    var specular = (D * Vis) * F;
+    specular *= 1.0 + s.F0 * (1.0 / (s.f_ab.x + s.f_ab.y) - 1.0);
+
+    var color = (diffuse + specular) * NdotL;
+    color *= light_color;
+    if (frame.atmosphere.z > 0.5) {
+        let P_as = (frame.world_to_atmosphere * vec4(s.P, 1.0)).xyz;
+        let P_clamped = atmosphere_clamp_to_surface(P_as);
+        let r = length(P_clamped);
+        let local_up = normalize(P_clamped);
+        let mu_light = dot(L, local_up);
+        let transmittance = sample_atmosphere_transmittance(r, mu_light);
+        let sun_visibility = calculate_visible_sun_ratio(r, mu_light, disk_size);
+        color *= transmittance * sun_visibility;
+    }
+    return color;
+}
+
+// Bevy atmosphere `clamp_to_surface`: at least 1 m above the planet.
+fn atmosphere_clamp_to_surface(position: vec3<f32>) -> vec3<f32> {
+    let min_radius = frame.atmosphere.x + 1.0;
+    let r = length(position);
+    if r < min_radius {
+        let up = normalize(position);
+        return up * min_radius;
+    }
+    return position;
+}
+
+// Bevy `fast_acos_4`.
+fn fast_acos_4(x: f32) -> f32 {
+    let x1 = abs(x);
+    let x2 = x1 * x1;
+    let x3 = x2 * x1;
+    var s: f32;
+    s = -0.2121144 * x1 + 1.5707288;
+    s = 0.0742610 * x2 + s;
+    s = -0.0187293 * x3 + s;
+    s = sqrt(1.0 - x1) * s;
+    return select(PI - s, s, x >= 0.0);
+}
+
+// Bevy `calculate_visible_sun_ratio`: the share of the light's disc above the horizon.
+fn calculate_visible_sun_ratio(r: f32, mu: f32, sun_angular_size: f32) -> f32 {
+    let inner_radius = frame.atmosphere.x;
+    let horizon_cos = -sqrt(1.0 - (inner_radius * inner_radius) / (r * r));
+    let horizon_angle = fast_acos_4(horizon_cos);
+    let sun_zenith_angle = fast_acos_4(mu);
+    if sun_zenith_angle + sun_angular_size * 0.5 <= horizon_angle {
+        return 1.0;
+    }
+    if sun_zenith_angle - sun_angular_size * 0.5 >= horizon_angle {
+        return 0.0;
+    }
+    let d = (horizon_angle - sun_zenith_angle) / (sun_angular_size * 0.5);
+    let visible_ratio = 0.5 + d * 0.5;
+    return clamp(visible_ratio, 0.0, 1.0);
+}
+
+// Bevy `sample_transmittance_lut` with `transmittance_lut_r_mu_to_uv` (Bruneton).
+fn sample_atmosphere_transmittance(r: f32, mu: f32) -> vec3<f32> {
+    let inner = frame.atmosphere.x;
+    let outer = frame.atmosphere.y;
+    let H = sqrt(outer * outer - inner * inner);
+    let rho = sqrt(max(r * r - inner * inner, 0.0));
+    let positive_discriminant = max(r * r * (mu * mu - 1.0) + outer * outer, 0.0);
+    let d = max(-r * mu + sqrt(positive_discriminant), 0.0);
+    let d_min = outer - r;
+    let d_max = rho + H;
+    let uv = vec2((d - d_min) / (d_max - d_min), rho / H);
+    return textureSampleLevel(
+        atmosphere_transmittance_texture, atmosphere_transmittance_sampler, uv, 0.0).rgb;
 }
 
 // ---------------------------------------------------------------- distance fog

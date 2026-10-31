@@ -17,9 +17,12 @@
 //! let grey = world.add_material(&StandardMaterial::default());
 //! let scene = Scene {
 //!     camera: Camera { eye: Vec3::new(6.0, 5.0, 8.0), target: Vec3::ZERO, fov_y: 0.785, near: 0.1, ev100: 9.7, shadow_filter: ShadowFilter::Gaussian, tonemapping: Tonemapping::TonyMcMapface },
-//!     clear_color: Vec3::new(0.3, 0.5, 0.8),
-//!     sun: Some(Sun { direction: Vec3::new(-0.4, -1.0, -0.3), color: Vec3::ONE, illuminance: 10_000.0, shadows: Some(SunShadows::default()) }),
-//!     ambient: Ambient { color: Vec3::ONE, brightness: 500.0 },
+//!     clear_color: Vec3::ZERO,
+//!     // The game's clock picks the hour; the sky filters raw sunlight through the atmosphere.
+//!     sun: Some(Sun { direction: -DayCycle::default().to_sun(16.0), color: Vec3::ONE, illuminance: RAW_SUNLIGHT, shadows: Some(SunShadows::default()) }),
+//!     moon: None,
+//!     sky: Some(Sky::default()),
+//!     ambient: Ambient { color: Vec3::ONE, brightness: 0.0 },
 //!     point_lights: vec![],
 //!     spot_lights: vec![],
 //!     shadow_maps: ShadowMapSizes::default(),
@@ -42,4 +45,5 @@ pub mod material;
 pub mod mesh;
 pub mod renderer;
 pub mod scene;
+mod sky;
 pub mod world;
