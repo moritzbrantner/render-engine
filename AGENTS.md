@@ -33,8 +33,11 @@ never depends on Bevy outside `oracle/`.
 | `examples/mesh_upload.rs` | Microbenchmark: per-frame pose uploads (`set_mesh`, `set_mesh_positions_normals`, `set_skin`) |
 | `docs/consumer-integration.md` | How a consumer (the mmorpg native client) drives the engine |
 | `site/` | Report page over the last oracle run (`scripts/build-pages.sh` → `pages-dist/`) |
+| `packages/three-lighting/` | The web client's lighting on three.js (`@moritzbrantner/three-lighting`, root `package.json`): GLSL ports of `lit.wgsl` and `tonemap.wgsl` and Bevy's cascade fitting (D8). A shading change in `lit.wgsl` or `tonemap.wgsl` makes the same change here |
+| `oracle/three/` | The oracle's three.js side: `render.mjs` renders exported scenarios in headless Chromium (Playwright, ANGLE on Vulkan); `oracle/src/three_side.rs` exports them and lists known gaps with their issues |
 
 ```sh
+bun install                                           # three.js side: three + Playwright (needs node); --no-three skips it
 cargo fmt --all -- --check && (cd oracle && cargo fmt -- --check)
 cargo clippy --all-targets --locked -- -D warnings
 (cd oracle && cargo clippy --release --all-targets --locked -- -D warnings)
@@ -47,8 +50,11 @@ cargo run --release --locked --manifest-path oracle/Cargo.toml -- --calibrate   
 bash scripts/build-pages.sh
 ```
 
-The oracle writes `target/oracle/<scenario>.{bevy,engine,flip}.png` and `report.json`. Look at
-the FLIP heat map before changing shading code.
+The oracle writes `target/oracle/<scenario>.{bevy,engine,flip}.png`, the three.js side's
+`<scenario>.three.png` and `<scenario>.three.flip.png`, and `report.json`. Look at the FLIP heat
+map before changing shading code. A lighting scenario counts as done on the web only when its
+three.js side passes; one that does not yet is a known gap (`three_side::GAPS`) or not ported,
+each with a follow-up issue.
 
 CI (`.github/workflows/validate.yml`) runs all of this on plain Ubuntu with lavapipe
 (`WGPU_FORCE_FALLBACK_ADAPTER=1`) in two parallel jobs: `tests` (engine fmt/clippy/test, never

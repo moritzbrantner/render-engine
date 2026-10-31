@@ -284,6 +284,42 @@ world.step_particles(&mut encoder, dt, None);
 - **Cost.** `particles_100k` (about 100k alive in one fountain plus 50 small effects) runs on
   the GPU; see the oracle report for its timings against hanabi.
 
+## Web client (three.js)
+
+The web client gets the same lighting through `@moritzbrantner/three-lighting`
+(`packages/three-lighting`, technical decisions D8), a three.js 0.186 `WebGLRenderer` port of the
+shaders above, gated against Bevy by the oracle's three.js side. Pin it like the other
+`github:` dependencies:
+
+```json
+"@moritzbrantner/three-lighting": "github:moritzbrantner/render-engine#<commit>"
+```
+
+The consumer keeps its renderer, scene and camera; meshes use `LitMaterial`, and
+`Lighting.render` replaces `renderer.render`:
+
+```js
+import { FogFalloff, Lighting, LitMaterial, loadCubemap, loadToneMappingLuts, singleCascade } from '@moritzbrantner/three-lighting';
+
+const lighting = new Lighting(await loadToneMappingLuts());
+lighting.ev100 = 10.5;
+lighting.tonemapping = 'tonyMcMapface';              // or 'agx', 'acesFitted'
+lighting.clearColor = [0.3, 0.48, 0.75];             // linear, tone mapped, not exposed
+lighting.sun = { direction: [0.6, -0.8, 0.2], color: [1, 0.95, 0.88], illuminance: 10_000, shadows: singleCascade(30) };
+lighting.ambient = { color: [0.75, 0.85, 1], brightness: 1500 };
+lighting.environment = { diffuse: await loadCubemap(diffuseUrl), specular: await loadCubemap(specularUrl), intensity: 2000 };
+lighting.fog = { color: [0.4, 0.48, 0.58, 1], falloff: FogFalloff.fromVisibility(120) };
+
+scene.add(new Mesh(geometry, new LitMaterial({ baseColor: [0.7, 0.08, 0.06], perceptualRoughness: 0.45 })));
+lighting.render(renderer, scene, camera);           // or (renderer, scene, camera, renderTarget)
+```
+
+Values are Bevy's units, as in `Scene`. `Lighting.render` draws the sun's cascades (Bevy's
+fitting, 2048² maps, Gaussian or 2×2 filtering), a 4× MSAA `HalfFloat` HDR pass, the tone
+mapping and the sRGB output. Environment maps are the same prefiltered KTX2 cube maps the
+native client loads (`assets/ibl`); the tone-mapping LUTs ship with the package. The port
+covers what the oracle's three.js side passes; the report lists the rest with its issues.
+
 ## Not covered yet
 
 - Stars, clouds and moon phases: the sky is Bevy's clear atmosphere; the moon is a full disc.

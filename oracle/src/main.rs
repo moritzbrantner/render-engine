@@ -17,6 +17,7 @@
 //! oracle --only sun_shadows      run only these scenarios
 //! oracle --no-timing             image gate only
 //! oracle --out DIR               write <scenario>.{bevy,engine,flip}.png and report.json (default target/oracle)
+//! oracle --no-three              skip the three.js side (D8: headless Chromium, needs node + bun install)
 //! oracle --calibrate             particle scenarios only: Bevy against itself (rerun, other seed,
 //!                                gravity ×1.25), to calibrate the particle gates (D9)
 //! ```
@@ -28,6 +29,7 @@ mod bevy_side;
 mod content;
 mod particles;
 mod scenarios;
+mod three_side;
 
 use render_engine::{headless::Headless, renderer::Viewport};
 use std::{path::PathBuf, process::ExitCode};
@@ -56,6 +58,8 @@ struct Options {
     frames: u32,
     calibrate: bool,
     variant: bevy_side::ParticleVariant,
+    /// Also render each lighting scenario through the three.js port (D8).
+    three: bool,
 }
 
 fn options() -> Result<Options, String> {
@@ -68,6 +72,7 @@ fn options() -> Result<Options, String> {
         frames: TIMED_FRAMES,
         calibrate: false,
         variant: bevy_side::ParticleVariant::default(),
+        three: true,
     };
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -86,6 +91,7 @@ fn options() -> Result<Options, String> {
                     .ok_or("--frames needs a number")?
             }
             "--calibrate" => o.calibrate = true,
+            "--no-three" => o.three = false,
             "--seed" => {
                 o.variant.seed = Some(
                     args.next()
@@ -632,6 +638,86 @@ fn calibrate(o: &Options) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// The three.js side of a lighting scenario against Bevy (D8): the same FLIP gate as
+/// render-engine. `blocking` is set when it fails and is not a known gap
+/// (`three_side::GAPS`); unported scenarios are reported with their follow-up issue.
+fn three_result(
+    s: &scenarios::Scenario,
+    out: &std::path::Path,
+    bevy: &image::RgbaImage,
+) -> serde_json::Value {
+    use serde_json::json;
+    if let Some(reason) = three_side::unsupported(s) {
+        return json!({
+            "status": "unported",
+            "reason": reason,
+            "issue": three_side::unported_issue(reason),
+            "result": format!("not ported ({reason})"),
+            "passed": false,
+            "blocking": false,
+        });
+    }
+    let gap = three_side::gap_issue(s.name);
+    let fail = |result: String| {
+        json!({
+            "status": if gap.is_some() { "gap" } else { "failed" },
+            "issue": gap,
+            "result": result,
+            "passed": false,
+            "blocking": gap.is_none(),
+        })
+    };
+    let three = match image::open(out.join(format!("{}.three.png", s.name))) {
+        Ok(i) => i.to_rgba8(),
+        Err(_) => {
+            let err = std::fs::read_to_string(out.join(format!("{}.three.err", s.name)))
+                .unwrap_or_default();
+            return fail(format!(
+                "NOT RENDERED {}",
+                err.lines().next().unwrap_or("(no output)")
+            ));
+        }
+    };
+    if three.dimensions() != bevy.dimensions() {
+        return fail("size mismatch".into());
+    }
+    let (w, h) = three.dimensions();
+    let f = flip(w, h, bevy.as_raw(), three.as_raw());
+    if let Err(e) = save_png(
+        &out.join(format!("{}.three.flip.png", s.name)),
+        w,
+        h,
+        &f.heatmap,
+    ) {
+        eprintln!("cannot write {}.three.flip.png: {e}", s.name);
+    }
+    let meta: serde_json::Value =
+        std::fs::read_to_string(out.join(format!("{}.three.meta.json", s.name)))
+            .ok()
+            .and_then(|m| serde_json::from_str(&m).ok())
+            .unwrap_or_default();
+    let ok = f.mean <= FLIP_MEAN_MAX && f.p99 <= FLIP_P99_MAX;
+    json!({
+        "status": if ok { "passed" } else if gap.is_some() { "gap" } else { "failed" },
+        "flip_mean": f.mean,
+        "flip_p99": f.p99,
+        "gpu_ms": meta["gpuMs"],
+        "renderer": meta["renderer"],
+        "issue": gap,
+        "result": if ok {
+            "ok".to_string()
+        } else {
+            let differs = format!("IMAGE DIFFERS (FLIP mean > {FLIP_MEAN_MAX} or p99 > {FLIP_P99_MAX})");
+            match gap {
+                Some(n) => format!("known gap #{n}: {differs}"),
+                None => differs,
+            }
+        },
+        "passed": ok,
+        "blocking": !ok && gap.is_none(),
+    })
+}
+
 struct Flip {
     mean: f32,
     /// 99th-percentile per-pixel error: catches local defects (a missing shadow) that the
@@ -743,12 +829,39 @@ fn main() -> ExitCode {
         "scenario", "capability", "FLIP mean", "FLIP p99", "engine ms", "bevy ms", "ratio"
     );
 
+    let selected = || {
+        scenarios
+            .iter()
+            .filter(|s| o.only.is_empty() || o.only.iter().any(|n| n == s.name))
+    };
+    // The three.js side renders every exportable scenario in one headless Chromium run.
     let mut failed = false;
+    if o.three {
+        let exported: Vec<&str> = selected()
+            .filter(|s| three_side::unsupported(s).is_none())
+            .filter(|s| match three_side::export(s, &o.out) {
+                Ok(()) => true,
+                Err(e) => {
+                    println!("{:<24} three export failed: {e}", s.name);
+                    false
+                }
+            })
+            .map(|s| s.name)
+            .collect();
+        if !exported.is_empty()
+            && let Err(e) = three_side::render(
+                &exported,
+                &o.out,
+                software,
+                if o.timing { o.frames } else { 0 },
+            )
+        {
+            println!("three side: {e}");
+        }
+    }
+
     let mut report = Vec::new();
-    for s in scenarios
-        .iter()
-        .filter(|s| o.only.is_empty() || o.only.iter().any(|n| n == s.name))
-    {
+    for s in selected() {
         let frames = if o.timing { o.frames } else { 1 };
         let (bevy_png, bevy_ms, spans) = match bevy_side::run_in_child(s.name, &o.out, frames) {
             Ok(r) => r,
@@ -855,6 +968,7 @@ fn main() -> ExitCode {
             "ok".into()
         };
         failed |= !image_ok || timing_missing || (slow && gate_timing);
+        let three = o.three.then(|| three_result(s, &o.out, &bevy));
         let fmt = |v: Option<f64>| v.map_or("-".to_string(), |v| format!("{v:.3}"));
         let ratio = match (engine_ms, bevy_ms) {
             (Some(e), Some(b)) => format!("{:.2}", e / b),
@@ -884,7 +998,23 @@ fn main() -> ExitCode {
             "bevy_spans": spans,
             "result": result,
             "passed": image_ok && !timing_missing && !(slow && gate_timing),
+            "three": three.clone(),
         }));
+        if let Some(t) = &three {
+            failed |= t["blocking"].as_bool().unwrap_or(false);
+            println!(
+                "{:<24} {:<20} {:>9} {:>9}  three.js: {}",
+                "",
+                "",
+                t["flip_mean"]
+                    .as_f64()
+                    .map_or("-".into(), |v| format!("{v:.4}")),
+                t["flip_p99"]
+                    .as_f64()
+                    .map_or("-".into(), |v| format!("{v:.4}")),
+                t["result"].as_str().unwrap_or("")
+            );
+        }
     }
     let (particle_report, particles_failed) = particle_scenarios(&o, &gpu, gate_timing);
     failed |= particles_failed;

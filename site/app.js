@@ -66,6 +66,26 @@ function ratioBar(e, b, margin) {
 
 const status = s => `<span class="status ${s.passed ? 'pass' : 'fail'}">${s.passed ? 'Pass' : 'Fail'}</span>`;
 
+// The three.js side (D8): passed, failed, a known gap or not ported yet (with its issue).
+const THREE_LABEL = { passed: 'Pass', failed: 'Fail', gap: 'Known gap', unported: 'Not ported' };
+const issueLink = n => (n ? ` <a href="${REPO}/issues/${n}">#${n}</a>` : '');
+const threeStatus = t => (t
+  ? `<span class="status ${t.status === 'passed' ? 'pass' : t.status === 'failed' ? 'fail' : 'gap'}">${THREE_LABEL[t.status] ?? esc(t.status)}</span>`
+  : '<span class="status gap">Not run</span>');
+const hasThreeImage = t => t && (t.status === 'passed' || t.flip_mean != null);
+const threeNote = t => (t.status === 'unported' ? t.reason : t.status === 'passed' ? '' : t.flip_mean != null ? 'image differs' : t.result ?? '');
+
+function threeTable(ci) {
+  const rows = ci.scenarios.filter(s => s.three);
+  if (!rows.length) return '<p class="empty">This report has no three.js side (the oracle ran with <code>--no-three</code>).</p>';
+  return `<div class="table-wrap"><table>
+    <thead><tr><th>Scenario</th><th>three.js vs Bevy</th><th>FLIP mean</th><th>FLIP p99</th><th>render-engine vs Bevy</th><th>Note</th></tr></thead>
+    <tbody>${rows.map(s => `<tr><td><a href="scenario.html?s=${encodeURIComponent(s.scenario)}">${esc(s.scenario)}</a></td>
+      <td>${threeStatus(s.three)}</td><td class="num">${fmt(s.three.flip_mean)}</td><td class="num">${fmt(s.three.flip_p99)}</td><td>${status(s)}</td>
+      <td>${s.three.status === 'passed' ? '' : esc(threeNote(s.three))}${issueLink(s.three.issue)}</td></tr>`).join('')}</tbody>
+  </table></div>`;
+}
+
 function gpuTable(gpu, names) {
   if (!gpu) return '<p class="empty">No local GPU run is committed yet. Run <code>bash scripts/record-local-gpu.sh</code> on the RTX 3060 Ti and commit <code>docs/oracle-local-gpu.json</code>.</p>';
   const rows = gpu.scenarios.filter(s => !names || names.includes(s.scenario));
@@ -133,6 +153,10 @@ export function renderIndex({ ci, gpu, build }) {
   const gpuPassed = gpu ? gpu.scenarios.filter(s => s.passed).length : null;
   const worstRatio = gpu ? Math.max(...gpu.scenarios.filter(s => s.engine_gpu_ms && s.bevy_gpu_ms).map(s => s.engine_gpu_ms / s.bevy_gpu_ms)) : null;
   const features = ci.features.filter(f => ci.scenarios.some(s => s.feature === f.id));
+  const web = ci.scenarios.filter(s => s.three);
+  const webPassed = web.filter(s => s.three.status === 'passed').length;
+  const webGaps = web.filter(s => s.three.status === 'gap').length;
+  const webUnported = web.filter(s => s.three.status === 'unported').length;
 
   main.innerHTML = `
   <section class="hero"><div class="wrap">
@@ -141,6 +165,7 @@ export function renderIndex({ ci, gpu, build }) {
     <div class="gates">
       <div class="gate"><h2>Image gate, CI on lavapipe</h2><p>Mean FLIP ≤ ${g(ci.flip_mean_max)}, 99th percentile ≤ ${g(ci.flip_p99_max)}</p><p>Worst: <span class="num">${fmt(worstMean)}</span> mean, <span class="num">${fmt(worstP99)}</span> p99</p></div>
       <div class="gate"><h2>GPU-time gate, local RTX 3060 Ti</h2><p>render-engine ≤ ${(gpu?.gpu_margin ?? ci.gpu_margin).toFixed(2)}× Bevy's median frame time</p>${gpu ? `<p>Slowest: <span class="num">${worstRatio.toFixed(2)}×</span>, ${gpuPassed} of ${gpu.scenarios.length} pass</p>` : '<p>No local run committed.</p>'}</div>
+      <div class="gate"><h2>Web gate, three.js on CI</h2><p>The same FLIP gate against Bevy, rendered in headless Chromium on the same software Vulkan (lavapipe)</p>${web.length ? `<p><span class="num">${webPassed}</span> of ${web.length} pass, ${webGaps} known gaps, ${webUnported} not ported. <a href="#web">Table</a></p>` : '<p>Not run.</p>'}</div>
     </div>
   </div></section>
   <div class="wrap">
@@ -158,9 +183,15 @@ export function renderIndex({ ci, gpu, build }) {
             <p class="cap">${esc(s.capability)}</p>
             ${scale('Mean', s.flip_mean, g(ci.flip_mean_max))}
             ${scale('p99', s.flip_p99, g(ci.flip_p99_max))}
+            ${s.three ? `<div class="row web"><span class="k">three.js</span>${threeStatus(s.three)}<span class="v">${fmt(s.three.flip_mean)}</span></div>` : ''}
           </div>
         </a>`).join('')}</div>
     </section>`).join('')}
+    <section class="section" id="web">
+      <h2>Web: three.js</h2>
+      <p>Each lighting scenario rendered in headless Chromium (WebGL 2 through ANGLE on Vulkan; on CI the same lavapipe device as Bevy) through <code>packages/three-lighting</code>, the three.js port the mmorpg web client uses, and compared with Bevy under the same FLIP gate as render-engine. A scenario counts as done on the web only when this side passes. Known gaps and unported capabilities link their follow-up issues. <a href="${REPO}/blob/main/docs/technical-decisions.md#d8--web-path-a-threejs-port-gated-by-the-same-oracle">Decision record</a>.</p>
+      ${threeTable(ci)}
+    </section>
     ${particleSection(ci)}
     <section class="section" id="gpu-time">
       <h2>GPU time</h2>
@@ -198,6 +229,7 @@ export function renderScenario({ ci, gpu, build }) {
   const prev = ci.scenarios[(i - 1 + ci.scenarios.length) % ci.scenarios.length];
   const next = ci.scenarios[(i + 1) % ci.scenarios.length];
   const img = k => `oracle/${encodeURIComponent(s.scenario)}.${k}.png`;
+  const withThree = hasThreeImage(s.three);
   document.title = `${s.scenario} · render-engine vs Bevy`;
 
   main.innerHTML = `<div class="wrap">
@@ -208,6 +240,7 @@ export function renderScenario({ ci, gpu, build }) {
       <div class="gate"><h2>FLIP on lavapipe (CI)</h2>${scale('Mean', s.flip_mean, g(ci.flip_mean_max))}${scale('p99', s.flip_p99, g(ci.flip_p99_max))}<p>${status(s)} gate: mean ≤ ${g(ci.flip_mean_max)}, p99 ≤ ${g(ci.flip_p99_max)}</p></div>
       <div class="gate"><h2>GPU time, local RTX 3060 Ti</h2>${local ? `<p>render-engine <span class="num">${ms(local.engine_gpu_ms)}</span></p><p>Bevy ${ms(local.bevy_gpu_ms)}</p>${ratioBar(local.engine_gpu_ms, local.bevy_gpu_ms, gpu.gpu_margin)}` : '<p>Not in the committed local run.</p>'}</div>
       <div class="gate"><h2>GPU time on lavapipe (advisory)</h2><p>render-engine ${ms(s.engine_gpu_ms)}</p><p>Bevy ${ms(s.bevy_gpu_ms)}</p><p>Software rendering; not gated.</p></div>
+      <div class="gate"><h2>three.js vs Bevy, CI</h2>${withThree ? `${scale('Mean', s.three.flip_mean, g(ci.flip_mean_max))}${scale('p99', s.three.flip_p99, g(ci.flip_p99_max))}` : ''}<p>${threeStatus(s.three)}${s.three && s.three.status !== 'passed' ? ` ${esc(threeNote(s.three))}${issueLink(s.three.issue)}` : ''}</p></div>
     </div>
     <div class="modes" role="group" aria-label="Comparison view">
       <button data-m="side" aria-pressed="true">Side by side</button>
@@ -226,7 +259,9 @@ export function renderScenario({ ci, gpu, build }) {
       view.innerHTML = `<div class="triple">
         <figure><img src="${img('engine')}" alt="render-engine"><figcaption>render-engine</figcaption></figure>
         <figure><img src="${img('bevy')}" alt="Bevy"><figcaption>Bevy (oracle)</figcaption></figure>
-        <figure><img src="${img('flip')}" alt="FLIP error map"><figcaption>FLIP error map</figcaption>${legend}</figure>
+        ${withThree ? `<figure><img src="${img('three')}" alt="three.js"><figcaption>three.js (web)</figcaption></figure>` : ''}
+        <figure><img src="${img('flip')}" alt="FLIP error map"><figcaption>FLIP error map, render-engine vs Bevy</figcaption>${legend}</figure>
+        ${withThree ? `<figure><img src="${img('three.flip')}" alt="FLIP error map, three.js"><figcaption>FLIP error map, three.js vs Bevy</figcaption></figure>` : ''}
       </div>`;
     },
     swipe: () => {
@@ -242,10 +277,11 @@ export function renderScenario({ ci, gpu, build }) {
     },
     toggle: () => {
       const states = [['engine', 'render-engine'], ['bevy', 'Bevy (oracle)'], ['flip', 'FLIP error map']];
+      if (withThree) states.push(['three', 'three.js (web)'], ['three.flip', 'FLIP error map, three.js']);
       let at = 0;
       view.innerHTML = `<div class="stage toggle" role="button" tabindex="0" aria-label="Show the next image">
         <img src="${img('engine')}" alt=""><span class="tag l"></span>
-      </div><p class="hint">Click, tap or press Space to cycle render-engine, Bevy and the FLIP map.</p>${legend}`;
+      </div><p class="hint">Click, tap or press Space to cycle render-engine, Bevy, the FLIP map${withThree ? ' and the three.js side' : ''}.</p>${legend}`;
       const stage = view.querySelector('.stage');
       const image = stage.querySelector('img');
       const tag = stage.querySelector('.tag');

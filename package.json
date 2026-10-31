@@ -1,0 +1,27 @@
+{
+  "name": "@moritzbrantner/three-lighting",
+  "version": "0.1.0",
+  "description": "render-engine's lighting on three.js: Bevy's PBR, sun cascades, IBL, fog and tone mapping, gated against Bevy",
+  "type": "module",
+  "license": "MIT",
+  "files": [
+    "packages/three-lighting",
+    "src/luts/*.ktx2",
+    "src/luts/LICENSE-*",
+    "src/luts/README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./packages/three-lighting/index.d.ts",
+      "import": "./packages/three-lighting/index.js"
+    }
+  },
+  "peerDependencies": {
+    "three": ">=0.186.0 <0.187.0"
+  },
+  "devDependencies": {
+    "playwright": "1.57.0",
+    "three": "0.186.1"
+  },
+  "packageManager": "bun@1.4.3"
+}
