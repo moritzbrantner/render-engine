@@ -20,6 +20,8 @@ pollster = "1.0.1"
 ktx2 = "0.5.0"
 ruzstd = "0.9.1"
 bevy_mikktspace = "1.0.0"
+# hanabi's per-frame effect seed chain (`StdRng::seed_from_u64`), replayed for parity (D9).
+rand = { version = "0.10.3", default-features = false, features = ["std_rng"] }
 
 [lints.rust]
 unsafe_code = "forbid"

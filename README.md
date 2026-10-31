@@ -1,11 +1,11 @@
 # render-engine
 
-Lighting and (next) particles for the owner's games, built on wgpu and measured against
+Lighting and particles for the owner's games, built on wgpu and measured against
 [Bevy](https://bevy.org).
 
 The games' native client renders with wgpu 30 and the `three-d-*` crates; its web client uses
 three.js. render-engine provides the lighting those clients need — sun and shadows first, then
-point/spot lights, ambient/IBL, sky and fog — and later GPU particles, through its own small API,
+point/spot lights, ambient/IBL, sky and fog — and particle emitters, through its own small API,
 and checks every capability against Bevy: same scene, perceptual image difference (NVIDIA FLIP)
 and GPU frame time. See [technical decisions](docs/technical-decisions.md).
 
@@ -34,11 +34,16 @@ and GPU frame time. See [technical decisions](docs/technical-decisions.md).
   render-engine, headless. It fails when mean FLIP > 0.005 or p99 FLIP > 0.05, or — on a GPU —
   when render-engine's GPU frame time (median of its fastest timing round) is more than 10%
   slower than Bevy's.
-- **Particle oracle:** particle scenarios run on Bevy with `bevy_hanabi` at a fixed timestep and
-  seed. Captures before any particle dies need an exact image match (FLIP). Later captures need
-  matching coverage, spatial and colour statistics, and alive counts must match on every frame
+- **Particles:** `render_engine::particles` emitters (burst and rate spawners; position,
+  velocity, lifetime, size and colour init modifiers; acceleration; size and colour over life;
+  additive or alpha blending) live in the `World`, are stepped by the game and drawn as
+  camera-facing quads in the main pass. The simulation replays `bevy_hanabi`'s spawner, seed
+  chain, per-particle random stream and slot allocation on the CPU (GPU simulation is #14).
+- **Particle oracle:** particle scenarios run on Bevy with `bevy_hanabi` and on render-engine at a
+  fixed timestep and seed. Captures before any particle dies need an exact image match (FLIP).
+  Later captures need matching coverage, spatial and colour statistics, and spawn and alive
+  counts must match on every frame
   ([D9](docs/technical-decisions.md#d9--particle-parity-seeded-replay-then-statistics)).
-  render-engine's emitters are next (#13).
 - **CI without a GPU:** CI renders both sides on lavapipe (software Vulkan); the image gate is
   enforced there, GPU time is advisory. Locally on a GPU both gates apply.
 - **Report site:** <https://moritzbrantner.github.io/render-engine/>, published from CI on

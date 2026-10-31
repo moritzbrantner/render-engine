@@ -1,11 +1,14 @@
 //! The consumer's GPU-resident content: meshes, textures and materials uploaded once and kept
 //! under stable handles until removed. Each frame the consumer lists [`Instance`]s (a mesh, a
 //! material and a transform) and the renderer draws them; nothing else is uploaded again.
+//! Particle emitters live here too: the consumer advances them with [`World::step_particles`]
+//! and the renderer draws every alive particle.
 
 use crate::{
     cull::Aabb,
     material::{AlphaMode, StandardMaterial, TextureData},
     mesh::MeshData,
+    particles::{Emitter, EmitterState, EmitterStats},
     renderer::Renderer,
 };
 use bytemuck::{Pod, Zeroable};
@@ -23,6 +26,10 @@ pub struct TextureId(u32);
 /// A material in a [`World`]; valid until [`World::remove_material`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct MaterialId(u32);
+
+/// A particle emitter in a [`World`]; valid until [`World::remove_emitter`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct EmitterId(u32);
 
 /// One drawn copy of a mesh this frame.
 #[derive(Clone, Copy, Debug)]
@@ -146,6 +153,7 @@ pub struct World {
     meshes: Slots<GpuMesh>,
     textures: Slots<GpuTexture>,
     materials: Slots<GpuMaterial>,
+    emitters: Slots<EmitterState>,
 }
 
 impl World {
@@ -172,6 +180,7 @@ impl World {
             meshes: Slots::new(),
             textures: Slots::new(),
             materials: Slots::new(),
+            emitters: Slots::new(),
         }
     }
 
@@ -264,6 +273,57 @@ impl World {
 
     pub fn remove_material(&mut self, material: MaterialId) {
         self.materials.remove(material.0);
+    }
+
+    /// Adds a particle emitter with no particles yet. Its seed chain starts with the next
+    /// [`World::step_particles`].
+    pub fn add_emitter(&mut self, emitter: &Emitter) -> EmitterId {
+        EmitterId(self.emitters.insert(EmitterState::new(emitter)))
+    }
+
+    /// Replaces an emitter's description (e.g. to stop its spawner with `active: false`). Alive
+    /// particles keep their attributes and keep moving; the new update and render modifiers
+    /// apply to them. A different capacity drops them.
+    pub fn set_emitter(&mut self, id: EmitterId, emitter: &Emitter) {
+        self.emitter_mut(id).set_desc(emitter);
+    }
+
+    /// Where new particles spawn: init positions and velocities are transformed by it. Alive
+    /// particles stay where they are (the simulation runs in world space).
+    pub fn set_emitter_transform(&mut self, id: EmitterId, world_from_emitter: Mat4) {
+        self.emitter_mut(id).transform = world_from_emitter;
+    }
+
+    pub fn remove_emitter(&mut self, id: EmitterId) {
+        self.emitters.remove(id.0);
+    }
+
+    /// The emitter's spawn and alive counts after the last step.
+    pub fn emitter_stats(&self, id: EmitterId) -> EmitterStats {
+        self.emitters
+            .get(id.0)
+            .expect("emitter_stats on a removed emitter")
+            .stats
+    }
+
+    /// Advances every emitter by `dt` seconds: spawns, initialises, ages, reaps and moves its
+    /// particles. Call it at the game's simulation rate (a fixed step keeps runs repeatable).
+    pub fn step_particles(&mut self, dt: f32) {
+        for e in self.emitters.items.iter_mut().flatten() {
+            e.step(dt);
+        }
+    }
+
+    fn emitter_mut(&mut self, id: EmitterId) -> &mut EmitterState {
+        self.emitters
+            .items
+            .get_mut(id.0 as usize)
+            .and_then(Option::as_mut)
+            .expect("emitter is removed")
+    }
+
+    pub(crate) fn emitters(&self) -> impl Iterator<Item = &EmitterState> {
+        self.emitters.items.iter().flatten()
     }
 
     pub(crate) fn mesh(&self, id: MeshId) -> &GpuMesh {

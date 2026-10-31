@@ -8,14 +8,17 @@
 //!   match under the lighting FLIP gate (D3). Only valid while no particle slot has been recycled.
 //! - [`Tier::Statistical`]: compared by [`ImageStats`] under the scenario's [`StatThresholds`].
 //!
-//! On every frame both sides must report the same alive-particle count (the CPU spawner is
-//! deterministic and the lifetimes are fixed, see [`Population`]).
+//! On every frame both sides must report the same spawn and alive-particle counts (the CPU
+//! spawner is deterministic and the lifetimes are fixed, see [`Population`]).
 //!
-//! The engine side lands with #13 (emitters); until then every particle scenario reports the
-//! engine as a known gap.
+//! The engine side is `render_engine::particles` ([`Emitter::engine`]).
 
 use render_engine::glam::{Vec3, Vec4};
-use render_engine::scene::{Camera, ShadowFilter, Tonemapping};
+use render_engine::particles::{
+    self, ColorBlend, ColorOverLife, Gradient, InitModifier, ParticleBlend, ShapeDimension,
+    Spawner, Value,
+};
+use render_engine::scene::{Ambient, Camera, Scene, ShadowFilter, ShadowMapSizes, Tonemapping};
 
 /// Fixed simulation timestep: exactly representable, so `k * DT` ages are exact in `f32`.
 pub const DT: f32 = 1.0 / 64.0;
@@ -122,6 +125,73 @@ pub struct Emitter {
     pub size: Vec<(f32, f32)>,
     /// Linear HDR colour and alpha over normalised age.
     pub color: Vec<(f32, Vec4)>,
+}
+
+impl Emitter {
+    /// The same emitter on render-engine: hanabi's modifiers in the order `bevy_side::
+    /// effect_asset` adds them (position, velocity, age, lifetime), so both draw the particle's
+    /// random stream in the same order.
+    pub fn engine(&self, seed: u32) -> particles::Emitter {
+        let velocity = match self.velocity {
+            Velocity::Radial { speed } => InitModifier::VelocitySphere {
+                center: self.position,
+                speed: Value::Const(speed),
+            },
+            Velocity::Jitter { base, spread } => InitModifier::Velocity(Value::Uniform {
+                min: base - spread,
+                max: base + spread,
+            }),
+        };
+        particles::Emitter {
+            capacity: self.capacity,
+            spawner: match self.spawn {
+                Spawn::Burst { count } => Spawner::once(count as f32),
+                Spawn::Rate { per_second } => Spawner::rate(per_second),
+            },
+            seed,
+            init: vec![
+                InitModifier::PositionSphere {
+                    center: self.position,
+                    radius: self.radius,
+                    dimension: ShapeDimension::Volume,
+                },
+                velocity,
+                InitModifier::Age(Value::Const(0.0)),
+                InitModifier::Lifetime(Value::Const(self.lifetime)),
+            ],
+            accel: self.gravity,
+            size_over_life: Some(Gradient::new(self.size.clone())),
+            color_over_life: Some(ColorOverLife {
+                gradient: Gradient::new(self.color.clone()),
+                blend: ColorBlend::Overwrite,
+            }),
+            roundness: 1.0,
+            blend: ParticleBlend::Add,
+            active: false,
+        }
+    }
+}
+
+impl ParticleScenario {
+    /// The scene around the emitters: the camera over the clear colour, nothing lit.
+    pub fn scene(&self) -> Scene {
+        Scene {
+            camera: self.camera,
+            clear_color: self.clear_color,
+            sun: None,
+            moon: None,
+            sky: None,
+            ambient: Ambient {
+                color: Vec3::ONE,
+                brightness: 0.0,
+            },
+            point_lights: vec![],
+            spot_lights: vec![],
+            shadow_maps: ShadowMapSizes::default(),
+            environment: None,
+            fog: None,
+        }
+    }
 }
 
 pub fn all() -> Vec<ParticleScenario> {

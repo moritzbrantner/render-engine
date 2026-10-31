@@ -4043,6 +4043,7 @@ dependencies = [
  "glam 0.34.1",
  "ktx2",
  "pollster",
+ "rand",
  "ruzstd",
  "wgpu",
 ]

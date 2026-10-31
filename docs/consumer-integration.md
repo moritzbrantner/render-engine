@@ -11,7 +11,7 @@ the mmorpg native client (`crates/mmorpg-client`), the first consumer.
 | Type | Lifetime | Role |
 | --- | --- | --- |
 | `renderer::Renderer` | one per device and output format | pipelines, samplers, tone-mapping LUTs |
-| `world::World` | one per device, for as long as the content lives | meshes, textures and materials behind stable handles (`MeshId`, `TextureId`, `MaterialId`) |
+| `world::World` | one per device, for as long as the content lives | meshes, textures, materials and particle emitters behind stable handles (`MeshId`, `TextureId`, `MaterialId`, `EmitterId`) |
 | `renderer::Viewport` | one per output surface | the engine's targets for one size, plus per-frame buffers (instances, lights, shadow maps) that it reuses and grows |
 | `scene::Scene` | rebuilt every frame (plain values) | camera, sun, moon, sky, point and spot lights, ambient light, environment map, fog |
 | `world::Instance` | a list rebuilt every frame | `{ mesh, material, world_from_local }`, one per drawn copy |
@@ -159,6 +159,51 @@ frame.present();
   oracle use it. For GPU timing, pass `FrameTimestamps { query_set, first }` to `encode`: it
   writes a begin and an end timestamp on each pass (`viewport.timestamp_queries()` in all);
   the frame's GPU time is the sum of the spans.
+
+## Particles
+
+Emitters live in the `World` next to the meshes, under `EmitterId` handles. The game steps them
+at its simulation rate; every `prepare` draws all alive particles as camera-facing quads in the
+main pass, after the blended instances.
+
+```rust
+use render_engine::particles::*;
+
+let sparks = world.add_emitter(&Emitter {
+    capacity: 256,
+    spawner: Spawner::rate(96.0),            // or Spawner::once(n), Spawner::burst(n, period)
+    seed: 0x5eed_0001,
+    // Applied in order; each random value draws from the particle's stream in this order.
+    init: vec![
+        InitModifier::PositionSphere { center: Vec3::ZERO, radius: 0.05, dimension: ShapeDimension::Volume },
+        InitModifier::Velocity(Value::Uniform { min: Vec3::new(-0.4, 5.6, -0.8), max: Vec3::new(1.2, 6.4, 0.8) }),
+        InitModifier::Lifetime(Value::Const(1.5)),
+    ],
+    accel: Vec3::new(0.0, -9.81, 0.0),
+    size_over_life: Some(Gradient::new(vec![(0.0, 0.12), (1.0, 0.04)])),
+    color_over_life: Some(ColorOverLife {
+        gradient: Gradient::new(vec![(0.0, Vec4::new(1.5, 2.5, 4.0, 1.0)), (1.0, Vec4::new(0.1, 0.3, 0.8, 0.0))]),
+        blend: ColorBlend::Overwrite,
+    }),
+    roundness: 1.0,                          // 0 = square quads, 1 = discs
+    blend: ParticleBlend::Add,               // or ParticleBlend::Alpha (sorted back to front)
+    active: true,
+});
+world.set_emitter_transform(sparks, torch.world_from_local);   // where new particles spawn
+
+// In the game loop, once per simulation tick:
+world.step_particles(dt);
+```
+
+- **Units.** Positions in metres, velocities in m/s, lifetimes in seconds. Colours are linear
+  HDR and are written as they are, without the camera's exposure (like hanabi's).
+- **Stopping.** `set_emitter(id, &Emitter { active: false, ..desc })` stops spawning and lets
+  alive particles finish; `remove_emitter` drops them at once.
+- **Statistics.** `world.emitter_stats(id)` has the last step's spawn count and alive count.
+- **Simulation space.** Particles live in world space: moving the emitter moves where new ones
+  spawn, not the ones already alive.
+- **Cost.** The simulation runs on the CPU, which suits thousands of particles; GPU simulation
+  for 100k is #14.
 
 ## Not covered yet
 

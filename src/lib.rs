@@ -1,4 +1,4 @@
-//! render-engine: lighting (and later particles) for the owner's games, built on wgpu and
+//! render-engine: lighting and particles for the owner's games, built on wgpu and
 //! measured against Bevy. See `docs/technical-decisions.md` and, for consumers,
 //! `docs/consumer-integration.md`.
 //!
@@ -44,6 +44,8 @@ pub mod headless;
 pub mod ktx;
 pub mod material;
 pub mod mesh;
+mod particle_pass;
+pub mod particles;
 pub mod renderer;
 pub mod scene;
 mod sky;
