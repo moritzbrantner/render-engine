@@ -152,7 +152,7 @@ fn main() -> ExitCode {
     let scenarios = scenarios::all();
     if o.list {
         for s in &scenarios {
-            println!("{:<20} {}", s.name, s.capability);
+            println!("{:<24} {}", s.name, s.capability);
         }
         return ExitCode::SUCCESS;
     }
@@ -190,7 +190,7 @@ fn main() -> ExitCode {
         }
     );
     println!(
-        "{:<16} {:<20} {:>9} {:>9} {:>12} {:>12} {:>7}  result",
+        "{:<24} {:<20} {:>9} {:>9} {:>12} {:>12} {:>7}  result",
         "scenario", "capability", "FLIP mean", "FLIP p99", "engine ms", "bevy ms", "ratio"
     );
 
@@ -204,7 +204,7 @@ fn main() -> ExitCode {
         let (bevy_png, bevy_ms, spans) = match bevy_side::run_in_child(s.name, &o.out, frames) {
             Ok(r) => r,
             Err(e) => {
-                println!("{:<16} {:<20} bevy failed: {e}", s.name, s.capability);
+                println!("{:<24} {:<20} bevy failed: {e}", s.name, s.capability);
                 failed = true;
                 continue;
             }
@@ -213,7 +213,7 @@ fn main() -> ExitCode {
             Ok(i) => i.to_rgba8(),
             Err(e) => {
                 println!(
-                    "{:<16} {:<20} cannot read {}: {e}",
+                    "{:<24} {:<20} cannot read {}: {e}",
                     s.name,
                     s.capability,
                     bevy_png.display()
@@ -227,7 +227,7 @@ fn main() -> ExitCode {
             Ok(f) => f,
             Err(e) => {
                 println!(
-                    "{:<16} {:<20} render-engine failed: {e}",
+                    "{:<24} {:<20} render-engine failed: {e}",
                     s.name, s.capability
                 );
                 failed = true;
@@ -235,7 +235,7 @@ fn main() -> ExitCode {
             }
         };
         if (bevy.width(), bevy.height()) != (ours.width, ours.height) {
-            println!("{:<16} {:<20} size mismatch", s.name, s.capability);
+            println!("{:<24} {:<20} size mismatch", s.name, s.capability);
             failed = true;
             continue;
         }
@@ -282,7 +282,7 @@ fn main() -> ExitCode {
             _ => "-".into(),
         };
         println!(
-            "{:<16} {:<20} {:>9.4} {:>9.4} {:>12} {:>12} {:>7}  {result}",
+            "{:<24} {:<20} {:>9.4} {:>9.4} {:>12} {:>12} {:>7}  {result}",
             s.name,
             s.capability,
             f.mean,

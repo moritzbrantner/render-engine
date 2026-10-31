@@ -10,8 +10,8 @@ use glam::{Quat, Vec2, Vec3};
 #[derive(Clone, Debug)]
 pub struct Scene {
     pub camera: Camera,
-    /// Linear RGB written where no geometry is drawn (Bevy `ClearColorConfig::Custom`). Not
-    /// tone mapped, as in Bevy.
+    /// Linear RGB written into the HDR frame where no geometry is drawn (Bevy
+    /// `ClearColorConfig::Custom`). Tone mapped with the frame but not exposed, as in Bevy.
     pub clear_color: Vec3,
     pub sun: Option<Sun>,
     pub ambient: Ambient,
@@ -30,6 +30,20 @@ pub struct Camera {
     pub ev100: f32,
     /// Bevy `ShadowFilteringMethod` on the camera.
     pub shadow_filter: ShadowFilter,
+    /// Bevy `Tonemapping` on an HDR camera (`Hdr`).
+    pub tonemapping: Tonemapping,
+}
+
+/// The display transform applied to the HDR frame (Bevy `Tonemapping`). The default is Bevy's.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Tonemapping {
+    /// Stephen Hill's ACES fit.
+    AcesFitted,
+    /// Tomasz Stachowiak's Tony McMapface (48³ LUT).
+    #[default]
+    TonyMcMapface,
+    /// Troy Sobotka's AgX with the default-contrast look (32³ LUT).
+    AgX,
 }
 
 impl Camera {

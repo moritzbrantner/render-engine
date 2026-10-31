@@ -16,7 +16,8 @@ and GPU frame time. See [technical decisions](docs/technical-decisions.md).
   Bevy counterpart.
 - **wgpu renderer:** cascaded sun shadows (Bevy's cascade fitting and defaults: up to 4
   cascades with blended overlap, Gaussian 13-tap or hardware 2×2 PCF filtering) and a forward
-  PBR pass (Filament/Bevy BRDF, 4× MSAA, ACES-fitted tone mapping). Same wgpu major as the mmorpg
+  PBR pass (Filament/Bevy BRDF, 4× MSAA) into an `Rgba16Float` HDR target, then a tone-mapping
+  pass with Bevy's operators and LUTs (Tony McMapface by default, AgX, ACES fitted). Same wgpu major as the mmorpg
   native client.
 - **Bevy as oracle:** `oracle/` renders every parity scenario on Bevy (`bevy_pbr`) and on
   render-engine, headless. It fails when mean FLIP > 0.005 or p99 FLIP > 0.05, or — on a GPU —

@@ -8,7 +8,7 @@
 use crate::scenarios::Scenario;
 use bevy::{
     app::{AppExit, ScheduleRunnerPlugin},
-    camera::{Exposure, RenderTarget},
+    camera::{Exposure, Hdr, RenderTarget},
     diagnostic::DiagnosticsStore,
     light::{
         CascadeShadowConfigBuilder, DirectionalLightShadowMap, GlobalAmbientLight,
@@ -27,7 +27,7 @@ use bevy::{
     },
     window::ExitCondition,
 };
-use render_engine::scene::{ShadowFilter, Shape};
+use render_engine::scene::{ShadowFilter, Shape, Tonemapping as EngineTonemapping};
 use std::{
     path::PathBuf,
     sync::{Arc, Mutex},
@@ -137,7 +137,12 @@ pub fn run(scenario: Scenario, timed_frames: u32) -> BevyRun {
                     ..default()
                 }),
                 Exposure { ev100: cam.ev100 },
-                Tonemapping::AcesFitted,
+                Hdr,
+                match cam.tonemapping {
+                    EngineTonemapping::AcesFitted => Tonemapping::AcesFitted,
+                    EngineTonemapping::TonyMcMapface => Tonemapping::TonyMcMapface,
+                    EngineTonemapping::AgX => Tonemapping::AgX,
+                },
                 DebandDither::Disabled,
                 Msaa::Sample4,
                 match cam.shadow_filter {

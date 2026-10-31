@@ -3,7 +3,7 @@
 // The BRDF follows Bevy 0.20 `bevy_pbr` (itself Filament): Burley diffuse, GGX distribution,
 // height-correlated Smith visibility, Schlick Fresnel with the f90 specular-occlusion trick, the
 // multiscatter energy compensation and the polynomial F_AB environment approximation for ambient
-// light. Output is ACES-fitted tone mapped linear colour; the sRGB target encodes it.
+// light. Output is exposed linear HDR colour; `tonemap.wgsl` maps it for display.
 
 const PI: f32 = 3.141592653589793;
 
@@ -128,29 +128,6 @@ fn F_AB(perceptual_roughness: f32, NdotV: f32) -> vec2<f32> {
 
 fn env_brdf_approx(f0: vec3<f32>, f_ab: vec2<f32>) -> vec3<f32> {
     return f0 * f_ab.x + f_ab.y;
-}
-
-fn RRTAndODTFit(v: vec3<f32>) -> vec3<f32> {
-    let a = v * (v + 0.0245786) - 0.000090537;
-    let b = v * (0.983729 * v + 0.4329510) + 0.238081;
-    return a / b;
-}
-
-fn aces_fitted(color: vec3<f32>) -> vec3<f32> {
-    let rgb_to_rrt = mat3x3<f32>(
-        vec3(0.59719, 0.35458, 0.04823),
-        vec3(0.07600, 0.90834, 0.01566),
-        vec3(0.02840, 0.13383, 0.83777),
-    );
-    let odt_to_rgb = mat3x3<f32>(
-        vec3(1.60475, -0.53108, -0.07367),
-        vec3(-0.10208, 1.10813, -0.00605),
-        vec3(-0.00327, -0.07276, 1.07602),
-    );
-    var c = color * rgb_to_rrt;
-    c = RRTAndODTFit(c);
-    c = c * odt_to_rgb;
-    return saturate(c);
 }
 
 fn sample_hardware(uv: vec2<f32>, depth: f32, layer: u32) -> f32 {
@@ -279,6 +256,5 @@ fn lit_fs(in: VertexOut) -> @location(0) vec4<f32> {
     let specular_occlusion = saturate(dot(F0, vec3(50.0 * 0.33)));
     let indirect = (diffuse_ambient + specular_ambient * specular_occlusion) * frame.ambient_color.rgb;
 
-    let color = frame.flags.x * (direct + indirect);
-    return vec4(aces_fitted(color), 1.0);
+    return vec4(frame.flags.x * (direct + indirect), 1.0);
 }
