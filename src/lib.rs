@@ -45,6 +45,7 @@ pub mod ktx;
 pub mod material;
 pub mod mesh;
 mod particle_pass;
+mod particle_sim;
 pub mod particles;
 pub mod renderer;
 pub mod scene;

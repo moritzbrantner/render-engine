@@ -276,3 +276,59 @@ fn sky_follows_the_time_of_day() {
     let top = pixel(&plain, w / 2, 0);
     assert!(top[2] > 150 && top[0] < 50, "clear colour again: {top:?}");
 }
+
+/// GPU particles: alive counts follow the spawns and fixed lifetimes (a particle spawned in a
+/// step is aged in it too), capacity caps a burst, slots are reused, and an emitter in front of
+/// the camera lights the frame.
+#[test]
+fn gpu_particles_spawn_age_die_and_draw() {
+    use render_engine::particles::*;
+    const DT: f32 = 1.0 / 64.0;
+    let emitter = |spawner, lifetime: f32, capacity| Emitter {
+        capacity,
+        spawner,
+        seed: 7,
+        init: vec![
+            InitModifier::PositionSphere {
+                center: Vec3::ZERO,
+                radius: 0.5,
+                dimension: ShapeDimension::Volume,
+            },
+            InitModifier::Lifetime(Value::Const(lifetime)),
+            InitModifier::Size(Value::Const(0.2)),
+            InitModifier::Color(Value::Const(Vec4::new(4.0, 0.0, 0.0, 1.0))),
+        ],
+        accel: Vec3::ZERO,
+        size_over_life: None,
+        color_over_life: None,
+        roundness: 0.0,
+        blend: ParticleBlend::Add,
+        active: true,
+    };
+    let gpu = Headless::new().expect("a wgpu adapter");
+    let mut world = World::new(gpu.renderer());
+    let rate = world.add_emitter(&emitter(Spawner::rate(64.0), 3.0 * DT, 100));
+    let burst = world.add_emitter(&emitter(Spawner::once(10.0), 2.0 * DT, 8));
+    let mut s = scene(false, Tonemapping::TonyMcMapface);
+    s.sun = None;
+    s.clear_color = Vec3::ZERO;
+    let (w, h) = (64, 64);
+    let mut viewport = Viewport::new(gpu.renderer(), w, h);
+    let mut alive = Vec::new();
+    for step in 0..5 {
+        let mut encoder = gpu.device.create_command_encoder(&Default::default());
+        world.step_particles(&mut encoder, DT, None);
+        gpu.queue.submit([encoder.finish()]);
+        if step == 0 {
+            assert_eq!(world.spawn_count(burst), 10);
+            let frame = gpu.render(&mut viewport, &world, &s, &[]).unwrap();
+            let lit = frame.rgba.chunks(4).filter(|p| p[0] > 50).count();
+            assert!(lit > 20, "particles light {lit} pixels");
+        }
+        let counts = world.read_alive_particles();
+        let of = |id| counts.iter().find(|c| c.0 == id).unwrap().1;
+        alive.push((of(rate), of(burst)));
+    }
+    // Ages DT, 2 DT, then reaped at 3 DT; the burst is capped at 8 and dies after two steps.
+    assert_eq!(alive, [(1, 8), (2, 0), (2, 0), (2, 0), (2, 0)]);
+}

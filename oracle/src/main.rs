@@ -146,7 +146,7 @@ fn bevy_child(name: &str, o: &Options) -> Result<(), String> {
 fn bevy_particles_child(s: particles::ParticleScenario, o: &Options) -> Result<(), String> {
     let (name, w, h) = (s.name, s.width, s.height);
     let captures = s.captures.clone();
-    let run = bevy_side::run_particles(s, o.variant);
+    let run = bevy_side::run_particles(s, o.variant, o.frames);
     std::fs::create_dir_all(&o.out).map_err(|e| e.to_string())?;
     let plate = run.plate.ok_or("Bevy produced no plate")?;
     save_png(&o.out.join(format!("{name}.plate.bevy.png")), w, h, &plate)?;
@@ -163,7 +163,7 @@ fn bevy_particles_child(s: particles::ParticleScenario, o: &Options) -> Result<(
             rgba,
         )?;
     }
-    let json = serde_json::json!({ "spawns": run.spawns, "gpu_ms": run.gpu_ms, "spans": run.spans, "first_spawn_update": run.first_spawn_update });
+    let json = serde_json::json!({ "spawns": run.spawns, "gpu_ms": run.gpu_ms, "sim_ms": run.sim_ms, "spans": run.spans, "first_spawn_update": run.first_spawn_update });
     std::fs::write(o.out.join(format!("{name}.bevy.json")), json.to_string())
         .map_err(|e| e.to_string())
 }
@@ -249,7 +249,12 @@ fn run_engine_particles(
         .enumerate()
         .map(|(i, e)| {
             let desc = e.engine(s.seed.wrapping_add(i as u32));
-            (world.add_emitter(&desc), desc)
+            let id = world.add_emitter(&desc);
+            world.set_emitter_transform(
+                id,
+                render_engine::glam::Mat4::from_translation(e.translation),
+            );
+            (id, desc)
         })
         .collect();
     let scene = s.scene();
@@ -258,8 +263,13 @@ fn run_engine_particles(
         .render(&mut viewport, &world, &scene, &[])
         .map_err(|e| e.to_string())?
         .rgba;
+    let step = |world: &mut render_engine::world::World| {
+        let mut encoder = gpu.device.create_command_encoder(&Default::default());
+        world.step_particles(&mut encoder, particles::DT, None);
+        gpu.queue.submit([encoder.finish()]);
+    };
     for _ in 1..first_spawn_update {
-        world.step_particles(particles::DT);
+        step(&mut world);
     }
     for (id, desc) in &emitters {
         world.set_emitter(
@@ -280,11 +290,12 @@ fn run_engine_particles(
         viewport,
     };
     for frame in 1..=last {
-        out.world.step_particles(particles::DT);
+        step(&mut out.world);
+        let alive = out.world.read_alive_particles();
         for (i, (id, _)) in emitters.iter().enumerate() {
-            let stats = out.world.emitter_stats(*id);
-            out.spawn_counts[i].push(stats.spawn_count);
-            out.alive[i].push(stats.alive);
+            out.spawn_counts[i].push(out.world.spawn_count(*id));
+            let n = alive.iter().find(|a| a.0 == *id).map_or(0, |a| a.1);
+            out.alive[i].push(n);
         }
         if s.captures.iter().any(|c| c.frame == frame) {
             let f = gpu
@@ -310,7 +321,8 @@ fn particle_scenarios(
         .iter()
         .filter(|s| o.only.is_empty() || o.only.iter().any(|n| n == s.name))
     {
-        let run = match bevy_side::run_particles_in_child(s, &o.out, Default::default()) {
+        let timed = if o.timing { o.frames } else { 0 };
+        let run = match bevy_side::run_particles_in_child(s, &o.out, Default::default(), timed) {
             Ok(r) => r,
             Err(e) => {
                 println!("{:<24} {:<20} bevy failed: {e}", s.name, "particles");
@@ -345,27 +357,61 @@ fn particle_scenarios(
         };
         write(format!("{}.plate.engine.png", s.name), &ours.plate);
 
-        // GPU time of the frame after the last capture; Bevy's is the median over its run.
+        // GPU time of simulation plus rendering, both sides stepping on from the last capture:
+        // render-engine's frames each step the world (`particle_dt`), Bevy's are the frames
+        // after its last capture, the render diagnostic spans plus hanabi's compute passes
+        // (`HanabiTimer`). Rounds alternate as for lighting; each side keeps its fastest.
+        let bevy_round = |run: &bevy_side::ParticleRun| {
+            Some((
+                median(&run.gpu_ms)? + median(&run.sim_ms)?,
+                median(&run.sim_ms)?,
+            ))
+        };
+        let mut bevy_rounds = vec![bevy_round(&run)];
         let mut engine_rounds = Vec::new();
+        let fastest_pair = |rounds: &[Option<(f64, f64)>]| {
+            rounds
+                .iter()
+                .flatten()
+                .copied()
+                .reduce(|a, b| if b.0 < a.0 { b } else { a })
+        };
+        let is_slow = |e: Option<(f64, f64)>, b: Option<(f64, f64)>| matches!((e, b), (Some(e), Some(b)) if e.0 > b.0 * GPU_MARGIN);
         while o.timing && engine_rounds.len() < (TIMING_ROUNDS + RETRIES) as usize {
             engine_rounds.push(
                 gpu.gpu_frame_times(
                     &mut ours.viewport,
-                    &ours.world,
+                    &mut ours.world,
                     &s.scene(),
                     &[],
                     o.frames as usize,
+                    Some(particles::DT),
                 )
                 .ok()
-                .and_then(|t| median(&t)),
+                .and_then(|t| Some((median(&t.total)?, median(&t.particles)?))),
             );
-            if !gate_timing {
+            let n = engine_rounds.len() as u32;
+            let more = gate_timing
+                && (n < TIMING_ROUNDS
+                    || (n < TIMING_ROUNDS + RETRIES
+                        && is_slow(fastest_pair(&engine_rounds), fastest_pair(&bevy_rounds))));
+            if !more {
                 break;
             }
+            match bevy_side::run_particles_in_child(s, &o.out, Default::default(), timed) {
+                Ok(r) => bevy_rounds.push(bevy_round(&r)),
+                Err(_) => break,
+            }
         }
-        let engine_ms = fastest(&engine_rounds);
-        let bevy_ms = if o.timing { median(&run.gpu_ms) } else { None };
-        let slow = matches!((engine_ms, bevy_ms), (Some(e), Some(b)) if e > b * GPU_MARGIN);
+        let engine_pair = fastest_pair(&engine_rounds);
+        let bevy_pair = if o.timing {
+            fastest_pair(&bevy_rounds)
+        } else {
+            None
+        };
+        let (engine_ms, bevy_ms) = (engine_pair.map(|p| p.0), bevy_pair.map(|p| p.0));
+        let (engine_sim_ms, bevy_sim_ms) = (engine_pair.map(|p| p.1), bevy_pair.map(|p| p.1));
+        let slow = is_slow(engine_pair, bevy_pair);
         let timing_missing = gate_timing && (engine_ms.is_none() || bevy_ms.is_none());
         let fmt = |v: Option<f64>| v.map_or("-".to_string(), |v| format!("{v:.3}"));
         let ratio = match (engine_ms, bevy_ms) {
@@ -408,7 +454,7 @@ fn particle_scenarios(
                 "ok".to_string()
             };
             println!(
-                "{:<24} {:<20} {:>9.4} {:>9.4} {:>12} {:>12} {:>7}  {result}; {} tier, alive {alive}, stats {:.3}/{:.3}/{:.3}",
+                "{:<24} {:<20} {:>9.4} {:>9.4} {:>12} {:>12} {:>7}  {result}; {} tier, alive {alive}, stats {:.3}/{:.3}/{:.3}, simulation {} vs {} ms",
                 format!("{}@{}", s.name, c.label()),
                 "particles",
                 cmp.flip.mean,
@@ -420,6 +466,8 @@ fn particle_scenarios(
                 cmp.stats.coverage,
                 cmp.stats.spatial,
                 cmp.stats.colour,
+                fmt(engine_sim_ms),
+                fmt(bevy_sim_ms),
             );
             captures.push(serde_json::json!({
                 "label": c.label(),
@@ -477,7 +525,10 @@ fn particle_scenarios(
             "population_passed": population_ok,
             "engine_gpu_ms": engine_ms,
             "bevy_gpu_ms": bevy_ms,
+            "engine_sim_ms": engine_sim_ms,
+            "bevy_sim_ms": bevy_sim_ms,
             "timing_rounds": engine_rounds.len(),
+            "bevy_timing_rounds": bevy_rounds.len(),
             "bevy_spans": run.spans,
             "result": result,
             "passed": passed,
@@ -509,7 +560,7 @@ fn calibrate(o: &Options) -> ExitCode {
         .filter(|s| o.only.is_empty() || o.only.iter().any(|n| n == s.name))
     {
         let dir = |tag: &str| o.out.join("calibrate").join(tag);
-        let base = match bevy_side::run_particles_in_child(s, &dir("base"), Default::default()) {
+        let base = match bevy_side::run_particles_in_child(s, &dir("base"), Default::default(), 0) {
             Ok(r) => r,
             Err(e) => {
                 eprintln!("{}: {e}", s.name);
@@ -535,7 +586,7 @@ fn calibrate(o: &Options) -> ExitCode {
         ));
         for (tag, variant) in variants {
             let tag = tag.as_str();
-            let run = match bevy_side::run_particles_in_child(s, &dir(tag), variant) {
+            let run = match bevy_side::run_particles_in_child(s, &dir(tag), variant, 0) {
                 Ok(r) => r,
                 Err(e) => {
                     eprintln!("{} {tag}: {e}", s.name);
@@ -718,7 +769,7 @@ fn main() -> ExitCode {
                 continue;
             }
         };
-        let (world, instances) = content::upload(gpu.renderer(), &s.assets, &s.objects);
+        let (mut world, instances) = content::upload(gpu.renderer(), &s.assets, &s.objects);
         let mut viewport = Viewport::new(gpu.renderer(), s.width, s.height);
         let ours = match gpu.render(&mut viewport, &world, &s.scene, &instances) {
             Ok(f) => f,
@@ -758,13 +809,14 @@ fn main() -> ExitCode {
             engine_rounds.push(
                 gpu.gpu_frame_times(
                     &mut viewport,
-                    &world,
+                    &mut world,
                     &s.scene,
                     &instances,
                     o.frames as usize,
+                    None,
                 )
                 .ok()
-                .and_then(|t| median(&t)),
+                .and_then(|t| median(&t.total)),
             );
             let n = engine_rounds.len() as u32;
             let more = gate_timing

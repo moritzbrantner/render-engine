@@ -1,6 +1,7 @@
 // Particles as camera-facing quads (bevy_hanabi's render pass with `OrientMode::
-// ParallelCameraDepthPlane` and its default unit quad), one instance per particle. Size and colour
-// over life are evaluated on the CPU (`particles.rs`); the round mask is hanabi's `RoundModifier`.
+// ParallelCameraDepthPlane` and its default unit quad), one instance per alive particle. The
+// simulation's update pass evaluates size and colour over life (`particle_sim.wgsl`); the round
+// mask is hanabi's `RoundModifier`.
 
 struct View {
     clip_from_world: mat4x4<f32>,
@@ -9,19 +10,22 @@ struct View {
     up: vec4<f32>,
 }
 
+struct Emitter {
+    roundness: f32,
+}
+
 @group(0) @binding(0) var<uniform> view: View;
+@group(0) @binding(1) var<uniform> emitter: Emitter;
 
 struct Instance {
     @location(0) position_size: vec4<f32>,
     @location(1) color: vec4<f32>,
-    @location(2) roundness: f32,
 }
 
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) color: vec4<f32>,
     @location(1) uv: vec2<f32>,
-    @location(2) @interpolate(flat) roundness: f32,
 }
 
 @vertex
@@ -38,14 +42,13 @@ fn vertex(@builtin(vertex_index) vertex_index: u32, instance: Instance) -> Verte
     out.position = view.clip_from_world * vec4<f32>(world, 1.0);
     out.color = instance.color;
     out.uv = vec2(corner.x + 0.5, 0.5 - corner.y);
-    out.roundness = instance.roundness;
     return out;
 }
 
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
-    if (in.roundness > 0.0) {
-        let n = 2.0 / in.roundness;
+    if (emitter.roundness > 0.0) {
+        let n = 2.0 / emitter.roundness;
         if (pow(abs(1.0 - 2.0 * in.uv.x), n) + pow(abs(1.0 - 2.0 * in.uv.y), n) > 1.0) {
             discard;
         }
