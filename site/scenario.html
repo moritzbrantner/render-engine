@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Scenario · render-engine vs Bevy</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&display=swap">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="wrap bar">
+    <a class="brand" href="./">render-engine</a>
+    <nav><a href="./#gpu-time">GPU time</a><a href="https://github.com/moritzbrantner/render-engine/blob/main/docs/technical-decisions.md">Decisions</a><button class="theme" type="button">Theme</button></nav>
+  </div>
+  <main></main>
+  <script type="module">
+    import { load, theme, renderScenario } from './app.js';
+    theme();
+    renderScenario(await load());
+  </script>
+</body>
+</html>

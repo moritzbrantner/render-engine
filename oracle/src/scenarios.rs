@@ -16,12 +16,82 @@ pub struct Scenario {
     pub name: &'static str,
     /// Capability the scenario covers (an issue/doc label, printed by `--list`).
     pub capability: &'static str,
+    /// Feature group (report filter, PR and decision-record links).
+    pub feature: Feature,
     pub width: u32,
     pub height: u32,
     pub scene: Scene,
     pub objects: Vec<MeshInstance>,
     /// Mesh and texture data the objects refer to.
     pub assets: Assets,
+}
+
+/// Feature groups of the parity scenarios. The report page filters by them and links each one to
+/// the PRs that introduced it and to its decision record.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Feature {
+    Shadows,
+    Tonemap,
+    Ibl,
+    Fog,
+    PointSpot,
+    TexturedProps,
+    Sky,
+}
+
+impl Feature {
+    pub const ALL: [Feature; 7] = [
+        Feature::Shadows,
+        Feature::Tonemap,
+        Feature::Ibl,
+        Feature::Fog,
+        Feature::PointSpot,
+        Feature::TexturedProps,
+        Feature::Sky,
+    ];
+
+    pub fn id(self) -> &'static str {
+        match self {
+            Feature::Shadows => "shadows",
+            Feature::Tonemap => "tonemap",
+            Feature::Ibl => "ibl",
+            Feature::Fog => "fog",
+            Feature::PointSpot => "point_spot",
+            Feature::TexturedProps => "textured_props",
+            Feature::Sky => "sky",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Feature::Shadows => "Sun shadows",
+            Feature::Tonemap => "Tone mapping",
+            Feature::Ibl => "IBL",
+            Feature::Fog => "Fog",
+            Feature::PointSpot => "Point / spot",
+            Feature::TexturedProps => "Textured props",
+            Feature::Sky => "Sky",
+        }
+    }
+
+    /// render-engine PRs that introduced the feature.
+    pub fn prs(self) -> &'static [u32] {
+        match self {
+            Feature::Shadows => &[18],
+            Feature::Tonemap => &[19, 23],
+            Feature::Ibl => &[20],
+            Feature::Fog => &[21],
+            Feature::PointSpot => &[24],
+            Feature::TexturedProps => &[25],
+            Feature::Sky => &[26],
+        }
+    }
+
+    /// Heading anchor of the decision record in `docs/technical-decisions.md`: D5 pins every
+    /// scenario's Bevy configuration, one paragraph per feature.
+    pub fn decision(self) -> &'static str {
+        "d5--pinned-bevy-configuration-per-scenario"
+    }
 }
 
 pub fn all() -> Vec<Scenario> {
@@ -81,6 +151,7 @@ fn sky_day_cycle() -> [Scenario; 4] {
     views.map(|(name, hours, moon, ev100)| Scenario {
         name,
         capability: "time-of-day sky (atmosphere)",
+        feature: Feature::Sky,
         width: 1280,
         height: 720,
         objects: objects.clone(),
@@ -238,6 +309,7 @@ fn textured_props() -> Scenario {
     Scenario {
         name: "textured_props",
         capability: "consumer meshes + textured StandardMaterial",
+        feature: Feature::TexturedProps,
         width: 1280,
         height: 720,
         scene,
@@ -417,6 +489,7 @@ fn point_spot() -> [Scenario; 3] {
         Scenario {
             name: "point_spot",
             capability: "point + spot lights, cube + spot shadows (Gaussian)",
+            feature: Feature::PointSpot,
             width: 1280,
             height: 720,
             scene,
@@ -426,6 +499,7 @@ fn point_spot() -> [Scenario; 3] {
         Scenario {
             name: "point_spot_hardware",
             capability: "point + spot lights, cube + spot shadows (2×2 PCF)",
+            feature: Feature::PointSpot,
             width: 1280,
             height: 720,
             scene: hardware,
@@ -435,6 +509,7 @@ fn point_spot() -> [Scenario; 3] {
         Scenario {
             name: "point_spot_soft",
             capability: "point + spot lights, soft shadows (PCSS)",
+            feature: Feature::PointSpot,
             width: 1280,
             height: 720,
             scene: soft,
@@ -546,6 +621,7 @@ fn fog_modes() -> Vec<Scenario> {
         out.push(Scenario {
             name,
             capability: "distance fog",
+            feature: Feature::Fog,
             width: 1280,
             height: 720,
             scene: scene.clone(),
@@ -560,6 +636,7 @@ fn fog_modes() -> Vec<Scenario> {
         out.push(Scenario {
             name: name_sun,
             capability: "distance fog + sun inscattering",
+            feature: Feature::Fog,
             width: 1280,
             height: 720,
             scene,
@@ -652,6 +729,7 @@ fn ibl_materials() -> [Scenario; 2] {
         Scenario {
             name: "ibl_materials",
             capability: "environment map (IBL)",
+            feature: Feature::Ibl,
             width: 1280,
             height: 720,
             scene,
@@ -661,6 +739,7 @@ fn ibl_materials() -> [Scenario; 2] {
         Scenario {
             name: "ibl_materials_sun",
             capability: "IBL + sun + shadow",
+            feature: Feature::Ibl,
             width: 1280,
             height: 720,
             scene: sunlit,
@@ -687,6 +766,7 @@ fn tonemap_range() -> [Scenario; 4] {
         let mut s = sun_shadows();
         s.name = name;
         s.capability = "HDR + tone mapping";
+        s.feature = Feature::Tonemap;
         s.scene.camera.ev100 = ev100;
         s.scene.camera.tonemapping = tonemapping;
         s
@@ -741,6 +821,7 @@ fn sun_shadows() -> Scenario {
     Scenario {
         name: "sun_shadows",
         capability: "sun+shadow+ambient",
+        feature: Feature::Shadows,
         width: 1280,
         height: 720,
         objects: meshes,
@@ -828,6 +909,7 @@ fn sun_cascades() -> Scenario {
     Scenario {
         name: "sun_cascades",
         capability: "sun+cascaded shadows (Gaussian)",
+        feature: Feature::Shadows,
         width: 1280,
         height: 720,
         objects: meshes,
