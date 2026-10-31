@@ -1,0 +1,384 @@
+{
+  "commit": "18b769cbc8f6ef9a604b3e6bcb221bc1b0c08b47",
+  "date": "2026-10-31",
+  "adapter": "NVIDIA GeForce RTX 3060 Ti",
+  "features": [
+    {
+      "decision": "d5--pinned-bevy-configuration-per-scenario",
+      "id": "shadows",
+      "label": "Sun shadows",
+      "prs": [
+        18
+      ]
+    },
+    {
+      "decision": "d5--pinned-bevy-configuration-per-scenario",
+      "id": "tonemap",
+      "label": "Tone mapping",
+      "prs": [
+        19,
+        23
+      ]
+    },
+    {
+      "decision": "d5--pinned-bevy-configuration-per-scenario",
+      "id": "ibl",
+      "label": "IBL",
+      "prs": [
+        20
+      ]
+    },
+    {
+      "decision": "d5--pinned-bevy-configuration-per-scenario",
+      "id": "fog",
+      "label": "Fog",
+      "prs": [
+        21
+      ]
+    },
+    {
+      "decision": "d5--pinned-bevy-configuration-per-scenario",
+      "id": "point_spot",
+      "label": "Point / spot",
+      "prs": [
+        24
+      ]
+    },
+    {
+      "decision": "d5--pinned-bevy-configuration-per-scenario",
+      "id": "textured_props",
+      "label": "Textured props",
+      "prs": [
+        25
+      ]
+    },
+    {
+      "decision": "d5--pinned-bevy-configuration-per-scenario",
+      "id": "sky",
+      "label": "Sky",
+      "prs": [
+        26
+      ]
+    }
+  ],
+  "flip_mean_max": 0.004999999888241291,
+  "flip_p99_max": 0.05000000074505806,
+  "frames": 200,
+  "gpu_gate": true,
+  "gpu_margin": 1.1,
+  "scenarios": [
+    {
+      "bevy_gpu_ms": 0.21196799999999996,
+      "capability": "sun+shadow+ambient",
+      "engine_gpu_ms": 0.132096,
+      "feature": "shadows",
+      "flip_mean": 0.000003844148977805162,
+      "flip_p99": 0.0,
+      "height": 720,
+      "passed": true,
+      "result": "ok",
+      "scenario": "sun_shadows",
+      "width": 1280
+    },
+    {
+      "bevy_gpu_ms": 0.26624000000000003,
+      "capability": "sun+cascaded shadows (Gaussian)",
+      "engine_gpu_ms": 0.915456,
+      "feature": "shadows",
+      "flip_mean": 0.0000073305518526467495,
+      "flip_p99": 0.00005287070234771818,
+      "height": 720,
+      "passed": false,
+      "result": "SLOWER THAN BEVY (> 1.10×)",
+      "scenario": "sun_cascades",
+      "width": 1280
+    },
+    {
+      "bevy_gpu_ms": 0.211968,
+      "capability": "HDR + tone mapping",
+      "engine_gpu_ms": 0.134144,
+      "feature": "tonemap",
+      "flip_mean": 0.0000028582992399606155,
+      "flip_p99": 0.0,
+      "height": 720,
+      "passed": true,
+      "result": "ok",
+      "scenario": "tonemap_range_noon_tony",
+      "width": 1280
+    },
+    {
+      "bevy_gpu_ms": 0.19763199999999995,
+      "capability": "HDR + tone mapping",
+      "engine_gpu_ms": 0.123904,
+      "feature": "tonemap",
+      "flip_mean": 0.0000017984119722314063,
+      "flip_p99": 0.0,
+      "height": 720,
+      "passed": true,
+      "result": "ok",
+      "scenario": "tonemap_range_noon_agx",
+      "width": 1280
+    },
+    {
+      "bevy_gpu_ms": 0.2048,
+      "capability": "HDR + tone mapping",
+      "engine_gpu_ms": 0.129024,
+      "feature": "tonemap",
+      "flip_mean": 9.370957627652388E-7,
+      "flip_p99": 0.0,
+      "height": 720,
+      "passed": true,
+      "result": "ok",
+      "scenario": "tonemap_range_dim_tony",
+      "width": 1280
+    },
+    {
+      "bevy_gpu_ms": 0.21503999999999995,
+      "capability": "HDR + tone mapping",
+      "engine_gpu_ms": 0.137216,
+      "feature": "tonemap",
+      "flip_mean": 0.0000010645352404026198,
+      "flip_p99": 0.0,
+      "height": 720,
+      "passed": true,
+      "result": "ok",
+      "scenario": "tonemap_range_dim_agx",
+      "width": 1280
+    },
+    {
+      "bevy_gpu_ms": 0.27647999999999995,
+      "capability": "environment map (IBL)",
+      "engine_gpu_ms": 0.246784,
+      "feature": "ibl",
+      "flip_mean": 2.7748174602493236E-7,
+      "flip_p99": 0.0,
+      "height": 720,
+      "passed": true,
+      "result": "ok",
+      "scenario": "ibl_materials",
+      "width": 1280
+    },
+    {
+      "bevy_gpu_ms": 0.330752,
+      "capability": "IBL + sun + shadow",
+      "engine_gpu_ms": 0.200704,
+      "feature": "ibl",
+      "flip_mean": 0.0000031299989586841548,
+      "flip_p99": 0.0,
+      "height": 720,
+      "passed": true,
+      "result": "ok",
+      "scenario": "ibl_materials_sun",
+      "width": 1280
+    },
+    {
+      "bevy_gpu_ms": 0.252928,
+      "capability": "distance fog",
+      "engine_gpu_ms": 0.193536,
+      "feature": "fog",
+      "flip_mean": 0.0000051014922064496204,
+      "flip_p99": 0.00003344588549225591,
+      "height": 720,
+      "passed": true,
+      "result": "ok",
+      "scenario": "fog_linear",
+      "width": 1280
+    },
+    {
+      "bevy_gpu_ms": 0.300032,
+      "capability": "distance fog + sun inscattering",
+      "engine_gpu_ms": 0.242688,
+      "feature": "fog",
+      "flip_mean": 0.00002046868576144334,
+      "flip_p99": 0.0004552674072328955,
+      "height": 720,
+      "passed": true,
+      "result": "ok",
+      "scenario": "fog_linear_sun",
+      "width": 1280
+    },
+    {
+      "bevy_gpu_ms": 0.263168,
+      "capability": "distance fog",
+      "engine_gpu_ms": 0.858112,
+      "feature": "fog",
+      "flip_mean": 0.00000431895614383393,
+      "flip_p99": 0.0,
+      "height": 720,
+      "passed": false,
+      "result": "SLOWER THAN BEVY (> 1.10×)",
+      "scenario": "fog_exponential",
+      "width": 1280
+    },
+    {
+      "bevy_gpu_ms": 0.29388800000000004,
+      "capability": "distance fog + sun inscattering",
+      "engine_gpu_ms": 0.237568,
+      "feature": "fog",
+      "flip_mean": 0.00002927388959506061,
+      "flip_p99": 0.0006574657163582742,
+      "height": 720,
+      "passed": true,
+      "result": "ok",
+      "scenario": "fog_exponential_sun",
+      "width": 1280
+    },
+    {
+      "bevy_gpu_ms": 0.253952,
+      "capability": "distance fog",
+      "engine_gpu_ms": 0.193536,
+      "feature": "fog",
+      "flip_mean": 0.000006067986305424711,
+      "flip_p99": 0.000047741050366312265,
+      "height": 720,
+      "passed": true,
+      "result": "ok",
+      "scenario": "fog_exponential_squared",
+      "width": 1280
+    },
+    {
+      "bevy_gpu_ms": 0.305152,
+      "capability": "distance fog + sun inscattering",
+      "engine_gpu_ms": 0.994304,
+      "feature": "fog",
+      "flip_mean": 0.000020094606952625327,
+      "flip_p99": 0.00041387349483557045,
+      "height": 720,
+      "passed": false,
+      "result": "SLOWER THAN BEVY (> 1.10×)",
+      "scenario": "fog_exponential_squared_sun",
+      "width": 1280
+    },
+    {
+      "bevy_gpu_ms": 0.252928,
+      "capability": "distance fog",
+      "engine_gpu_ms": 0.19456,
+      "feature": "fog",
+      "flip_mean": 0.000005817691544507397,
+      "flip_p99": 0.00003576360541046597,
+      "height": 720,
+      "passed": true,
+      "result": "ok",
+      "scenario": "fog_atmospheric",
+      "width": 1280
+    },
+    {
+      "bevy_gpu_ms": 0.2816,
+      "capability": "distance fog + sun inscattering",
+      "engine_gpu_ms": 0.229376,
+      "feature": "fog",
+      "flip_mean": 0.000019507893739501014,
+      "flip_p99": 0.0003867182822432369,
+      "height": 720,
+      "passed": true,
+      "result": "ok",
+      "scenario": "fog_atmospheric_sun",
+      "width": 1280
+    },
+    {
+      "bevy_gpu_ms": 0.846848,
+      "capability": "point + spot lights, cube + spot shadows (Gaussian)",
+      "engine_gpu_ms": 0.4864,
+      "feature": "point_spot",
+      "flip_mean": 0.000013872851923224516,
+      "flip_p99": 0.0002510654157958925,
+      "height": 720,
+      "passed": true,
+      "result": "ok",
+      "scenario": "point_spot",
+      "width": 1280
+    },
+    {
+      "bevy_gpu_ms": 0.7854079999999999,
+      "capability": "point + spot lights, cube + spot shadows (2×2 PCF)",
+      "engine_gpu_ms": 0.81408,
+      "feature": "point_spot",
+      "flip_mean": 0.000014701021427754313,
+      "flip_p99": 0.00027973687974736094,
+      "height": 720,
+      "passed": true,
+      "result": "ok",
+      "scenario": "point_spot_hardware",
+      "width": 1280
+    },
+    {
+      "bevy_gpu_ms": 0.982016,
+      "capability": "point + spot lights, soft shadows (PCSS)",
+      "engine_gpu_ms": 0.459776,
+      "feature": "point_spot",
+      "flip_mean": 0.000038452148146461695,
+      "flip_p99": 0.0008632457465864718,
+      "height": 720,
+      "passed": true,
+      "result": "ok",
+      "scenario": "point_spot_soft",
+      "width": 1280
+    },
+    {
+      "bevy_gpu_ms": 0.617472,
+      "capability": "consumer meshes + textured StandardMaterial",
+      "engine_gpu_ms": 0.508928,
+      "feature": "textured_props",
+      "flip_mean": 0.000032528281735721976,
+      "flip_p99": 0.0006694167386740446,
+      "height": 720,
+      "passed": true,
+      "result": "ok",
+      "scenario": "textured_props",
+      "width": 1280
+    },
+    {
+      "bevy_gpu_ms": 1.498112,
+      "capability": "time-of-day sky (atmosphere)",
+      "engine_gpu_ms": 1.188864,
+      "feature": "sky",
+      "flip_mean": 0.0000991180568234995,
+      "flip_p99": 0.00245389761403203,
+      "height": 720,
+      "passed": true,
+      "result": "ok",
+      "scenario": "sky_day_cycle_noon",
+      "width": 1280
+    },
+    {
+      "bevy_gpu_ms": 1.5083519999999997,
+      "capability": "time-of-day sky (atmosphere)",
+      "engine_gpu_ms": 1.189888,
+      "feature": "sky",
+      "flip_mean": 0.00009231853618985042,
+      "flip_p99": 0.0020879250951111317,
+      "height": 720,
+      "passed": true,
+      "result": "ok",
+      "scenario": "sky_day_cycle_golden",
+      "width": 1280
+    },
+    {
+      "bevy_gpu_ms": 1.4960639999999998,
+      "capability": "time-of-day sky (atmosphere)",
+      "engine_gpu_ms": 1.16224,
+      "feature": "sky",
+      "flip_mean": 0.00011326350067975,
+      "flip_p99": 0.0027030447963625193,
+      "height": 720,
+      "passed": true,
+      "result": "ok",
+      "scenario": "sky_day_cycle_dusk",
+      "width": 1280
+    },
+    {
+      "bevy_gpu_ms": 1.6127999999999998,
+      "capability": "time-of-day sky (atmosphere)",
+      "engine_gpu_ms": 1.27488,
+      "feature": "sky",
+      "flip_mean": 0.0001303602330153808,
+      "flip_p99": 0.003350399900227785,
+      "height": 720,
+      "passed": true,
+      "result": "ok",
+      "scenario": "sky_day_cycle_night",
+      "width": 1280
+    }
+  ],
+  "software": false
+}

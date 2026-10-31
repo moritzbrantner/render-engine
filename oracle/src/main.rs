@@ -301,12 +301,17 @@ fn main() -> ExitCode {
         );
         report.push(serde_json::json!({
             "scenario": s.name,
+            "capability": s.capability,
+            "feature": s.feature.id(),
+            "width": ours.width,
+            "height": ours.height,
             "flip_mean": f.mean,
             "flip_p99": f.p99,
             "engine_gpu_ms": engine_ms,
             "bevy_gpu_ms": bevy_ms,
             "bevy_spans": spans,
             "result": result,
+            "passed": image_ok && !timing_missing && !(slow && gate_timing),
         }));
     }
     let report = serde_json::json!({
@@ -316,6 +321,13 @@ fn main() -> ExitCode {
         "flip_p99_max": FLIP_P99_MAX,
         "gpu_margin": GPU_MARGIN,
         "gpu_gate": gate_timing,
+        "frames": if o.timing { o.frames } else { 1 },
+        "features": scenarios::Feature::ALL.map(|f| serde_json::json!({
+            "id": f.id(),
+            "label": f.label(),
+            "prs": f.prs(),
+            "decision": f.decision(),
+        })),
         "scenarios": report,
     });
     if let Err(e) = std::fs::write(o.out.join("report.json"), format!("{report:#}")) {

@@ -33,8 +33,12 @@ and GPU frame time. See [technical decisions](docs/technical-decisions.md).
   when render-engine's median GPU frame time is more than 10% slower than Bevy's.
 - **CI without a GPU:** CI renders both sides on lavapipe (software Vulkan); the image gate is
   enforced there, GPU time is advisory. Locally on a GPU both gates apply.
-- **Report page:** `site/` shows each scenario's Bevy image, render-engine image and FLIP error
-  map from the last oracle run.
+- **Report site:** <https://moritzbrantner.github.io/render-engine/>, published from CI on
+  `main`. `site/` renders the oracle's own `report.json`: an overview by feature with the FLIP
+  numbers of the CI run, and per scenario render-engine | Bevy | FLIP side by side, swipe and
+  toggle. The GPU-time table comes from the latest committed local run
+  (`bash scripts/record-local-gpu.sh` on the RTX 3060 Ti writes `docs/oracle-local-gpu.json`).
+  Preview locally with `bash scripts/build-pages.sh` and any static server on `pages-dist/`.
 
 ## Example
 
