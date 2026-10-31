@@ -1,8 +1,9 @@
-//! The wgpu renderer: one shadow pass per sun cascade and one forward PBR pass with 4× MSAA.
+//! The wgpu renderer: one shadow pass per sun cascade, one forward PBR pass with 4× MSAA into an
+//! HDR target, and a tone-mapping pass into the output.
 
 use crate::{
     mesh::{Geometry, Vertex},
-    scene::{MAX_CASCADES, Scene, ShadowFilter},
+    scene::{MAX_CASCADES, Scene, ShadowFilter, Tonemapping},
 };
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat3, Mat4, Vec3, Vec4};
@@ -10,7 +11,11 @@ use wgpu::util::DeviceExt;
 
 /// MSAA sample count of the main pass (Bevy's default `Msaa::Sample4`).
 pub const SAMPLE_COUNT: u32 = 4;
+/// Format of the main pass (Bevy's `ViewTarget::TEXTURE_FORMAT_HDR`).
+pub const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+const TONY_MC_MAPFACE_LUT: &[u8] = include_bytes!("luts/tony_mc_mapface.ktx2");
+const AGX_LUT: &[u8] = include_bytes!("luts/AgX-default_contrast.ktx2");
 /// Stride of the per-cascade shadow-view uniforms (dynamic-offset alignment).
 const CASCADE_STRIDE: u64 = 256;
 
@@ -45,13 +50,27 @@ struct InstanceData {
 
 /// Fixed GPU state: pipelines, layouts and samplers.
 pub struct Renderer {
-    color_format: wgpu::TextureFormat,
     frame_layout: wgpu::BindGroupLayout,
     cascade_layout: wgpu::BindGroupLayout,
     shadow_layout: wgpu::BindGroupLayout,
+    tonemap_layout: wgpu::BindGroupLayout,
     shadow_pipeline: wgpu::RenderPipeline,
     lit_pipeline: wgpu::RenderPipeline,
+    /// Indexed by [`tonemap_index`].
+    tonemap_pipelines: [wgpu::RenderPipeline; 3],
     shadow_sampler: wgpu::Sampler,
+    tony_mc_mapface_lut: wgpu::TextureView,
+    agx_lut: wgpu::TextureView,
+    lut_sampler: wgpu::Sampler,
+}
+
+/// The tone-mapping shader's `METHOD` constant.
+fn tonemap_index(t: Tonemapping) -> usize {
+    match t {
+        Tonemapping::AcesFitted => 0,
+        Tonemapping::TonyMcMapface => 1,
+        Tonemapping::AgX => 2,
+    }
 }
 
 /// A scene uploaded for one target size; render it any number of times.
@@ -70,6 +89,10 @@ pub struct PreparedScene {
     draws: Vec<(u32, u32, i32)>,
     msaa_view: wgpu::TextureView,
     depth_view: wgpu::TextureView,
+    /// The resolved HDR frame, read by the tone-mapping pass.
+    hdr_view: wgpu::TextureView,
+    tonemap_group: wgpu::BindGroup,
+    tonemapping: Tonemapping,
 }
 
 /// Where a frame writes GPU timestamps: index 0 at the start of the first pass, index 1 at the
@@ -79,7 +102,13 @@ pub struct FrameTimestamps<'a> {
 }
 
 impl Renderer {
-    pub fn new(device: &wgpu::Device, color_format: wgpu::TextureFormat) -> Self {
+    /// Creates the pipelines for frames written to `color_format` (tone mapped; an sRGB format
+    /// encodes the output) and uploads the tone-mapping LUTs.
+    pub fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        color_format: wgpu::TextureFormat,
+    ) -> Self {
         let shader = device.create_shader_module(wgpu::include_wgsl!("shaders/lit.wgsl"));
         let frame_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("frame"),
@@ -206,10 +235,85 @@ impl Renderer {
                 module: &shader,
                 entry_point: Some("lit_fs"),
                 compilation_options: Default::default(),
-                targets: &[Some(color_format.into())],
+                targets: &[Some(HDR_FORMAT.into())],
             }),
             multiview_mask: None,
             cache: None,
+        });
+
+        let tonemap_shader =
+            device.create_shader_module(wgpu::include_wgsl!("shaders/tonemap.wgsl"));
+        let tonemap_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("tonemap"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D3,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        let tonemap_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("tonemap"),
+                bind_group_layouts: &[Some(&tonemap_layout)],
+                immediate_size: 0,
+            });
+        let tonemap_pipelines = [0.0, 1.0, 2.0].map(|method| {
+            let constants = [("METHOD", method)];
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("tonemap"),
+                layout: Some(&tonemap_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &tonemap_shader,
+                    entry_point: Some("tonemap_vs"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &tonemap_shader,
+                    entry_point: Some("tonemap_fs"),
+                    compilation_options: wgpu::PipelineCompilationOptions {
+                        constants: &constants,
+                        ..Default::default()
+                    },
+                    targets: &[Some(color_format.into())],
+                }),
+                multiview_mask: None,
+                cache: None,
+            })
+        });
+        // Bevy's tone-mapping LUT sampler: trilinear, clamped.
+        let lut_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("tonemapping lut"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
+            ..Default::default()
         });
 
         // Hardware 2×2 PCF; the Gaussian filter combines 9 of these taps.
@@ -222,13 +326,17 @@ impl Renderer {
         });
 
         Self {
-            color_format,
             frame_layout,
             cascade_layout,
             shadow_layout,
+            tonemap_layout,
             shadow_pipeline,
             lit_pipeline,
+            tonemap_pipelines,
             shadow_sampler,
+            tony_mc_mapface_lut: load_lut(device, queue, TONY_MC_MAPFACE_LUT),
+            agx_lut: load_lut(device, queue, AGX_LUT),
+            lut_sampler,
         }
     }
 
@@ -440,6 +548,47 @@ impl Renderer {
                 })
                 .create_view(&Default::default())
         };
+        let hdr_view = device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("hdr colour"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: HDR_FORMAT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            })
+            .create_view(&Default::default());
+        let tonemapping = cam.tonemapping;
+        // Like Bevy, operators without a LUT still bind one (the small AgX LUT).
+        let lut = match tonemapping {
+            Tonemapping::TonyMcMapface => &self.tony_mc_mapface_lut,
+            Tonemapping::AcesFitted | Tonemapping::AgX => &self.agx_lut,
+        };
+        let tonemap_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("tonemap"),
+            layout: &self.tonemap_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&hdr_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(lut),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&self.lut_sampler),
+                },
+            ],
+        });
 
         let c = scene.clear_color;
         PreparedScene {
@@ -466,8 +615,11 @@ impl Renderer {
                 usage: wgpu::BufferUsages::INDEX,
             }),
             draws,
-            msaa_view: target(self.color_format, "msaa colour"),
+            msaa_view: target(HDR_FORMAT, "msaa hdr colour"),
             depth_view: target(DEPTH_FORMAT, "depth"),
+            hdr_view,
+            tonemap_group,
+            tonemapping,
         }
     }
 
@@ -524,7 +676,7 @@ impl Renderer {
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: &scene.msaa_view,
                 depth_slice: None,
-                resolve_target: Some(target),
+                resolve_target: Some(&scene.hdr_view),
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Clear(scene.clear_color),
                     store: wgpu::StoreOp::Discard,
@@ -538,17 +690,45 @@ impl Renderer {
                 }),
                 stencil_ops: None,
             }),
-            timestamp_writes: query_set.map(|query_set| wgpu::RenderPassTimestampWrites {
-                query_set,
-                beginning_of_pass_write_index: scene.cascade_views.is_empty().then_some(0),
-                end_of_pass_write_index: Some(1),
-            }),
+            timestamp_writes: query_set.filter(|_| scene.cascade_views.is_empty()).map(
+                |query_set| wgpu::RenderPassTimestampWrites {
+                    query_set,
+                    beginning_of_pass_write_index: Some(0),
+                    end_of_pass_write_index: None,
+                },
+            ),
             occlusion_query_set: None,
             multiview_mask: None,
         });
         pass.set_pipeline(&self.lit_pipeline);
         pass.set_bind_group(1, &scene.shadow_group, &[]);
         draw(&mut pass);
+        drop(pass);
+
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("tonemap"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            // The frame ends at the tone-mapping pass.
+            timestamp_writes: query_set.map(|query_set| wgpu::RenderPassTimestampWrites {
+                query_set,
+                beginning_of_pass_write_index: None,
+                end_of_pass_write_index: Some(1),
+            }),
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        pass.set_pipeline(&self.tonemap_pipelines[tonemap_index(scene.tonemapping)]);
+        pass.set_bind_group(0, &scene.tonemap_group, &[]);
+        pass.draw(0..3, 0..1);
     }
 }
 
@@ -556,6 +736,56 @@ impl PreparedScene {
     pub fn size(&self) -> (u32, u32) {
         (self.width, self.height)
     }
+}
+
+/// Uploads one of Bevy's tone-mapping LUTs: a zstd-supercompressed single-level 3D KTX2 file in
+/// `R16G16B16A16_SFLOAT` or `E5B9G9R9_UFLOAT_PACK32`.
+fn load_lut(device: &wgpu::Device, queue: &wgpu::Queue, ktx2: &[u8]) -> wgpu::TextureView {
+    use std::io::Read;
+    let reader = ktx2::Reader::new(ktx2).expect("embedded LUT is valid KTX2");
+    let header = reader.header();
+    let (format, texel_bytes) = match header.format {
+        Some(ktx2::Format::R16G16B16A16_SFLOAT) => (wgpu::TextureFormat::Rgba16Float, 8),
+        Some(ktx2::Format::E5B9G9R9_UFLOAT_PACK32) => (wgpu::TextureFormat::Rgb9e5Ufloat, 4),
+        other => panic!("unsupported LUT format {other:?}"),
+    };
+    let level = reader.levels().next().expect("LUT has a level");
+    let mut texels = Vec::with_capacity(level.uncompressed_byte_length as usize);
+    match header.supercompression_scheme {
+        Some(ktx2::SupercompressionScheme::Zstandard) => {
+            ruzstd::decoding::StreamingDecoder::new(level.data)
+                .expect("LUT zstd frame")
+                .read_to_end(&mut texels)
+                .expect("LUT decompresses");
+        }
+        None => texels.extend_from_slice(level.data),
+        Some(other) => panic!("unsupported LUT supercompression {other:?}"),
+    }
+    let size = wgpu::Extent3d {
+        width: header.pixel_width,
+        height: header.pixel_height,
+        depth_or_array_layers: header.pixel_depth,
+    };
+    let texture = device.create_texture_with_data(
+        queue,
+        &wgpu::TextureDescriptor {
+            label: Some("tonemapping lut"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D3,
+            format,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        },
+        wgpu::util::TextureDataOrder::LayerMajor,
+        &texels,
+    );
+    debug_assert_eq!(
+        texels.len(),
+        (size.width * size.height * size.depth_or_array_layers * texel_bytes) as usize
+    );
+    texture.create_view(&Default::default())
 }
 
 /// Right-handed view matrix with +Y up (the inverse of Bevy `Transform::looking_at(target, Y)`).

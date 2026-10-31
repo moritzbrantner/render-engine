@@ -4,6 +4,7 @@
 use render_engine::glam::{Quat, Vec2, Vec3};
 use render_engine::scene::{
     Ambient, Camera, Material, MeshInstance, Scene, ShadowFilter, Shape, Sun, SunShadows,
+    Tonemapping,
 };
 
 pub struct Scenario {
@@ -16,7 +17,29 @@ pub struct Scenario {
 }
 
 pub fn all() -> Vec<Scenario> {
-    vec![sun_shadows(), sun_cascades()]
+    let mut all = vec![sun_shadows(), sun_cascades()];
+    all.extend(tonemap_range());
+    all
+}
+
+/// The `sun_shadows` scene at a noon exposure (EV100 10.5, bright highlights on the gold box)
+/// and three stops dimmer (EV100 13.5, dusk-like shadows near black), each with Tony McMapface and
+/// AgX: the shoulder and the toe of both LUT operators.
+fn tonemap_range() -> [Scenario; 4] {
+    [
+        ("tonemap_range_noon_tony", 10.5, Tonemapping::TonyMcMapface),
+        ("tonemap_range_noon_agx", 10.5, Tonemapping::AgX),
+        ("tonemap_range_dim_tony", 13.5, Tonemapping::TonyMcMapface),
+        ("tonemap_range_dim_agx", 13.5, Tonemapping::AgX),
+    ]
+    .map(|(name, ev100, tonemapping)| {
+        let mut s = sun_shadows();
+        s.name = name;
+        s.capability = "HDR + tone mapping";
+        s.scene.camera.ev100 = ev100;
+        s.scene.camera.tonemapping = tonemapping;
+        s
+    })
 }
 
 fn rgb(r: f32, g: f32, b: f32) -> Vec3 {
@@ -77,6 +100,7 @@ fn sun_shadows() -> Scenario {
                 near: 0.1,
                 ev100: 10.5,
                 shadow_filter: ShadowFilter::Hardware2x2,
+                tonemapping: Tonemapping::AcesFitted,
             },
             clear_color: rgb(0.30, 0.48, 0.75),
             sun: Some(Sun {
@@ -155,6 +179,7 @@ fn sun_cascades() -> Scenario {
                 near: 0.1,
                 ev100: 10.5,
                 shadow_filter: ShadowFilter::Gaussian,
+                tonemapping: Tonemapping::AcesFitted,
             },
             clear_color: rgb(0.32, 0.50, 0.78),
             sun: Some(Sun {

@@ -29,8 +29,7 @@ Consumers, in priority order:
    `three-d-*` crates from `moritzbrantner/3d-lab`. The engine stays on the same wgpu major so it
    can render into the client's device and passes. First feature consumer: mmorpg#529 (Greyhaven
    sun/sky, shadows, ambient/IBL).
-2. **mmorpg web client** (three.js 0.186). How the web client gets parity is an open decision
-   (see the `needs-decision` web-path issue).
+2. **mmorpg web client** (three.js 0.186), through a three.js port (see D8).
 
 ## D3 — The gate
 
@@ -70,16 +69,21 @@ sets `WGPU_FORCE_FALLBACK_ADAPTER=1`; Bevy and render-engine both honour that va
 - On a hardware adapter (the owner's RTX 3060 Ti) **both gates are enforced**. Run the oracle
   locally before merging work that touches render passes or shaders, and put its table in the
   PR.
-- The images agree across devices: `sun_shadows` scores mean 0.0000 and `sun_cascades` 0.0004
-  on both lavapipe and the RTX 3060 Ti.
+- The images agree across devices within the gate. Since the HDR target (#4) the frame passes
+  through two `Rgba16Float` roundings, so tiny float differences on lavapipe flip about 5% of
+  pixels by one 8-bit step: `sun_shadows` scores mean 0.0024 / p99 0.038 on lavapipe and
+  0.0001 / 0.0007 on the RTX 3060 Ti; `sun_cascades` 0.0026 / 0.025 and 0.0005 / 0.0086.
 
 ## D5 — Pinned Bevy configuration per scenario
 
 The Bevy side configures each scenario explicitly instead of relying on Bevy defaults, so a Bevy
 upgrade that changes a default shows up as a deliberate scenario change:
 
-- tone mapping `AcesFitted` (analytic, no LUT), `DebandDither::Disabled`, `Msaa::Sample4`, a
-  non-HDR `Rgba8UnormSrgb` target;
+- an `Hdr` camera with the scenario's `Tonemapping` (`AcesFitted` for the shadow scenarios,
+  `TonyMcMapface` and `AgX` with Bevy's `tonemapping_luts` in `tonemap_range`),
+  `DebandDither::Disabled`, `Msaa::Sample4`, default `ColorGrading`, an `Rgba8UnormSrgb` image
+  target. render-engine embeds Bevy's own LUT files (`src/luts/`, licences kept there) and
+  rounds the tone-mapped colour through f16 like Bevy's post-process chain;
 - sun shadows: the scenario's full `CascadeShadowConfigBuilder` (cascade count, minimum and
   maximum distance, first cascade far bound, overlap), its `ShadowFilteringMethod` on the camera
   (`Hardware2x2` or `Gaussian`), `DirectionalLightShadowMap` 2048 and Bevy's depth/normal biases
@@ -87,8 +91,7 @@ upgrade that changes a default shows up as a deliberate scenario change:
   Bevy's defaults (4 cascades, 10 m / 150 m, overlap 0.2, Gaussian);
 - `GlobalAmbientLight` for ambient; no environment map yet.
 
-Later scenarios lift these one at a time (temporal filtering, IBL, TonyMcMapface tone mapping,
-HDR targets, fog, sky).
+Later scenarios lift these one at a time (temporal filtering, IBL, fog, sky).
 
 ## D6 — Order: lighting first, then particles
 
@@ -103,6 +106,15 @@ render-engine owns render passes, lights, shadows, sky/fog/ambient, tone mapping
 particle simulation and rendering. Games own scene content, ECS, asset loading, the game loop,
 gameplay and the day clock that drives the sun. The engine exposes coarse per-frame data (scene,
 lights, instances) and renders into a target the consumer provides.
+
+## D8 — Web path: a three.js port gated by the same oracle
+
+Owner decision 2026-10-31 (#10, option B). The web client gets parity through a **three.js
+port** of the lighting, using three.js built-ins where they pass the gate and custom TSL/shader
+chunks where they don't. Each web scenario is checked against the **same Bevy oracle
+scenarios** through a headless Chromium side with the same FLIP thresholds (D3); GPU time is
+advisory there. Option A (render-engine compiled to WASM/WebGPU) stays available later for
+particles only, if three.js GPU particles cannot meet the gate. Scope of the first step: #11.
 
 ## Standing rules
 

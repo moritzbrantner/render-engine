@@ -10,7 +10,7 @@ use crate::{
     scene::Scene,
 };
 
-/// The colour format of offscreen frames (sRGB-encoded, like Bevy's non-HDR main texture).
+/// The colour format of offscreen frames (tone mapped and sRGB-encoded, like a Bevy image target).
 pub const COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 
 #[derive(Debug)]
@@ -83,7 +83,7 @@ impl Headless {
             ..Default::default()
         }))
         .map_err(Error::Device)?;
-        let renderer = Renderer::new(&device, COLOR_FORMAT);
+        let renderer = Renderer::new(&device, &queue, COLOR_FORMAT);
         Ok(Self {
             device,
             queue,

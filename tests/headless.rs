@@ -4,7 +4,7 @@
 use glam::{Vec2, Vec3};
 use render_engine::{headless::Headless, scene::*};
 
-fn scene(shadows: bool) -> Scene {
+fn scene(shadows: bool, tonemapping: Tonemapping) -> Scene {
     Scene {
         camera: Camera {
             eye: Vec3::new(0.0, 4.0, 6.0),
@@ -13,6 +13,7 @@ fn scene(shadows: bool) -> Scene {
             near: 0.1,
             ev100: 10.5,
             shadow_filter: ShadowFilter::Gaussian,
+            tonemapping,
         },
         clear_color: Vec3::new(0.0, 0.0, 1.0),
         sun: Some(Sun {
@@ -49,16 +50,30 @@ fn pixel(frame: &render_engine::headless::Frame, x: u32, y: u32) -> [u8; 4] {
 fn sky_ground_and_sun_shadow() {
     let gpu = Headless::new().expect("a wgpu adapter (install mesa-vulkan-drivers for lavapipe)");
     let (w, h) = (160, 90);
-    let lit = gpu.render(&gpu.prepare(&scene(false), w, h)).unwrap();
-    let shadowed = gpu.render(&gpu.prepare(&scene(true), w, h)).unwrap();
-    assert_eq!(lit.rgba.len(), (w * h * 4) as usize);
+    for tonemapping in [
+        Tonemapping::AcesFitted,
+        Tonemapping::TonyMcMapface,
+        Tonemapping::AgX,
+    ] {
+        let lit = gpu
+            .render(&gpu.prepare(&scene(false, tonemapping), w, h))
+            .unwrap();
+        let shadowed = gpu
+            .render(&gpu.prepare(&scene(true, tonemapping), w, h))
+            .unwrap();
+        assert_eq!(lit.rgba.len(), (w * h * 4) as usize);
 
-    // Top row is sky: the clear colour, untouched by tone mapping.
-    assert_eq!(pixel(&lit, 2, 0), [0, 0, 255, 255]);
-    // Ground under the floating slab: lit without shadows, dark with them (no ambient).
-    let (x, y) = (w / 2, h / 2 + 3);
-    let bright = pixel(&lit, x, y)[0];
-    let dark = pixel(&shadowed, x, y)[0];
-    assert!(bright > 100, "lit ground {bright}");
-    assert!(dark < 10, "shadowed ground {dark}");
+        // Top row is sky: the blue clear colour, tone mapped with the HDR frame.
+        let [r, g, b, a] = pixel(&lit, 2, 0);
+        assert!(
+            b > 150 && r < b / 2 && g < b && a == 255,
+            "{tonemapping:?} sky {r} {g} {b} {a}"
+        );
+        // Ground under the floating slab: lit without shadows, dark with them (no ambient).
+        let (x, y) = (w / 2, h / 2 + 3);
+        let bright = pixel(&lit, x, y)[0];
+        let dark = pixel(&shadowed, x, y)[0];
+        assert!(bright > 100, "{tonemapping:?} lit ground {bright}");
+        assert!(dark < 10, "{tonemapping:?} shadowed ground {dark}");
+    }
 }

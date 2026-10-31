@@ -3484,7 +3484,9 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "glam 0.34.1",
+ "ktx2",
  "pollster",
+ "ruzstd",
  "wgpu",
 ]
 
