@@ -78,7 +78,7 @@ mod kind {
     pub const COLOR: u32 = 7;
 }
 
-/// `(mode, a, b)` of a value: constant in `a`, or uniform between `a` and `b`.
+/// `(mode, a, b)` of a vector: constant in `a`, or uniform between `a` and `b`.
 fn value<T: Copy>(v: Value<T>, f: impl Fn(T) -> Vec4) -> (u32, Vec4, Vec4) {
     match v {
         Value::Const(c) => (0, f(c), Vec4::ZERO),
@@ -86,8 +86,16 @@ fn value<T: Copy>(v: Value<T>, f: impl Fn(T) -> Vec4) -> (u32, Vec4, Vec4) {
     }
 }
 
+/// `(mode, a, b)` of a scalar: constant in `a.x`, or uniform between `a.x` and `a.y` (`scalar`
+/// in the shader).
+fn scalar(v: Value<f32>) -> (u32, Vec4, Vec4) {
+    match v {
+        Value::Const(c) => (0, Vec4::new(c, 0.0, 0.0, 0.0), Vec4::ZERO),
+        Value::Uniform { min, max } => (1, Vec4::new(min, max, 0.0, 0.0), Vec4::ZERO),
+    }
+}
+
 fn modifier(m: &InitModifier) -> GpuModifier {
-    let scalar = |x: f32| Vec4::new(x, 0.0, 0.0, 0.0);
     let (kind, (mode, a, b)) = match *m {
         InitModifier::PositionSphere {
             center,
@@ -106,23 +114,15 @@ fn modifier(m: &InitModifier) -> GpuModifier {
         ),
         InitModifier::Position(v) => (kind::POSITION, value(v, |v: Vec3| v.extend(0.0))),
         InitModifier::VelocitySphere { center, speed } => {
-            let (mode, min, max) = value(speed, scalar);
-            (
-                kind::VELOCITY_SPHERE,
-                (mode, center.extend(0.0), Vec4::new(min.x, max.x, 0.0, 0.0)),
-            )
+            // The speed goes in `b` (`b.x`, or `b.x..b.y`).
+            let (mode, speed, _) = scalar(speed);
+            (kind::VELOCITY_SPHERE, (mode, center.extend(0.0), speed))
         }
         InitModifier::Velocity(v) => (kind::VELOCITY, value(v, |v: Vec3| v.extend(0.0))),
-        InitModifier::Lifetime(v) => (kind::LIFETIME, value(v, scalar)),
-        InitModifier::Age(v) => (kind::AGE, value(v, scalar)),
-        InitModifier::Size(v) => (kind::SIZE, value(v, scalar)),
+        InitModifier::Lifetime(v) => (kind::LIFETIME, scalar(v)),
+        InitModifier::Age(v) => (kind::AGE, scalar(v)),
+        InitModifier::Size(v) => (kind::SIZE, scalar(v)),
         InitModifier::Color(v) => (kind::COLOR, value(v, |v| v)),
-    };
-    // A uniform scalar keeps its range in `a.x..a.y` (`scalar` in the shader).
-    let (a, b) = if matches!(kind, kind::LIFETIME | kind::AGE | kind::SIZE) && mode == 1 {
-        (Vec4::new(a.x, b.x, 0.0, 0.0), Vec4::ZERO)
-    } else {
-        (a, b)
     };
     GpuModifier {
         kind,
