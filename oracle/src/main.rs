@@ -34,6 +34,8 @@ const FLIP_P99_MAX: f32 = 0.05;
 const GPU_MARGIN: f64 = 1.10;
 /// Frames timed per side and round.
 const TIMED_FRAMES: u32 = 300;
+/// Frames timed per side on a software adapter, where GPU time is only advisory.
+const SOFTWARE_TIMED_FRAMES: u32 = 20;
 /// Timing rounds per scenario on a hardware adapter (each side once per round, alternating).
 const TIMING_ROUNDS: u32 = 2;
 /// Extra rounds for a scenario still over the margin before it fails.
@@ -193,6 +195,15 @@ fn main() -> ExitCode {
     };
     let software = gpu.adapter.device_type == render_engine::wgpu::DeviceType::Cpu;
     let gate_timing = o.timing && !software;
+    // Advisory software timings need only a few frames (CPU rasterisation is slow).
+    let o = Options {
+        frames: if software {
+            o.frames.min(SOFTWARE_TIMED_FRAMES)
+        } else {
+            o.frames
+        },
+        ..o
+    };
     println!(
         "adapter: {} ({:?}, {:?}); GPU-time gate: {}",
         gpu.adapter.name,
