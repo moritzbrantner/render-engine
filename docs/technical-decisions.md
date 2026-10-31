@@ -238,10 +238,13 @@ Each capture is judged by one of two tiers:
   through GPU atomics, so which new particle gets which slot depends on hanabi's thread
   scheduling. render-engine cannot reproduce that, even though Bevy happens to repeat it
   bit-for-bit on the RTX 3060 Ti and on lavapipe (`--calibrate`, "rerun" rows).
-- **Blending.** The first scenario blends additively. Additive blending does not depend on the
-  draw order, and hanabi draws in its alive-list order, which also comes from atomics. Alpha-blended
-  scenarios will need to sort, either both sides by the same key or with per-scenario
-  statistical gates only.
+- **Blending.** Additive blending does not depend on the draw order, and hanabi draws in its
+  alive-list order, which also comes from atomics. hanabi does not sort an alpha-blended
+  effect's particles (only ribbons), so that order shows over a blended background, and it
+  changes from run to run: a Bevy rerun of `particles_alpha` scores FLIP p99 0.037–0.065 and
+  colour 0.007 against itself. Alpha-blended scenarios are therefore judged by the statistical
+  tier at every capture (#14). Between effects, Bevy's transparent phase sorts hanabi's
+  effects back to front by their transform; render-engine does the same.
 - **Statistics** (`ImageStats`, both images against their own plate): *alpha coverage* is the
   share of pixels where some channel changed by more than 2/255, compared as the relative
   difference. The *spatial histogram* adds up, per cell of a 16 × 9 grid, each pixel's largest
@@ -262,17 +265,23 @@ Each capture is judged by one of two tiers:
   noise under that change; the spatial histogram catches it. In the exact tier, every other seed
   scores FLIP mean ≥ 0.023 and p99 ≥ 0.92, so the FLIP gate rejects any difference in the random
   stream. The numbers are the same on the RTX 3060 Ti and on lavapipe to three decimals.
-- **GPU time.** The Bevy side records the sum of its top-level render diagnostic spans per
-  simulation frame, as for lighting. hanabi's compute passes (`hanabi:init`, `hanabi:update`)
-  write no timestamps, so this covers rendering but not simulation. Timing simulation as well
-  belongs to the GPU-simulation work (#14).
-- **Engine side (#13).** `render_engine::particles` simulates on the CPU, replaying hanabi step
-  by step: `EffectSpawner::tick` for the spawn count; the effect seed set to `prng_seed` when
-  the emitter is added and advanced by `StdRng::seed_from_u64(seed).random()` after every step,
-  active or not; `pcg_hash(slot ^ seed)`, `frand`/`frand3`/`frand4` and the init modifiers in
-  their listed order; hanabi's dead-slot stack (`dead_index` starts as `0, 1, 2, …`; a spawn
-  takes the row at the alive count, a death writes its slot back at the decremented count); then
-  age, reap, `v += a·dt`, `p += v·dt` for every alive particle, including the ones just spawned.
+  `particles_100k` (#14): seed noise at 3.0 s reaches 0.0041 / 0.0146 / 0.0119, so the gate is
+  0.006 / 0.022 / 0.018; gravity × 1.25 scores 0.072 / 0.173 / 0.134. `particles_alpha`: seed
+  noise over both captures reaches 0.042 / 0.046 / 0.064, so the gate is 0.065 / 0.07 / 0.095;
+  buoyancy × 1.25 scores coverage 0.087 at 1.0 s and 0.139 / spatial 0.087 at 3.0 s.
+- **Engine side.** `render_engine::particles` replays hanabi step by step. On the CPU
+  (`World::step_particles`): `EffectSpawner::tick` for the spawn count, and the effect seed set
+  to `prng_seed` when the emitter is added and advanced by `StdRng::seed_from_u64(seed).random()`
+  after every step, active or not. On the GPU (#14, `particle_sim.wgsl`, one compute pass per
+  step for all emitters, which share one slot pool like hanabi's slabs): `init`, one thread per
+  spawn, takes the slot in dead-stack row `alive + i` (`dead_index` starts as `0, 1, 2, …`),
+  then `pcg_hash(slot ^ seed)`, `frand`/`frand3`/`frand4` and the init modifiers in their listed
+  order; `prepare` caps the alive counts at capacity and writes the update dispatch and the draw
+  arguments; `update`, one thread per alive particle, ages, reaps, does `v += a·dt` and
+  `p += v·dt` (the particles just spawned included), returns a dead slot at the decremented
+  alive count through an atomic and appends a survivor to the next alive list through another,
+  writing its quad (size and colour over life) for the render pass. Each emitter is one
+  indirect draw. Like hanabi, which slot a recycled spawn takes then depends on the atomics.
   hanabi compiles an effect, and sets its seed, on app update 1, so the Bevy side reports the
   update on which its spawners started (`first_spawn_update`). The engine side adds its emitters
   inactive and steps them `first_spawn_update − 1` times before activating them, so both seed
@@ -280,14 +289,21 @@ Each capture is judged by one of two tiers:
   `particles_fountain@t0500` scores FLIP mean 0.024 and p99 0.94, so the gate checks the chain.
   Particles are drawn in the main pass after the blended instances, as hanabi's quads
   (`ParallelCameraDepthPlane`, the unit quad, `RoundModifier`'s mask, 4× MSAA, depth tested
-  but not written), additive first, then alpha-blended particles sorted back to front.
-- **Recycling in practice.** The CPU replay of the dead-slot stack processes deaths in alive-list
-  order. On the RTX 3060 Ti and on lavapipe, hanabi's atomics produce the same order for
-  `particles_fountain`, so its 2.0 s capture also matches exactly (FLIP 0, statistics 0). The
-  statistical tier still gates it, since other GPUs or scenarios need not schedule the same way.
-- **GPU time** of a particle scenario: render-engine's frame after the last capture (its
-  fastest round) against Bevy's median frame over the run, both covering rendering only; the
-  local gate applies as for lighting.
+  but not written), additive emitters first, then alpha-blended emitters back to front.
+- **Recycling in practice.** On the RTX 3060 Ti and on lavapipe, both sides' atomics happen to
+  recycle slots in the same order for `particles_fountain` and `particles_100k`, so their late
+  captures also match nearly exactly (FLIP mean ≤ 0.0002, statistics 0.000). The statistical
+  tier still gates them, since other GPUs or scenarios need not schedule the same way.
+- **GPU time** of a particle scenario covers simulation plus rendering on both sides, in steady
+  state after the last capture. render-engine: each timed frame steps the world (its compute
+  pass is timed like any other pass) and renders. Bevy: the frames after the last capture (300
+  locally), the median of the top-level render diagnostic spans plus the median of hanabi's
+  compute work. hanabi writes no timestamps of its own and records all its compute passes in one
+  system of Bevy's `RenderGraph` schedule (`bevy_hanabi::render::simulate`), so the oracle adds
+  a system right before and one right after it that each write a timestamp into their command
+  encoder (`bevy_side::HanabiTimer`, found by system name, which needs Bevy's `debug`
+  feature); Bevy submits the encoders in system order. Rounds alternate as for lighting, each
+  side keeping its fastest, and the local gate applies as for lighting.
 
 ## Standing rules
 

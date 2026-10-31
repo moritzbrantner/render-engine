@@ -162,9 +162,10 @@ frame.present();
 
 ## Particles
 
-Emitters live in the `World` next to the meshes, under `EmitterId` handles. The game steps them
-at its simulation rate; every `prepare` draws all alive particles as camera-facing quads in the
-main pass, after the blended instances.
+Emitters live in the `World` next to the meshes, under `EmitterId` handles; their particles live
+on the GPU. The game steps them at its simulation rate by recording compute passes into its
+encoder; every frame then draws all alive particles as camera-facing quads in the main pass,
+after the blended instances.
 
 ```rust
 use render_engine::particles::*;
@@ -186,24 +187,34 @@ let sparks = world.add_emitter(&Emitter {
         blend: ColorBlend::Overwrite,
     }),
     roundness: 1.0,                          // 0 = square quads, 1 = discs
-    blend: ParticleBlend::Add,               // or ParticleBlend::Alpha (sorted back to front)
+    blend: ParticleBlend::Add,               // or ParticleBlend::Alpha (emitters back to front)
     active: true,
 });
 world.set_emitter_transform(sparks, torch.world_from_local);   // where new particles spawn
 
-// In the game loop, once per simulation tick:
-world.step_particles(dt);
+// In the game loop, once per simulation tick, into the frame's encoder before `encode`:
+world.step_particles(&mut encoder, dt, None);
 ```
 
 - **Units.** Positions in metres, velocities in m/s, lifetimes in seconds. Colours are linear
   HDR and are written as they are, without the camera's exposure (like hanabi's).
 - **Stopping.** `set_emitter(id, &Emitter { active: false, ..desc })` stops spawning and lets
   alive particles finish; `remove_emitter` drops them at once.
-- **Statistics.** `world.emitter_stats(id)` has the last step's spawn count and alive count.
+- **Stepping.** `step_particles` ticks the spawners on the CPU and records one compute pass
+  (spawn and init, then age, reap and move) for all emitters at once. Several steps can go into
+  one encoder; a frame rendered without a step shows the last step's particles again. Pass
+  `FrameTimestamps` to time the pass (two queries).
+- **Statistics.** `world.spawn_count(id)` is the last step's spawn count (CPU).
+  `world.read_alive_particles()` reads every emitter's alive count back from the GPU and waits,
+  for tests and tools.
+- **Limits.** At most 8 init modifiers per emitter and 8 keys per gradient.
 - **Simulation space.** Particles live in world space: moving the emitter moves where new ones
   spawn, not the ones already alive.
-- **Cost.** The simulation runs on the CPU, which suits thousands of particles; GPU simulation
-  for 100k is #14.
+- **Alpha blending.** Alpha-blended emitters are drawn after the additive ones, back to front
+  by their transform's position (as Bevy sorts hanabi effects); inside an emitter the order is
+  the GPU's alive-list order, as in hanabi.
+- **Cost.** `particles_100k` (about 100k alive in one fountain plus 50 small effects) runs on
+  the GPU; see the oracle report for its timings against hanabi.
 
 ## Not covered yet
 

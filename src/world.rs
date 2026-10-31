@@ -8,8 +8,9 @@ use crate::{
     cull::Aabb,
     material::{AlphaMode, StandardMaterial, TextureData},
     mesh::MeshData,
-    particles::{Emitter, EmitterState, EmitterStats},
-    renderer::Renderer,
+    particle_sim::ParticlePool,
+    particles::{Emitter, EmitterState},
+    renderer::{FrameTimestamps, Renderer},
 };
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec4};
@@ -154,6 +155,7 @@ pub struct World {
     textures: Slots<GpuTexture>,
     materials: Slots<GpuMaterial>,
     emitters: Slots<EmitterState>,
+    particles: ParticlePool,
 }
 
 impl World {
@@ -181,6 +183,7 @@ impl World {
             textures: Slots::new(),
             materials: Slots::new(),
             emitters: Slots::new(),
+            particles: ParticlePool::new(renderer.device(), renderer.sim_pipelines()),
         }
     }
 
@@ -285,36 +288,71 @@ impl World {
     /// particles keep their attributes and keep moving; the new update and render modifiers
     /// apply to them. A different capacity drops them.
     pub fn set_emitter(&mut self, id: EmitterId, emitter: &Emitter) {
-        self.emitter_mut(id).set_desc(emitter);
+        let e = self.emitters_mut(id);
+        if emitter.capacity != e.desc.capacity
+            && let Some(base) = e.base.take()
+        {
+            self.particles.free(base);
+        }
+        self.emitters_mut(id).desc = emitter.clone();
     }
 
     /// Where new particles spawn: init positions and velocities are transformed by it. Alive
     /// particles stay where they are (the simulation runs in world space).
     pub fn set_emitter_transform(&mut self, id: EmitterId, world_from_emitter: Mat4) {
-        self.emitter_mut(id).transform = world_from_emitter;
+        self.emitters_mut(id).transform = world_from_emitter;
     }
 
     pub fn remove_emitter(&mut self, id: EmitterId) {
-        self.emitters.remove(id.0);
-    }
-
-    /// The emitter's spawn and alive counts after the last step.
-    pub fn emitter_stats(&self, id: EmitterId) -> EmitterStats {
-        self.emitters
-            .get(id.0)
-            .expect("emitter_stats on a removed emitter")
-            .stats
-    }
-
-    /// Advances every emitter by `dt` seconds: spawns, initialises, ages, reaps and moves its
-    /// particles. Call it at the game's simulation rate (a fixed step keeps runs repeatable).
-    pub fn step_particles(&mut self, dt: f32) {
-        for e in self.emitters.items.iter_mut().flatten() {
-            e.step(dt);
+        if let Some(base) = self.emitters.remove(id.0).and_then(|e| e.base) {
+            self.particles.free(base);
         }
     }
 
-    fn emitter_mut(&mut self, id: EmitterId) -> &mut EmitterState {
+    /// Particles the emitter's spawner asked for in the last step (hanabi
+    /// `EffectSpawner::spawn_count`); spawns beyond its capacity are dropped on the GPU.
+    pub fn spawn_count(&self, id: EmitterId) -> u32 {
+        self.emitters
+            .get(id.0)
+            .expect("spawn_count on a removed emitter")
+            .spawn_count
+    }
+
+    /// Every emitter's alive-particle count after the last submitted
+    /// [`World::step_particles`]. Reads the GPU counters back and waits for them, so it is meant
+    /// for tests and tools, not for every frame of a game.
+    pub fn read_alive_particles(&self) -> Vec<(EmitterId, u32)> {
+        let counts = self.particles.read_alive(&self.queue);
+        self.emitter_ids()
+            .map(|(id, e)| {
+                let n = e.base.and_then(|_| counts.get(id as usize).copied());
+                (EmitterId(id), n.unwrap_or(0))
+            })
+            .collect()
+    }
+
+    /// Records one simulation step of `dt` seconds for every emitter into `encoder`: the
+    /// spawners tick on the CPU, then a compute pass spawns, initialises, ages, reaps and moves
+    /// the particles on the GPU. Call it at the game's simulation rate (a fixed step keeps runs
+    /// repeatable), before [`Renderer::encode`] of the frame that shows the result; several
+    /// steps may go into one encoder. With `timestamps`, the pass writes its begin and end
+    /// timestamps at `first` and `first + 1`.
+    pub fn step_particles(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        dt: f32,
+        timestamps: Option<FrameTimestamps<'_>>,
+    ) {
+        let emitters = self
+            .emitters
+            .items
+            .iter_mut()
+            .enumerate()
+            .filter_map(|(i, e)| Some((i as u32, e.as_mut()?)));
+        self.particles.step(encoder, emitters, dt, timestamps);
+    }
+
+    fn emitters_mut(&mut self, id: EmitterId) -> &mut EmitterState {
         self.emitters
             .items
             .get_mut(id.0 as usize)
@@ -322,8 +360,17 @@ impl World {
             .expect("emitter is removed")
     }
 
-    pub(crate) fn emitters(&self) -> impl Iterator<Item = &EmitterState> {
-        self.emitters.items.iter().flatten()
+    /// `(id, emitter)` of every emitter.
+    pub(crate) fn emitter_ids(&self) -> impl Iterator<Item = (u32, &EmitterState)> {
+        self.emitters
+            .items
+            .iter()
+            .enumerate()
+            .filter_map(|(i, e)| Some((i as u32, e.as_ref()?)))
+    }
+
+    pub(crate) fn particle_pool(&self) -> &ParticlePool {
+        &self.particles
     }
 
     pub(crate) fn mesh(&self, id: MeshId) -> &GpuMesh {

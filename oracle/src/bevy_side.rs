@@ -26,6 +26,7 @@ use bevy::{
         render_resource::{
             Extent3d, TextureDataOrder, TextureFormat, TextureViewDescriptor, TextureViewDimension,
         },
+        renderer::{RenderContext, RenderGraph, RenderGraphSystems, RenderQueue},
         settings::{RenderCreation, WgpuFeatures, WgpuSettings},
         view::{
             DebandDither, Msaa, Tonemapping,
@@ -41,6 +42,7 @@ use bevy::{
     render::render_resource::Face,
 };
 use bevy_hanabi as hanabi;
+use render_engine::particles::ParticleBlend;
 use render_engine::{
     material::{AlphaMode as EngineAlphaMode, TextureData},
     mesh::{MeshData, Shape},
@@ -602,8 +604,11 @@ pub struct ParticleRun {
     pub captures: Vec<(u32, Vec<u8>)>,
     /// Particles spawned per emitter and simulation frame (hanabi's `EffectSpawner::spawn_count`).
     pub spawns: Vec<Vec<u32>>,
-    /// GPU milliseconds per simulation frame (sum of the top-level render diagnostic spans).
+    /// GPU milliseconds per timed frame (sum of the top-level render diagnostic spans), over
+    /// the frames after the last capture.
     pub gpu_ms: Vec<f64>,
+    /// GPU milliseconds of hanabi's compute passes per timed frame ([`HanabiTimer`]).
+    pub sim_ms: Vec<f64>,
     pub spans: Vec<String>,
     /// The app update (1 = the first) on which the spawners started. hanabi sets each effect's
     /// seed to its `prng_seed` when it compiles the effect on update 1 and advances the seed
@@ -624,6 +629,156 @@ struct ParticlePlan {
     sim_frame: u32,
     captures: Vec<u32>,
     emitters: usize,
+    /// Frames timed after the last capture (0: exit right after it).
+    timed_frames: u32,
+}
+
+impl ParticlePlan {
+    fn last_capture(&self) -> u32 {
+        self.captures.iter().copied().max().unwrap_or(0)
+    }
+
+    /// Whether this simulation frame's GPU time counts: after the last capture, once the
+    /// diagnostics (a few frames behind) show frames from after it.
+    fn timed(&self) -> bool {
+        let first = self.last_capture() + TIMING_LAG;
+        self.timed_frames > 0
+            && self.sim_frame > first
+            && self.sim_frame <= first + self.timed_frames
+    }
+
+    fn done(&self) -> bool {
+        let extra = if self.timed_frames > 0 {
+            TIMING_LAG + self.timed_frames
+        } else {
+            0
+        };
+        self.sim_frame > self.last_capture() + extra
+    }
+}
+
+/// Frames by which GPU timings trail the frame that records them.
+const TIMING_LAG: u32 = 4;
+
+/// Timestamps around hanabi's compute passes, which write none of their own: hanabi records all
+/// of them (spawner fill, init, indirect, update, sort) in one system of Bevy's `RenderGraph`
+/// schedule (`bevy_hanabi::render::simulate`). [`hanabi_timer_begin`] runs right before it and
+/// [`hanabi_timer_end`] right after it, each writing a timestamp into its own command encoder;
+/// Bevy submits the encoders in system order, so the span covers exactly hanabi's work. The span
+/// is read back after the frame's submission and kept in `spans` while it records.
+#[derive(Resource)]
+struct HanabiTimer {
+    query_set: Mutex<Option<render_engine::wgpu::QuerySet>>,
+    spans: Arc<HanabiSpans>,
+}
+
+/// hanabi's GPU milliseconds per frame, kept while `record` is set (the timed frames).
+#[derive(Default)]
+struct HanabiSpans {
+    record: std::sync::atomic::AtomicBool,
+    ms: Mutex<Vec<f64>>,
+}
+
+/// The main world's handle on [`HanabiSpans`], to switch recording on for the timed frames.
+#[derive(Resource)]
+struct HanabiSpansHandle(Arc<HanabiSpans>);
+
+impl std::ops::Deref for HanabiSpansHandle {
+    type Target = HanabiSpans;
+    fn deref(&self) -> &HanabiSpans {
+        &self.0
+    }
+}
+
+fn hanabi_timer_begin(mut ctx: RenderContext, timer: Res<HanabiTimer>) {
+    let inside_encoders = render_engine::wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS;
+    if !ctx.render_device().features().contains(inside_encoders) {
+        return;
+    }
+    let mut query_set = timer.query_set.lock().unwrap();
+    let device = ctx.render_device().wgpu_device().clone();
+    let query_set = query_set.get_or_insert_with(|| {
+        device.create_query_set(&render_engine::wgpu::QuerySetDescriptor {
+            label: Some("hanabi timer"),
+            ty: render_engine::wgpu::QueryType::Timestamp,
+            count: 2,
+        })
+    });
+    ctx.command_encoder().write_timestamp(query_set, 0);
+}
+
+fn hanabi_timer_end(mut ctx: RenderContext, timer: Res<HanabiTimer>, queue: Res<RenderQueue>) {
+    use render_engine::wgpu;
+    let query_set = timer.query_set.lock().unwrap();
+    let Some(query_set) = query_set.as_ref() else {
+        return;
+    };
+    let device = ctx.render_device().wgpu_device().clone();
+    let buffer = |usage| {
+        device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("hanabi timer"),
+            size: 16,
+            usage,
+            mapped_at_creation: false,
+        })
+    };
+    let resolve = buffer(wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC);
+    let readback = buffer(wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ);
+    let encoder = ctx.command_encoder();
+    encoder.write_timestamp(query_set, 1);
+    encoder.resolve_query_set(query_set, 0..2, &resolve, 0);
+    encoder.copy_buffer_to_buffer(&resolve, 0, &readback, 0, 16);
+    let period = f64::from(queue.get_timestamp_period());
+    let spans = timer.spans.clone();
+    let mapped = readback.clone();
+    encoder.map_buffer_on_submit(&readback, wgpu::MapMode::Read, .., move |r| {
+        if r.is_ok()
+            && spans.record.load(std::sync::atomic::Ordering::Relaxed)
+            && let Ok(view) = mapped.slice(..).get_mapped_range()
+        {
+            let tick = |i: usize| u64::from_le_bytes(view[i * 8..i * 8 + 8].try_into().unwrap());
+            spans
+                .ms
+                .lock()
+                .unwrap()
+                .push(tick(1).wrapping_sub(tick(0)) as f64 * period / 1e6);
+        }
+    });
+}
+
+/// Brackets hanabi's `simulate` system with [`HanabiTimer`]'s, if the device can write
+/// timestamps between passes.
+fn add_hanabi_timer(app: &mut App, spans: Arc<HanabiSpans>) {
+    let render_app = app.sub_app_mut(bevy::render::RenderApp);
+    let simulate = render_app
+        .world()
+        .resource::<bevy::ecs::schedule::Schedules>()
+        .get(RenderGraph)
+        .and_then(|s| {
+            s.graph().systems.iter().find_map(|(_, system, _)| {
+                let name = system.name().to_string();
+                (name.contains("hanabi") && name.ends_with("::simulate"))
+                    .then(|| system.default_system_sets()[0])
+            })
+        })
+        .expect("bevy_hanabi's simulate system is in the RenderGraph schedule");
+    render_app
+        .insert_resource(HanabiTimer {
+            query_set: Mutex::new(None),
+            spans,
+        })
+        .add_systems(
+            RenderGraph,
+            (
+                hanabi_timer_begin
+                    .in_set(RenderGraphSystems::Render)
+                    .before(simulate),
+                hanabi_timer_end
+                    .in_set(RenderGraphSystems::Render)
+                    .after(simulate)
+                    .before(bevy::core_pipeline::schedule::camera_driver),
+            ),
+        );
 }
 
 /// Variations of a particle scenario for calibrating the statistics gate (`oracle --calibrate`).
@@ -692,7 +847,10 @@ fn effect_asset(e: &Emitter, seed: u32, gravity_scale: f32) -> hanabi::EffectAss
     };
     let mut asset = hanabi::EffectAsset::new(e.capacity, spawner, w.finish())
         .with_name(e.name)
-        .with_alpha_mode(hanabi::AlphaMode::Add)
+        .with_alpha_mode(match e.blend {
+            ParticleBlend::Add => hanabi::AlphaMode::Add,
+            ParticleBlend::Alpha => hanabi::AlphaMode::Blend,
+        })
         .with_simulation_condition(hanabi::SimulationCondition::Always)
         .init(init_position);
     asset = match init_velocity {
@@ -722,7 +880,11 @@ fn effect_asset(e: &Emitter, seed: u32, gravity_scale: f32) -> hanabi::EffectAss
 /// Renders a particle scenario on Bevy + bevy_hanabi at the fixed timestep `particles::DT`.
 /// After warm-up (and once every effect's pipelines are ready) it captures the empty plate,
 /// starts all spawners on the next frame and captures each `Capture::frame`.
-pub fn run_particles(scenario: ParticleScenario, variant: ParticleVariant) -> ParticleRun {
+pub fn run_particles(
+    scenario: ParticleScenario,
+    variant: ParticleVariant,
+    timed_frames: u32,
+) -> ParticleRun {
     let shared = ParticleShared(Arc::new(Mutex::new(ParticleRun {
         spawns: vec![Vec::new(); scenario.emitters.len()],
         ..default()
@@ -746,6 +908,7 @@ pub fn run_particles(scenario: ParticleScenario, variant: ParticleVariant) -> Pa
             updates: 0,
             captures: scenario.captures.iter().map(|c| c.frame).collect(),
             emitters: scenario.emitters.len(),
+            timed_frames,
         });
     let seed = variant.seed.unwrap_or(scenario.seed);
     app.add_systems(
@@ -791,16 +954,20 @@ pub fn run_particles(scenario: ParticleScenario, variant: ParticleVariant) -> Pa
                     hanabi::ParticleEffect::new(effects.add(asset)),
                     spawner,
                     EmitterIndex(i),
-                    Transform::default(),
+                    Transform::from_translation(v3(e.translation)),
                 ));
             }
         },
     )
     .add_systems(Update, drive_particles)
     .add_systems(Last, record_frame);
+    let hanabi_spans = Arc::new(HanabiSpans::default());
+    app.insert_resource(HanabiSpansHandle(hanabi_spans.clone()));
+    add_hanabi_timer(&mut app, hanabi_spans.clone());
 
     app.run();
     let mut run = shared.0.lock().unwrap();
+    run.sim_ms = std::mem::take(&mut *hanabi_spans.ms.lock().unwrap());
     std::mem::take(&mut *run)
 }
 
@@ -862,8 +1029,7 @@ fn drive_particles(
         screenshot(&mut commands, &target, &shared, plan.sim_frame);
     }
     let run = shared.0.lock().unwrap();
-    let last = plan.captures.iter().copied().max().unwrap_or(0);
-    if plan.sim_frame > last && run.plate.is_some() && run.captures.len() == plan.captures.len() {
+    if plan.done() && run.plate.is_some() && run.captures.len() == plan.captures.len() {
         exit.write(AppExit::Success);
     }
 }
@@ -875,30 +1041,42 @@ fn record_frame(
     shared: Res<ParticleShared>,
     store: Res<DiagnosticsStore>,
     spawners: Query<(&hanabi::EffectSpawner, &EmitterIndex)>,
+    hanabi_spans: Res<HanabiSpansHandle>,
 ) {
-    if plan.sim_frame == 0 || plan.sim_frame > plan.captures.iter().copied().max().unwrap_or(0) {
+    if plan.sim_frame == 0 {
         return;
     }
     let mut run = shared.0.lock().unwrap();
-    if let Some((total, spans)) = frame_gpu_ms(&store) {
+    hanabi_spans
+        .record
+        .store(plan.timed(), std::sync::atomic::Ordering::Relaxed);
+    if plan.timed()
+        && let Some((total, spans)) = frame_gpu_ms(&store)
+    {
         run.gpu_ms.push(total);
         run.spans = spans;
     }
-    for (s, i) in &spawners {
-        run.spawns[i.0].push(s.spawn_count);
+    if plan.sim_frame <= plan.last_capture() {
+        for (s, i) in &spawners {
+            run.spawns[i.0].push(s.spawn_count);
+        }
     }
 }
 
 /// Runs a particle scenario's Bevy side in a child process (`--bevy-side` with the variant's
-/// `--seed`/`--gravity-scale`) and reads its output back from `dir`.
+/// `--seed`/`--gravity-scale`, timing `timed_frames` frames after the last capture) and reads its
+/// output back from `dir`.
 pub fn run_particles_in_child(
     scenario: &ParticleScenario,
     dir: &std::path::Path,
     variant: ParticleVariant,
+    timed_frames: u32,
 ) -> Result<ParticleRun, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let mut cmd = std::process::Command::new(exe);
-    cmd.args(["--bevy-side", scenario.name, "--out"]).arg(dir);
+    cmd.args(["--bevy-side", scenario.name, "--out"])
+        .arg(dir)
+        .args(["--frames", &timed_frames.to_string()]);
     if let Some(seed) = variant.seed {
         cmd.args(["--seed", &seed.to_string()]);
     }
@@ -942,6 +1120,7 @@ pub fn run_particles_in_child(
             })
             .unwrap_or_default(),
         gpu_ms: numbers(&value["gpu_ms"]),
+        sim_ms: numbers(&value["sim_ms"]),
         first_spawn_update: value["first_spawn_update"].as_u64().unwrap_or(0) as u32,
         spans: value["spans"]
             .as_array()

@@ -12,6 +12,7 @@ use crate::{
     cull::{Frustum, Obb},
     material::AlphaMode,
     particle_pass::{ParticleFrame, ParticlePipelines},
+    particle_sim::SimPipelines,
     scene::{Cubemap, FogFalloff, LightShadows, MAX_CASCADES, Scene, ShadowFilter, Tonemapping},
     sky::{SkyPipelines, SkyTargets},
     world::{Instance, MaterialId, MeshId, Vertex, World},
@@ -191,6 +192,8 @@ pub struct Renderer {
     no_transmittance: wgpu::TextureView,
     /// Camera-facing particle quads (`particle_pass`).
     particles: ParticlePipelines,
+    /// The particle simulation's compute pipelines, shared by its worlds (`particle_sim`).
+    sim: SimPipelines,
 }
 
 /// The tone-mapping shader's `METHOD` constant.
@@ -885,6 +888,7 @@ impl Renderer {
             lut_sampler,
             sky: SkyPipelines::new(device, queue),
             particles: ParticlePipelines::new(device),
+            sim: SimPipelines::new(device),
             no_transmittance: device
                 .create_texture_with_data(
                     queue,
@@ -915,6 +919,10 @@ impl Renderer {
 
     pub(crate) fn material_layout(&self) -> &wgpu::BindGroupLayout {
         &self.material_layout
+    }
+
+    pub(crate) fn sim_pipelines(&self) -> &SimPipelines {
+        &self.sim
     }
 
     /// Writes one frame's camera, lights and instances into `viewport`. Only buffers whose
@@ -1567,7 +1575,7 @@ impl Renderer {
                     Phase::Opaque..Phase::End,
                     &lit_index,
                 );
-                viewport.particles.draw(&mut pass, &self.particles);
+                viewport.particles.draw(&mut pass, &self.particles, world);
             }
             Some(sky) => {
                 let mut pass = begin_main_pass(
@@ -1610,7 +1618,7 @@ impl Renderer {
                     Phase::Blend..Phase::End,
                     &lit_index,
                 );
-                viewport.particles.draw(&mut pass, &self.particles);
+                viewport.particles.draw(&mut pass, &self.particles, world);
             }
         }
 

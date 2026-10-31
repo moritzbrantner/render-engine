@@ -48,6 +48,14 @@ pub struct Headless {
     timestamps: bool,
 }
 
+/// GPU milliseconds per frame from [`Headless::gpu_frame_times`].
+pub struct FrameTimes {
+    /// Every pass, the particle simulation included.
+    pub total: Vec<f64>,
+    /// The particle simulation pass alone (zero without `particle_dt`).
+    pub particles: Vec<f64>,
+}
+
 /// One RGBA8 frame, rows top to bottom, sRGB-encoded.
 pub struct Frame {
     pub width: u32,
@@ -178,14 +186,19 @@ impl Headless {
     /// after [`WARMUP`] of untimed frames, so the GPU is at its working clocks. Submitting one
     /// frame and waiting for it lets an idle GPU drop to a lower power state part-way through a
     /// run, which made the same scene time 4× slower from one run to the next.
+    ///
+    /// With `particle_dt`, every frame (timed or not) first steps the world's particles by that
+    /// many seconds ([`World::step_particles`]), and the frame's time includes the simulation
+    /// pass.
     pub fn gpu_frame_times(
         &self,
         viewport: &mut Viewport,
-        world: &World,
+        world: &mut World,
         scene: &Scene,
         instances: &[Instance],
         frames: usize,
-    ) -> Result<Vec<f64>, Error> {
+        particle_dt: Option<f32>,
+    ) -> Result<FrameTimes, Error> {
         if !self.timestamps {
             return Err(Error::NoTimestamps);
         }
@@ -193,7 +206,8 @@ impl Headless {
         let (width, height) = viewport.size();
         let target = self.target(width, height);
         let view = target.create_view(&Default::default());
-        let per_frame = viewport.timestamp_queries();
+        let sim = if particle_dt.is_some() { 2 } else { 0 };
+        let per_frame = viewport.timestamp_queries() + sim;
         let batch = (wgpu::QUERY_SET_MAX_QUERIES / per_frame).clamp(1, BATCH_FRAMES);
         let count = per_frame * batch;
         let query_set = self.device.create_query_set(&wgpu::QuerySetDescriptor {
@@ -214,30 +228,39 @@ impl Headless {
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             mapped_at_creation: false,
         });
-        let frame = |timestamps: Option<FrameTimestamps<'_>>| {
+        let frame = |world: &mut World, first: Option<u32>| {
             let mut encoder = self.device.create_command_encoder(&Default::default());
+            let stamps = |offset| {
+                first.map(|first| FrameTimestamps {
+                    query_set: &query_set,
+                    first: first + offset,
+                })
+            };
+            if let Some(dt) = particle_dt {
+                world.step_particles(&mut encoder, dt, stamps(0));
+            }
             self.renderer
-                .encode(&mut encoder, viewport, world, &view, timestamps);
+                .encode(&mut encoder, viewport, world, &view, stamps(sim));
             encoder
         };
 
         let warmup = std::time::Instant::now();
         while warmup.elapsed() < WARMUP {
             for _ in 0..batch {
-                self.queue.submit([frame(None).finish()]);
+                self.queue.submit([frame(world, None).finish()]);
             }
             let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
         }
 
         let period = f64::from(self.queue.get_timestamp_period());
-        let mut times = Vec::with_capacity(frames);
-        while times.len() < frames {
-            let n = batch.min((frames - times.len()) as u32);
+        let mut times = FrameTimes {
+            total: Vec::with_capacity(frames),
+            particles: Vec::with_capacity(frames),
+        };
+        while times.total.len() < frames {
+            let n = batch.min((frames - times.total.len()) as u32);
             for f in 0..n {
-                let mut encoder = frame(Some(FrameTimestamps {
-                    query_set: &query_set,
-                    first: f * per_frame,
-                }));
+                let mut encoder = frame(world, Some(f * per_frame));
                 if f + 1 == n {
                     encoder.resolve_query_set(&query_set, 0..n * per_frame, &resolve, 0);
                     encoder.copy_buffer_to_buffer(&resolve, 0, &readback, 0, size);
@@ -253,7 +276,9 @@ impl Headless {
                     .iter()
                     .map(|[b, e]| e.wrapping_sub(*b))
                     .sum();
-                times.push(spans as f64 * period / 1e6);
+                let particles = if sim > 0 { f[1].wrapping_sub(f[0]) } else { 0 };
+                times.total.push(spans as f64 * period / 1e6);
+                times.particles.push(particles as f64 * period / 1e6);
             }
         }
         Ok(times)

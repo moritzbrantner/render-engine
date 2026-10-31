@@ -125,6 +125,10 @@ pub struct Emitter {
     pub size: Vec<(f32, f32)>,
     /// Linear HDR colour and alpha over normalised age.
     pub color: Vec<(f32, Vec4)>,
+    pub blend: ParticleBlend,
+    /// The emitter's transform (a translation): where its spawn positions and velocities are
+    /// placed, and, for alpha-blended emitters, the position they are sorted by.
+    pub translation: Vec3,
 }
 
 impl Emitter {
@@ -166,7 +170,7 @@ impl Emitter {
                 blend: ColorBlend::Overwrite,
             }),
             roundness: 1.0,
-            blend: ParticleBlend::Add,
+            blend: self.blend,
             active: false,
         }
     }
@@ -195,7 +199,7 @@ impl ParticleScenario {
 }
 
 pub fn all() -> Vec<ParticleScenario> {
-    vec![fountain()]
+    vec![fountain(), hundred_k(), alpha()]
 }
 
 /// `particles_fountain`: a one-off burst of sparks plus a continuous fountain, both under
@@ -236,6 +240,8 @@ fn fountain() -> ParticleScenario {
                     (0.5, Vec4::new(3.0, 0.6, 0.1, 0.8)),
                     (1.0, Vec4::new(1.0, 0.1, 0.0, 0.0)),
                 ],
+                blend: ParticleBlend::Add,
+                translation: Vec3::ZERO,
             },
             Emitter {
                 name: "fountain",
@@ -255,6 +261,8 @@ fn fountain() -> ParticleScenario {
                     (0.6, Vec4::new(0.3, 1.2, 2.0, 0.7)),
                     (1.0, Vec4::new(0.1, 0.3, 0.8, 0.0)),
                 ],
+                blend: ParticleBlend::Add,
+                translation: Vec3::ZERO,
             },
         ],
         captures: vec![
@@ -273,6 +281,170 @@ fn fountain() -> ParticleScenario {
             coverage: 0.16,
             spatial: 0.15,
             colour: 0.12,
+        },
+    }
+}
+
+/// `particles_100k`: a fountain sustaining about 100k particles (51 200 a second, living 2 s)
+/// plus a ring of 50 small effects (64 a second each, living 1 s), all additive. Captured at
+/// 0.75 s (38 400 + 50 × 48 alive, before the first small effect's particles die: exact tier)
+/// and 3.0 s (101 600 + 50 × 63 alive: statistical tier).
+fn hundred_k() -> ParticleScenario {
+    let gravity = Vec3::new(0.0, -9.81, 0.0);
+    let mut emitters = vec![Emitter {
+        name: "fountain",
+        capacity: 102_400,
+        spawn: Spawn::Rate {
+            per_second: 51_200.0,
+        },
+        position: Vec3::new(0.0, -1.0, 0.0),
+        radius: 0.1,
+        velocity: Velocity::Jitter {
+            base: Vec3::new(0.0, 7.0, 0.0),
+            spread: Vec3::new(1.6, 0.8, 1.6),
+        },
+        lifetime: 128.0 * DT,
+        gravity,
+        size: vec![(0.0, 0.035), (1.0, 0.015)],
+        color: vec![
+            (0.0, Vec4::new(1.2, 0.8, 0.3, 0.35)),
+            (0.5, Vec4::new(0.9, 0.35, 0.1, 0.25)),
+            (1.0, Vec4::new(0.4, 0.08, 0.02, 0.0)),
+        ],
+        blend: ParticleBlend::Add,
+        translation: Vec3::ZERO,
+    }];
+    for i in 0..50 {
+        let angle = i as f32 / 50.0 * std::f32::consts::TAU;
+        // A hue around the ring.
+        let hue = |offset: f32| 0.5 + 0.5 * (angle + offset).cos();
+        let tint = Vec3::new(hue(0.0), hue(2.1), hue(4.2)) * 3.0;
+        emitters.push(Emitter {
+            name: Box::leak(format!("ring{i:02}").into_boxed_str()),
+            capacity: 128,
+            spawn: Spawn::Rate { per_second: 64.0 },
+            position: Vec3::new(5.0 * angle.cos(), -2.5, 5.0 * angle.sin() - 1.0),
+            radius: 0.08,
+            velocity: Velocity::Jitter {
+                base: Vec3::new(0.0, 1.6, 0.0),
+                spread: Vec3::new(0.3, 0.3, 0.3),
+            },
+            lifetime: 64.0 * DT,
+            gravity: Vec3::new(0.0, -1.0, 0.0),
+            size: vec![(0.0, 0.08), (1.0, 0.03)],
+            color: vec![(0.0, tint.extend(1.0)), (1.0, (tint * 0.3).extend(0.0))],
+            blend: ParticleBlend::Add,
+            translation: Vec3::ZERO,
+        });
+    }
+    ParticleScenario {
+        name: "particles_100k",
+        capability: "100k fountain + 50 effects, GPU simulation",
+        width: 1280,
+        height: 720,
+        camera: Camera {
+            eye: Vec3::new(0.0, 1.5, 13.0),
+            target: Vec3::new(0.0, -0.5, 0.0),
+            fov_y: 45f32.to_radians(),
+            near: 0.1,
+            ev100: 0.0,
+            shadow_filter: ShadowFilter::Hardware2x2,
+            tonemapping: Tonemapping::TonyMcMapface,
+        },
+        clear_color: Vec3::new(0.010, 0.012, 0.020),
+        seed: 0x5eed_0100,
+        emitters,
+        captures: vec![
+            Capture {
+                frame: 48,
+                tier: Tier::Exact,
+            },
+            Capture {
+                frame: 192,
+                tier: Tier::Statistical,
+            },
+        ],
+        // Seed noise at 3.0 s over eight seeds (RTX 3060 Ti): coverage ≤ 0.0041, spatial ≤ 0.0146,
+        // colour ≤ 0.0119. Gravity ×1.25 scores 0.072 / 0.173 / 0.134, which fail on all three.
+        // In the exact tier every other seed scores FLIP mean ≥ 0.045 and p99 ≥ 0.85.
+        stat_max: StatThresholds {
+            coverage: 0.006,
+            spatial: 0.022,
+            colour: 0.018,
+        },
+    }
+}
+
+/// `particles_alpha`: two alpha-blended smoke columns, one behind the other, so both the
+/// back-to-front order of the emitters and the blending itself show. Captured at 1.0 s and
+/// 3.0 s, both in the statistical tier: hanabi draws an emitter's particles in its alive-list
+/// order, which its GPU atomics decide, and over a blended background that order shows. Before
+/// any particle dies the two sides draw the same particles, in a different order inside each
+/// emitter: FLIP mean 0.0014, p99 0.055 at 1.0 s (RTX 3060 Ti).
+fn alpha() -> ParticleScenario {
+    let smoke = |name, translation, color: Vec4| Emitter {
+        name,
+        capacity: 512,
+        spawn: Spawn::Rate { per_second: 256.0 },
+        position: Vec3::ZERO,
+        radius: 0.3,
+        velocity: Velocity::Jitter {
+            base: Vec3::new(0.0, 0.2, 0.0),
+            spread: Vec3::new(0.3, 0.2, 0.3),
+        },
+        lifetime: 128.0 * DT,
+        gravity: Vec3::new(0.0, 1.2, 0.0),
+        size: vec![(0.0, 0.15), (1.0, 0.35)],
+        color: vec![(0.0, color), (1.0, (color.truncate() * 0.4).extend(0.0))],
+        blend: ParticleBlend::Alpha,
+        translation,
+    };
+    ParticleScenario {
+        name: "particles_alpha",
+        capability: "alpha blending, emitters sorted back to front",
+        width: 1280,
+        height: 720,
+        camera: Camera {
+            eye: Vec3::new(0.0, 1.4, 6.5),
+            target: Vec3::new(0.0, 1.3, 0.0),
+            fov_y: 45f32.to_radians(),
+            near: 0.1,
+            ev100: 0.0,
+            shadow_filter: ShadowFilter::Hardware2x2,
+            tonemapping: Tonemapping::TonyMcMapface,
+        },
+        clear_color: Vec3::new(0.30, 0.32, 0.36),
+        seed: 0x5eed_0200,
+        emitters: vec![
+            smoke(
+                "back",
+                Vec3::new(-0.35, 0.0, -1.5),
+                Vec4::new(1.2, 0.5, 0.2, 0.4),
+            ),
+            smoke(
+                "front",
+                Vec3::new(0.35, 0.0, 1.0),
+                Vec4::new(0.15, 0.35, 0.9, 0.4),
+            ),
+        ],
+        captures: vec![
+            Capture {
+                frame: 64,
+                tier: Tier::Statistical,
+            },
+            Capture {
+                frame: 192,
+                tier: Tier::Statistical,
+            },
+        ],
+        // Seed noise over eight seeds and both captures (RTX 3060 Ti): coverage ≤ 0.042, spatial
+        // ≤ 0.046, colour ≤ 0.064; a Bevy rerun alone scores colour 0.007 (the atomics reorder
+        // each emitter). Buoyancy ×1.25 scores coverage 0.087 at 1.0 s, 0.139 / spatial 0.087 at
+        // 3.0 s, which fail.
+        stat_max: StatThresholds {
+            coverage: 0.065,
+            spatial: 0.07,
+            colour: 0.095,
         },
     }
 }

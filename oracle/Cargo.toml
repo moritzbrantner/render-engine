@@ -10,6 +10,8 @@ description = "Bevy oracle: renders each parity scenario on Bevy and render-engi
 render-engine = { path = ".." }
 bevy = { version = "0.20.1", default-features = false, features = [
     "3d_bevy_render",
+    # System names, to find bevy_hanabi's `simulate` system and time it (`bevy_side::HanabiTimer`).
+    "debug",
     "default_app",
     "experimental_pbr_pcss",
     "multi_threaded",
