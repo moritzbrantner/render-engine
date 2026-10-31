@@ -2,9 +2,10 @@
 //! renderer, so every field here has a direct Bevy counterpart (listed per field).
 //!
 //! Units follow Bevy's physical conventions: lengths in metres, directional illuminance in lux,
-//! ambient brightness in cd/m², exposure as EV100. Colours are linear RGB.
+//! ambient and environment-map brightness in cd/m², exposure as EV100. Colours are linear RGB.
 
 use glam::{Quat, Vec2, Vec3};
+use std::sync::Arc;
 
 /// Everything one frame needs.
 #[derive(Clone, Debug)]
@@ -15,6 +16,8 @@ pub struct Scene {
     pub clear_color: Vec3,
     pub sun: Option<Sun>,
     pub ambient: Ambient,
+    /// Image-based ambient light, added to `ambient` (Bevy `EnvironmentMapLight` on the camera).
+    pub environment: Option<EnvironmentMap>,
     pub meshes: Vec<MeshInstance>,
 }
 
@@ -163,6 +166,61 @@ pub struct Ambient {
     pub brightness: f32,
 }
 
+/// Image-based light from prefiltered cube maps (Bevy `EnvironmentMapLight`), split-sum style:
+/// Lambertian irradiance for diffuse, GGX-prefiltered radiance for specular.
+#[derive(Clone, Debug)]
+pub struct EnvironmentMap {
+    /// Irradiance / π per direction: the radiance a white Lambertian surface facing that way
+    /// reflects.
+    pub diffuse: Arc<Cubemap>,
+    /// Prefiltered radiance with a mip chain; level `m` of `n` is filtered for perceptual
+    /// roughness `m / (n - 1)`.
+    pub specular: Arc<Cubemap>,
+    /// Scales both maps to cd/m² (Bevy `intensity`).
+    pub intensity: f32,
+}
+
+/// Cube-map texels. Faces follow the wgpu/Vulkan order (+X, -X, +Y, -Y, +Z, -Z) and are looked up
+/// with the world direction's z negated, like Bevy's (left-handed) cube maps.
+#[derive(Clone)]
+pub struct Cubemap {
+    /// Texels per face side at level 0.
+    pub size: u32,
+    pub format: wgpu::TextureFormat,
+    /// One entry per mip level, each holding its six faces in order.
+    pub levels: Vec<Vec<u8>>,
+}
+
+impl Cubemap {
+    /// Decodes a cube-map KTX2 file (`E5B9G9R9_UFLOAT_PACK32` or `R16G16B16A16_SFLOAT`,
+    /// optionally zstd-supercompressed), as written by the glTF IBL Sampler or the oracle's
+    /// `bake_ibl`.
+    pub fn from_ktx2(bytes: &[u8]) -> Result<Self, crate::ktx::Error> {
+        let t = crate::ktx::decode(bytes)?;
+        if t.faces != 6 || t.width != t.height || t.depth != 0 {
+            return Err(crate::ktx::Error::new(format!(
+                "expected a square cube map, got {}×{} with {} faces",
+                t.width, t.height, t.faces
+            )));
+        }
+        Ok(Self {
+            size: t.width,
+            format: t.format,
+            levels: t.levels,
+        })
+    }
+}
+
+impl std::fmt::Debug for Cubemap {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Cubemap")
+            .field("size", &self.size)
+            .field("format", &self.format)
+            .field("mip_levels", &self.levels.len())
+            .finish()
+    }
+}
+
 /// A metallic-roughness material (Bevy `StandardMaterial` without textures).
 #[derive(Clone, Copy, Debug)]
 pub struct Material {
@@ -193,6 +251,13 @@ pub enum Shape {
     Cuboid(Vec3),
     /// Bevy `Plane3d::default().mesh().size(x, z)`: an XZ plane facing +Y.
     Plane(Vec2),
+    /// Bevy `Sphere::new(radius).mesh().uv(sectors, stacks)`: a UV sphere with its poles on ±Z
+    /// and smooth normals.
+    Sphere {
+        radius: f32,
+        sectors: u32,
+        stacks: u32,
+    },
 }
 
 #[derive(Clone, Copy, Debug)]

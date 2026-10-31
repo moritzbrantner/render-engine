@@ -94,7 +94,8 @@ impl Headless {
     }
 
     pub fn prepare(&self, scene: &Scene, width: u32, height: u32) -> PreparedScene {
-        self.renderer.prepare(&self.device, scene, width, height)
+        self.renderer
+            .prepare(&self.device, &self.queue, scene, width, height)
     }
 
     fn target(&self, width: u32, height: u32) -> wgpu::Texture {

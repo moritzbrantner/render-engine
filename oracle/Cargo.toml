@@ -17,7 +17,7 @@ bevy = { version = "0.20.1", default-features = false, features = [
     "zstd_rust",
 ] }
 nv-flip = "0.1.2"
-image = { version = "0.25.10", default-features = false, features = ["png"] }
+image = { version = "0.25.10", default-features = false, features = ["hdr", "png"] }
 pollster = "1.0.1"
 serde_json = "1.0"
 

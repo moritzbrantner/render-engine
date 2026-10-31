@@ -72,7 +72,9 @@ sets `WGPU_FORCE_FALLBACK_ADAPTER=1`; Bevy and render-engine both honour that va
 - The images agree across devices within the gate. Since the HDR target (#4) the frame passes
   through two `Rgba16Float` roundings, so tiny float differences on lavapipe flip about 5% of
   pixels by one 8-bit step: `sun_shadows` scores mean 0.0024 / p99 0.038 on lavapipe and
-  0.0001 / 0.0007 on the RTX 3060 Ti; `sun_cascades` 0.0026 / 0.025 and 0.0005 / 0.0086.
+  0.0001 / 0.0007 on the RTX 3060 Ti; `sun_cascades` 0.0026 / 0.025 and 0.0005 / 0.0086;
+  `ibl_materials` 0.0005 / 0.0081 and 0.0000 / 0.0000; `ibl_materials_sun` 0.0022 / 0.031 and
+  0.0000 / 0.0001.
 
 ## D5 — Pinned Bevy configuration per scenario
 
@@ -89,9 +91,17 @@ upgrade that changes a default shows up as a deliberate scenario change:
   (`Hardware2x2` or `Gaussian`), `DirectionalLightShadowMap` 2048 and Bevy's depth/normal biases
   (0.02 m, 1.8 texels). `sun_shadows` keeps one cascade with 2×2 PCF; `sun_cascades` uses
   Bevy's defaults (4 cascades, 10 m / 150 m, overlap 0.2, Gaussian);
-- `GlobalAmbientLight` for ambient; no environment map yet.
+- `GlobalAmbientLight` for ambient (brightness 0 in the IBL scenarios);
+- image-based light: an `EnvironmentMapLight` on the camera (intensity in cd/m², no rotation)
+  whose diffuse and specular `Image`s are built from the same decoded texels render-engine
+  uploads, with Bevy's default (trilinear, clamped) sampler. The maps are prefiltered once,
+  offline, from a committed CC0 HDRI (`assets/ibl/`, provenance in its README) by the oracle's
+  `bake_ibl`: the glTF IBL Sampler's split-sum layout that Bevy documents (GGX specular with
+  perceptual roughness `mip / (mips - 1)`, Lambertian diffuse), written as zstd `rgb9e5` KTX2 by
+  KTX-Software. Both sides therefore sample identical cube maps; render-engine owns the
+  sampling and the BRDF terms. Bevy's runtime `GeneratedEnvironmentMapLight` is not used.
 
-Later scenarios lift these one at a time (temporal filtering, IBL, fog, sky).
+Later scenarios lift these one at a time (temporal filtering, fog, sky).
 
 ## D6 — Order: lighting first, then particles
 

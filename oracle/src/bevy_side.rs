@@ -11,14 +11,16 @@ use bevy::{
     camera::{Exposure, Hdr, RenderTarget},
     diagnostic::DiagnosticsStore,
     light::{
-        CascadeShadowConfigBuilder, DirectionalLightShadowMap, GlobalAmbientLight,
-        ShadowFilteringMethod,
+        CascadeShadowConfigBuilder, DirectionalLightShadowMap, EnvironmentMapLight,
+        GlobalAmbientLight, ShadowFilteringMethod,
     },
     prelude::*,
     render::{
         RenderPlugin,
         diagnostic::RenderDiagnosticsPlugin,
-        render_resource::TextureFormat,
+        render_resource::{
+            Extent3d, TextureDataOrder, TextureFormat, TextureViewDescriptor, TextureViewDimension,
+        },
         settings::{RenderCreation, WgpuFeatures, WgpuSettings},
         view::{
             DebandDither, Msaa, Tonemapping,
@@ -27,7 +29,7 @@ use bevy::{
     },
     window::ExitCondition,
 };
-use render_engine::scene::{ShadowFilter, Shape, Tonemapping as EngineTonemapping};
+use render_engine::scene::{Cubemap, ShadowFilter, Shape, Tonemapping as EngineTonemapping};
 use std::{
     path::PathBuf,
     sync::{Arc, Mutex},
@@ -62,6 +64,29 @@ fn v3(v: render_engine::glam::Vec3) -> Vec3 {
 
 fn linear(v: render_engine::glam::Vec3) -> Color {
     Color::linear_rgb(v.x, v.y, v.z)
+}
+
+/// The same texels as render-engine uploads, as a cube `Image` with Bevy's default sampler (what
+/// Bevy's KTX2 loader produces from the file).
+fn cube_image(cube: &Cubemap) -> Image {
+    let mut image = Image {
+        data: Some(cube.levels.concat()),
+        data_order: TextureDataOrder::MipMajor,
+        texture_view_descriptor: Some(TextureViewDescriptor {
+            dimension: Some(TextureViewDimension::Cube),
+            ..default()
+        }),
+        ..default()
+    };
+    let desc = &mut image.texture_descriptor;
+    desc.size = Extent3d {
+        width: cube.size,
+        height: cube.size,
+        depth_or_array_layers: 6,
+    };
+    desc.mip_level_count = cube.levels.len() as u32;
+    desc.format = cube.format;
+    image
 }
 
 pub fn run(scenario: Scenario, timed_frames: u32) -> BevyRun {
@@ -124,7 +149,7 @@ pub fn run(scenario: Scenario, timed_frames: u32) -> BevyRun {
             ));
             commands.insert_resource(TargetImage(target.clone()));
             let cam = scene.camera;
-            commands.spawn((
+            let mut camera = commands.spawn((
                 Camera3d::default(),
                 Camera {
                     clear_color: ClearColorConfig::Custom(linear(scene.clear_color)),
@@ -151,6 +176,14 @@ pub fn run(scenario: Scenario, timed_frames: u32) -> BevyRun {
                 },
                 Transform::from_translation(v3(cam.eye)).looking_at(v3(cam.target), Vec3::Y),
             ));
+            if let Some(env) = &scene.environment {
+                camera.insert(EnvironmentMapLight {
+                    diffuse_map: images.add(cube_image(&env.diffuse)),
+                    specular_map: images.add(cube_image(&env.specular)),
+                    intensity: env.intensity,
+                    ..default()
+                });
+            }
             if let Some(sun) = scene.sun {
                 let mut light = commands.spawn((
                     DirectionalLight {
@@ -182,6 +215,11 @@ pub fn run(scenario: Scenario, timed_frames: u32) -> BevyRun {
                     Shape::Plane(size) => {
                         meshes.add(Plane3d::default().mesh().size(size.x, size.y))
                     }
+                    Shape::Sphere {
+                        radius,
+                        sectors,
+                        stacks,
+                    } => meshes.add(Sphere::new(radius).mesh().uv(sectors, stacks)),
                 };
                 let mat = m.material;
                 commands.spawn((
