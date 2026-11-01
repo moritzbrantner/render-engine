@@ -258,6 +258,19 @@ As built (#11):
   linearly sample a depth texture without comparison, so the local passes also write their depth
   into an R32F target that the soft-shadow (PCSS) blocker search reads. Shader macros are
   `LIT_*`: three.js rewrites `NUM_POINT_LIGHTS` and its other light counts in every shader.
+- **Textured materials (#40)** port render-engine's `StandardMaterial` path into `LitMaterial`
+  rather than mapping onto `MeshStandardMaterial`: per-material `LIT_*` defines select the
+  textures, alpha mode, double-sided and unlit code; `tangent` and `color` are declared by the
+  shader (three only declares them for its own materials), with `defaultAttributeValues` of zero
+  (no tangents) and white. Masked and blended casters and double-sided ones draw their shadows
+  with a per-material variant of the shadow material (base-colour alpha discard, both faces)
+  instead of `scene.overrideMaterial`. The main pass sets three's opaque and transparent sorts to
+  Bevy's phases (opaque, then masked, then blended back to front by object origin; three's own
+  transparent sort uses the bounding-sphere centre) and draws double-sided blended meshes in one
+  pass (`forceSinglePass`). Textures upload with the engine's mip chain and sampler
+  (`textureFromData`). The remaining FLIP error on `textured_props` sits on silhouette pixels
+  whose MSAA coverage differs by a sample or two, probably because a WebGL framebuffer is stored
+  upside down relative to wgpu's, which mirrors the 4× sample pattern.
 - **Oracle side.** `oracle --no-three` skips it; otherwise the oracle exports every lighting
   scenario the port covers (`oracle/src/three_side.rs`: scene in Bevy units plus vertex data) and
   renders them in one headless Chromium run (`oracle/three/render.mjs`, Playwright) through

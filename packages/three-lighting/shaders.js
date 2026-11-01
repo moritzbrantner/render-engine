@@ -12,8 +12,18 @@ export const MAX_POINT_SHADOWS = 4;
 export const MAX_SPOT_SHADOWS = 4;
 
 export const litVertex = /* glsl */ `
+// glTF TANGENT and COLOR_0 (three declares uv, TEXCOORD_0). Declared here rather than by three,
+// which only does for its own materials; absent attributes read LitMaterial's
+// defaultAttributeValues (no tangent, white).
+in vec4 tangent;
+in vec4 color;
 out vec3 vWorld;
 out vec3 vNormal;
+out vec2 vUv;
+out vec4 vTangent;
+out vec4 vColor;
+// 1 when the mesh has tangents (render-engine's per-instance flag).
+flat out float vHasTangents;
 
 // Bevy inverse_transpose_3x3m.
 mat3 inverseTranspose3x3(mat3 m) {
@@ -24,6 +34,8 @@ mat3 inverseTranspose3x3(mat3 m) {
     return mat3(x / det, y / det, z / det);
 }
 
+// Bevy mesh_normal_local_to_world and mesh_tangent_local_to_world: normalised per vertex
+// (MikkTSpace), not again per fragment; a mirroring model matrix flips the bitangent sign.
 void main() {
     vec4 world = modelMatrix * vec4(position, 1.0);
     vWorld = world.xyz;
@@ -32,6 +44,15 @@ void main() {
         n = normalize(inverseTranspose3x3(mat3(modelMatrix)) * n);
     }
     vNormal = n;
+    vTangent = tangent;
+    vHasTangents = 0.0;
+    if (any(notEqual(tangent, vec4(0.0)))) {
+        float sign = determinant(mat3(modelMatrix)) < 0.0 ? -1.0 : 1.0;
+        vTangent = vec4(normalize(mat3(modelMatrix) * tangent.xyz), tangent.w * sign);
+        vHasTangents = 1.0;
+    }
+    vUv = uv;
+    vColor = color;
     gl_Position = projectionMatrix * viewMatrix * world;
 }
 `;
@@ -42,14 +63,35 @@ export const litFragment = /* glsl */ `
 
 in vec3 vWorld;
 in vec3 vNormal;
+in vec2 vUv;
+in vec4 vTangent;
+in vec4 vColor;
+flat in float vHasTangents;
 layout(location = 0) out highp vec4 fragColor;
 
-// Material (Bevy StandardMaterial, untextured subset).
+// Material (Bevy StandardMaterial, the glTF core subset). Each texture multiplies its factor and
+// samples TEXCOORD_0; LIT_* defines say which textures are bound and how alpha and faces are used.
 uniform vec4 baseColor;
 uniform vec3 emissive;
 uniform float metallic;
 uniform float perceptualRoughness;
 uniform float reflectance;
+uniform float alphaCutoff;
+#ifdef LIT_BASE_COLOR_TEXTURE
+uniform sampler2D baseColorTexture;
+#endif
+#ifdef LIT_EMISSIVE_TEXTURE
+uniform sampler2D emissiveTexture;
+#endif
+#ifdef LIT_METALLIC_ROUGHNESS_TEXTURE
+uniform sampler2D metallicRoughnessTexture;
+#endif
+#ifdef LIT_OCCLUSION_TEXTURE
+uniform sampler2D occlusionTexture;
+#endif
+#ifdef LIT_NORMAL_MAP
+uniform sampler2D normalMapTexture;
+#endif
 
 // Frame (shared by every LitMaterial, owned by Lighting).
 uniform float exposure;
@@ -681,16 +723,61 @@ float fetchSpotShadow(int light, vec3 P, vec3 N, vec2 fragCoord) {
 }
 #endif
 
-vec3 litRadiance(vec3 worldNormal, vec3 N) {
-    vec3 base = baseColor.rgb;
-    float roughness = perceptualRoughnessToRoughness(perceptualRoughness);
+// Every material input of a fragment (Bevy pbr_input_from_standard_material). All texture
+// sampling happens here, before any alpha discard, in uniform control flow.
+struct MaterialSample {
+    vec4 baseColor;
+    vec3 emissive;
+    float metallic;
+    float perceptualRoughness;
+    float diffuseOcclusion;
+    // Tangent-space normal in [-1, 1], when the material has a normal map.
+    vec3 Nt;
+};
+
+MaterialSample sampleMaterial() {
+    MaterialSample m;
+    // Bevy: vertex colour, times the material colour, times the texture.
+    m.baseColor = vColor * baseColor;
+#ifdef LIT_BASE_COLOR_TEXTURE
+    m.baseColor *= texture(baseColorTexture, vUv);
+#endif
+    m.emissive = emissive;
+#ifdef LIT_EMISSIVE_TEXTURE
+    m.emissive *= texture(emissiveTexture, vUv).rgb;
+#endif
+    m.metallic = metallic;
+    m.perceptualRoughness = perceptualRoughness;
+#ifdef LIT_METALLIC_ROUGHNESS_TEXTURE
+    vec4 mr = texture(metallicRoughnessTexture, vUv);
+    m.perceptualRoughness *= mr.g;
+    m.metallic *= mr.b;
+#endif
+    m.diffuseOcclusion = 1.0;
+#ifdef LIT_OCCLUSION_TEXTURE
+    m.diffuseOcclusion = texture(occlusionTexture, vUv).r;
+#endif
+    m.Nt = vec3(0.0, 0.0, 1.0);
+#ifdef LIT_NORMAL_MAP
+    m.Nt = texture(normalMapTexture, vUv).rgb * 2.0 - 1.0;
+#endif
+    return m;
+}
+
+// Exposed radiance of a lit fragment with shading normal N; shadows are looked up with the
+// interpolated vertex normal, as in Bevy.
+vec3 litRadiance(vec3 worldNormal, vec3 N, MaterialSample m) {
+    vec3 base = m.baseColor.rgb;
+    float metal = m.metallic;
+    float pr = m.perceptualRoughness;
+    float roughness = perceptualRoughnessToRoughness(pr);
     vec3 V = normalize(cameraPosition - vWorld);
     float NdotV = max(dot(N, V), 0.0001);
 
-    vec3 diffuseColor = base * (1.0 - metallic);
+    vec3 diffuseColor = base * (1.0 - metal);
     vec3 f0Dielectric = vec3(0.16 * reflectance * reflectance);
-    vec3 F0 = mix(f0Dielectric, base, metallic);
-    vec2 fab = F_AB(perceptualRoughness, NdotV);
+    vec3 F0 = mix(f0Dielectric, base, metal);
+    vec2 fab = F_AB(pr, NdotV);
 
     // Bevy's order: point lights, spot lights, then the sun.
     vec3 direct = vec3(0.0);
@@ -732,17 +819,19 @@ vec3 litRadiance(vec3 worldNormal, vec3 N) {
     vec3 diffuseAmbient = envBrdfApprox(diffuseColor, F_AB(1.0, NdotV));
     vec3 specularAmbient = envBrdfApprox(F0, fab);
     float specularOcclusion = clamp(dot(F0, vec3(50.0 * 0.33)), 0.0, 1.0);
+    // Bevy's order: environment diffuse, environment specular, then the uniform ambient light.
+    // The occlusion texture darkens the diffuse environment light and all of the ambient light.
     vec3 indirect = vec3(0.0);
     if (environment.z > 0.5) {
         vec3 envDiffuse, envSpecular;
-        environmentMapLight(N, V, perceptualRoughness, roughness, diffuseColor, metallic, f0Dielectric, base, fab, envDiffuse, envSpecular);
-        indirect += envDiffuse;
+        environmentMapLight(N, V, pr, roughness, diffuseColor, metal, f0Dielectric, base, fab, envDiffuse, envSpecular);
+        indirect += envDiffuse * m.diffuseOcclusion;
         indirect += envSpecular;
     }
-    indirect += (diffuseAmbient + specularAmbient * specularOcclusion) * ambientColor;
+    indirect += (diffuseAmbient + specularAmbient * specularOcclusion) * ambientColor * m.diffuseOcclusion;
 
     // Emissive light is scaled by alpha and exposed like the rest (Bevy, emissive.a = 1).
-    return exposure * (direct + indirect) + emissive * baseColor.a * exposure;
+    return exposure * (direct + indirect) + m.emissive * m.baseColor.a * exposure;
 }
 
 vec4 scatteringAdjustedFogColor(vec3 scattering) {
@@ -789,14 +878,55 @@ vec3 applyFog(vec3 inputColor, vec3 world) {
     return inputColor * (1.0 - extinctionFactor * color.a) + color.rgb * inscatteringFactor * color.a;
 }
 
+// Bevy pbr_fragment + apply_pbr_lighting + main_pass_post_lighting_processing, with
+// alpha_discard for masked materials. Front faces follow three's winding, which flips for
+// mirroring model matrices (Bevy's winding_corrected_front_facing).
 void main() {
-    vec3 worldNormal = vNormal;
-    vec3 N = normalize(worldNormal);
-    vec3 color = litRadiance(worldNormal, N);
-    if (fogBi.w > 0.5) {
-        color = applyFog(color, vWorld);
+    MaterialSample m = sampleMaterial();
+#if defined(LIT_ALPHA_MASK)
+    if (m.baseColor.a < alphaCutoff) {
+        discard;
     }
-    fragColor = vec4(color, 1.0);
+    m.baseColor.a = 1.0;
+#elif !defined(LIT_ALPHA_BLEND)
+    m.baseColor.a = 1.0;
+#endif
+    bool hasTangents = vHasTangents > 0.5;
+    vec3 worldNormal = vNormal;
+#if defined(LIT_DOUBLE_SIDED) && !defined(LIT_NORMAL_MAP)
+    // Bevy prepare_world_normal: back faces flip the normal, unless the mesh has tangents or the
+    // material a normal map (then the normal map flips it).
+    if (!gl_FrontFacing && !hasTangents) {
+        worldNormal = -worldNormal;
+    }
+#endif
+
+    vec4 color;
+#ifdef LIT_UNLIT
+    color = m.baseColor;
+#else
+    vec3 N = normalize(worldNormal);
+#ifdef LIT_NORMAL_MAP
+    if (hasTangents) {
+        // Bevy calculate_tbn_mikktspace + apply_normal_mapping: no renormalisation or
+        // Gram-Schmidt before the map is applied.
+        vec3 T = vTangent.xyz;
+        vec3 B = vTangent.w * cross(worldNormal, T);
+        vec3 Nt = m.Nt;
+#ifdef LIT_DOUBLE_SIDED
+        if (!gl_FrontFacing) {
+            Nt = -Nt;
+        }
+#endif
+        N = normalize(Nt.x * T + Nt.y * B + Nt.z * worldNormal);
+    }
+#endif
+    color = vec4(litRadiance(worldNormal, N, m), m.baseColor.a);
+#endif
+    if (fogBi.w > 0.5) {
+        color.rgb = applyFog(color.rgb, vWorld);
+    }
+    fragColor = color;
 }
 `;
 
@@ -804,10 +934,47 @@ void main() {
 // between the sun and the cascade's near plane clamp onto it). With EXT_clip_control and
 // EXT_depth_clamp (nativeDepth) this is Bevy's pipeline: zero-to-one clip space and unclipped,
 // rasterizer-clamped depth. Without them, GL clip z = 2·z − w and the clamp happens per fragment.
+//
+// Alpha-masked and blended casters (LIT_ALPHA_DISCARD) cut their shadows out by the base
+// colour's alpha (render-engine shadow_masked_fs, Bevy prepass_alpha_discard); blended ones at
+// 0.05, like Bevy.
+const shadowAlphaDiscard = /* glsl */ `
+#ifdef LIT_ALPHA_DISCARD
+in vec2 vUv;
+uniform vec4 baseColor;
+uniform float alphaCutoff;
+#ifdef LIT_BASE_COLOR_TEXTURE
+uniform sampler2D baseColorTexture;
+#endif
+void alphaDiscard() {
+    vec4 color = baseColor;
+#ifdef LIT_BASE_COLOR_TEXTURE
+    color *= texture(baseColorTexture, vUv);
+#endif
+    if (color.a < alphaCutoff) {
+        discard;
+    }
+}
+#else
+void alphaDiscard() {}
+#endif
+`;
+
+const shadowUv = /* glsl */ `
+#ifdef LIT_ALPHA_DISCARD
+out vec2 vUv;
+#define LIT_PASS_UV vUv = uv;
+#else
+#define LIT_PASS_UV
+#endif
+`;
+
 export const shadowVertex = /* glsl */ `
 uniform mat4 cascadeClip;
 out float vDepth;
+${shadowUv}
 void main() {
+    LIT_PASS_UV
     vec4 clip = cascadeClip * (modelMatrix * vec4(position, 1.0));
     vDepth = clip.z;
 #ifdef NATIVE_DEPTH
@@ -822,7 +989,9 @@ void main() {
 export const shadowFragment = /* glsl */ `
 in float vDepth;
 layout(location = 0) out highp vec4 fragColor;
+${shadowAlphaDiscard}
 void main() {
+    alphaDiscard();
 #ifndef NATIVE_DEPTH
     gl_FragDepth = min(vDepth, 1.0);
 #endif
@@ -838,7 +1007,9 @@ void main() {
 export const localShadowVertex = /* glsl */ `
 uniform mat4 lightClip;
 uniform float flipY;
+${shadowUv}
 void main() {
+    LIT_PASS_UV
     vec4 clip = lightClip * (modelMatrix * vec4(position, 1.0));
     clip.y *= flipY;
 #ifdef NATIVE_DEPTH
@@ -851,7 +1022,9 @@ void main() {
 
 export const localShadowFragment = /* glsl */ `
 layout(location = 0) out highp vec4 fragColor;
+${shadowAlphaDiscard}
 void main() {
+    alphaDiscard();
     fragColor = vec4(gl_FragCoord.z, 0.0, 0.0, 1.0);
 }
 `;

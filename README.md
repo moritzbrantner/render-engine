@@ -128,7 +128,7 @@ FLIP gate against Bevy. CI run on lavapipe (ANGLE on Vulkan), FLIP mean / p99 ag
 | `fog_modes` (8 views) | ≤ 0.0001 / 0.0026 | pass |
 | `point_spot` (3 views: Gaussian, 2×2 PCF, PCSS) | ≤ 0.0006 / 0.0153 | pass |
 | `many_instances` | 0.0058 / 0.0869 | known gap, #42 |
-| `textured_props` | – | not ported, #40 |
+| `textured_props` | 0.0016 / 0.0438 | pass |
 | `skinned_figure` | – | not ported, #41 |
 | `sky_day_cycle` (4 views) | – | not ported, #39 |
 

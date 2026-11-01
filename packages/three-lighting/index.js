@@ -16,6 +16,7 @@ import {
   Data3DTexture,
   DataTexture,
   DepthTexture,
+  DoubleSide,
   FloatType,
   FrontSide,
   GLSL3,
@@ -24,17 +25,23 @@ import {
   HalfFloatType,
   LinearFilter,
   LinearMipmapLinearFilter,
+  LinearMipmapNearestFilter,
   LinearSRGBColorSpace,
   Matrix4,
+  MirroredRepeatWrapping,
   NearestFilter,
+  NearestMipmapLinearFilter,
+  NearestMipmapNearestFilter,
   NoBlending,
   OrthographicCamera,
   PerspectiveCamera,
   RGBAFormat,
   RedFormat,
+  RepeatWrapping,
   RGBFormat,
   SRGBColorSpace,
   ShaderMaterial,
+  UnsignedByteType,
   UnsignedInt5999Type,
   UnsignedIntType,
   Vector3,
@@ -378,9 +385,69 @@ function packLocalLights(pointLights, spotLights, directionalSize, pointSize) {
 
 const NO_LOCAL_LIGHTS = { LIT_POINT_LIGHTS: 0, LIT_SPOT_LIGHTS: 0, LIT_POINT_SHADOWS: 0, LIT_SPOT_SHADOWS: 0 };
 
+const WRAP = { repeat: RepeatWrapping, clampToEdge: ClampToEdgeWrapping, mirrorRepeat: MirroredRepeatWrapping };
+
+/** three's minification filter for render-engine's `min_filter` and `mipmap_filter`. */
+function minFilterOf(min, mipmap, mipmapped) {
+  if (!mipmapped) return min === 'nearest' ? NearestFilter : LinearFilter;
+  if (min === 'nearest') return mipmap === 'nearest' ? NearestMipmapNearestFilter : NearestMipmapLinearFilter;
+  return mipmap === 'nearest' ? LinearMipmapNearestFilter : LinearMipmapLinearFilter;
+}
+
+/** glTF's default sampler (render-engine `Sampler::default`): repeat, trilinear. */
+export const DEFAULT_SAMPLER = Object.freeze({
+  addressModeU: 'repeat',
+  addressModeV: 'repeat',
+  magFilter: 'linear',
+  minFilter: 'linear',
+  mipmapFilter: 'linear',
+});
+
 /**
- * Bevy `StandardMaterial` (untextured subset): linear base colour, metallic, perceptual
- * roughness, reflectance (0.5 = 4% F0) and emissive radiance (cd/m²).
+ * A material texture as render-engine uploads one (`TextureData`): RGBA8 texels, level 0 first,
+ * each level half the previous one, with its sampler. One level means no mipmaps; none are
+ * generated. `srgb` for colour (base colour, emissive), linear for data (normal,
+ * metallic-roughness, occlusion), as glTF prescribes. Rows run top-down from v = 0, as in glTF.
+ */
+export function textureFromData({ width, height, srgb, levels, sampler = DEFAULT_SAMPLER }) {
+  const texture = new DataTexture(levels[0], width, height, RGBAFormat, UnsignedByteType);
+  const mipmapped = levels.length > 1;
+  texture.mipmaps = mipmapped
+    ? levels.map((data, i) => ({ data, width: Math.max(1, width >> i), height: Math.max(1, height >> i) }))
+    : [];
+  Object.assign(texture, {
+    wrapS: WRAP[sampler.addressModeU],
+    wrapT: WRAP[sampler.addressModeV],
+    magFilter: sampler.magFilter === 'nearest' ? NearestFilter : LinearFilter,
+    minFilter: minFilterOf(sampler.minFilter, sampler.mipmapFilter, mipmapped),
+    generateMipmaps: false,
+    flipY: false,
+    unpackAlignment: 1,
+    colorSpace: srgb ? SRGBColorSpace : LinearSRGBColorSpace,
+    needsUpdate: true,
+  });
+  return texture;
+}
+
+/** Bevy `AlphaMode`: 'opaque', 'mask' (with `alphaCutoff`) or 'blend'. */
+const ALPHA_MODES = ['opaque', 'mask', 'blend'];
+
+const TEXTURE_DEFINES = {
+  baseColorTexture: 'LIT_BASE_COLOR_TEXTURE',
+  emissiveTexture: 'LIT_EMISSIVE_TEXTURE',
+  metallicRoughnessTexture: 'LIT_METALLIC_ROUGHNESS_TEXTURE',
+  occlusionTexture: 'LIT_OCCLUSION_TEXTURE',
+  normalMapTexture: 'LIT_NORMAL_MAP',
+};
+
+/**
+ * Bevy `StandardMaterial` (the glTF core subset render-engine covers): linear base colour and
+ * alpha, metallic, perceptual roughness, reflectance (0.5 = 4% F0), emissive radiance (cd/m²),
+ * each times its texture (`TEXCOORD_0`, three's `uv`); the mesh's `color` attribute (glTF
+ * `COLOR_0`) multiplies the base colour. Normal maps need the mesh's MikkTSpace `tangent`
+ * attribute. Alpha modes sort and draw like Bevy's phases (opaque, then masked, then blended back
+ * to front by object origin) and masked or blended materials cut their shadows out.
+ * The parameters are fixed at construction.
  */
 export class LitMaterial extends ShaderMaterial {
   constructor({
@@ -390,7 +457,26 @@ export class LitMaterial extends ShaderMaterial {
     perceptualRoughness = 0.5,
     reflectance = 0.5,
     emissive = [0, 0, 0],
+    baseColorTexture = null,
+    emissiveTexture = null,
+    metallicRoughnessTexture = null,
+    normalMapTexture = null,
+    occlusionTexture = null,
+    alphaMode = 'opaque',
+    alphaCutoff = 0.5,
+    doubleSided = false,
+    unlit = false,
   } = {}) {
+    if (!ALPHA_MODES.includes(alphaMode)) throw new Error(`unknown alphaMode ${alphaMode}`);
+    const textures = { baseColorTexture, emissiveTexture, metallicRoughnessTexture, normalMapTexture, occlusionTexture };
+    const defines = { ...NO_LOCAL_LIGHTS };
+    for (const [name, define] of Object.entries(TEXTURE_DEFINES)) {
+      if (textures[name]) defines[define] = '';
+    }
+    if (alphaMode === 'mask') defines.LIT_ALPHA_MASK = '';
+    if (alphaMode === 'blend') defines.LIT_ALPHA_BLEND = '';
+    if (doubleSided) defines.LIT_DOUBLE_SIDED = '';
+    if (unlit) defines.LIT_UNLIT = '';
     super({
       glslVersion: GLSL3,
       vertexShader: litVertex,
@@ -401,14 +487,91 @@ export class LitMaterial extends ShaderMaterial {
         metallic: { value: metallic },
         perceptualRoughness: { value: perceptualRoughness },
         reflectance: { value: reflectance },
+        // Masked: the material's cutoff. Blended: the shadow pass's (Bevy's 0.05).
+        alphaCutoff: { value: alphaMode === 'blend' ? 0.05 : alphaMode === 'mask' ? alphaCutoff : 0 },
+        ...Object.fromEntries(Object.entries(textures).map(([name, t]) => [name, { value: t }])),
         ...frameUniforms(),
       },
-      defines: { ...NO_LOCAL_LIGHTS },
-      side: FrontSide,
+      defines,
+      side: doubleSided ? DoubleSide : FrontSide,
+      // Blended: straight alpha over what is behind, depth tested but not written, one pass
+      // for both faces (Bevy's Transparent3d).
+      transparent: alphaMode === 'blend',
+      depthWrite: alphaMode !== 'blend',
+      forceSinglePass: true,
     });
+    // Attributes the mesh does not have: no tangents, white vertex colours.
+    this.defaultAttributeValues = { ...this.defaultAttributeValues, tangent: [0, 0, 0, 0], color: [1, 1, 1, 1] };
     this.isLitMaterial = true;
     this.toneMapped = false;
+    this.alphaMode = alphaMode;
+    this.doubleSided = doubleSided;
+    this.unlit = unlit;
   }
+
+  /**
+   * The LitMaterial for a material three's GLTFLoader made: `MeshStandardMaterial` (or
+   * `MeshPhysicalMaterial`, whose extensions are dropped) or, for `KHR_materials_unlit`,
+   * `MeshBasicMaterial`. Maps glTF's factors and textures the way Bevy's glTF loader does.
+   */
+  static fromGltf(material) {
+    const color = material.color ? [material.color.r, material.color.g, material.color.b] : [1, 1, 1];
+    const alphaMode = material.transparent ? 'blend' : material.alphaTest > 0 ? 'mask' : 'opaque';
+    const common = {
+      baseColor: color,
+      alpha: material.opacity ?? 1,
+      baseColorTexture: material.map ?? null,
+      alphaMode,
+      alphaCutoff: alphaMode === 'mask' ? material.alphaTest : 0.5,
+      doubleSided: material.side === DoubleSide,
+    };
+    if (material.isMeshBasicMaterial) return new LitMaterial({ ...common, unlit: true });
+    const e = material.emissive;
+    const strength = material.emissiveIntensity ?? 1;
+    return new LitMaterial({
+      ...common,
+      metallic: material.metalness ?? 0,
+      perceptualRoughness: material.roughness ?? 1,
+      metallicRoughnessTexture: material.roughnessMap ?? material.metalnessMap ?? null,
+      normalMapTexture: material.normalMap ?? null,
+      occlusionTexture: material.aoMap ?? null,
+      emissive: e ? [e.r * strength, e.g * strength, e.b * strength] : [0, 0, 0],
+      emissiveTexture: material.emissiveMap ?? null,
+    });
+  }
+}
+
+/** Opaque, then alpha-masked draws (Bevy's Opaque3d and AlphaMask3d), each three's way. */
+function opaqueSort(a, b) {
+  const phase = (item) => (item.material.alphaMode === 'mask' ? 1 : 0);
+  return (
+    phase(a) - phase(b) ||
+    a.groupOrder - b.groupOrder ||
+    a.renderOrder - b.renderOrder ||
+    a.material.id - b.material.id ||
+    (a.materialVariant ?? 0) - (b.materialVariant ?? 0) ||
+    a.z - b.z ||
+    a.id - b.id
+  );
+}
+
+/** Blended draws from back to front by object origin in view space (Bevy's Transparent3d). */
+function transparentSort(camera) {
+  const v = camera.matrixWorldInverse.elements;
+  const viewZ = (item) => {
+    const m = item.object.matrixWorld.elements;
+    return v[2] * m[12] + v[6] * m[13] + v[10] * m[14] + v[14];
+  };
+  return (a, b) =>
+    a.groupOrder - b.groupOrder || a.renderOrder - b.renderOrder || viewZ(a) - viewZ(b) || a.id - b.id;
+}
+
+/** Turns a define on or off, recompiling when it changes. */
+function setDefine(material, name, on) {
+  if (on === Object.hasOwn(material.defines, name)) return;
+  if (on) material.defines[name] = '';
+  else delete material.defines[name];
+  material.needsUpdate = true;
 }
 
 /** A reverse-Z comparison depth texture with Bevy's linear shadow sampler. */
@@ -501,6 +664,8 @@ export class Lighting {
       depthFunc: GreaterEqualDepth,
       side: FrontSide,
     });
+    // Per LitMaterial that cuts its shadow out or draws both faces: { cascade, local }.
+    this.shadowVariants = new WeakMap();
     this.shadowTargets = Array.from({ length: MAX_CASCADES }, () => shadowTarget(shadowMapSize));
     this.shadowCamera = new OrthographicCamera();
     this.shadowMaterial = new ShaderMaterial({
@@ -669,7 +834,17 @@ export class Lighting {
     const gl = renderer.getContext();
     if (clipControl) clipControl.clipControlEXT(clipControl.LOWER_LEFT_EXT, clipControl.ZERO_TO_ONE_EXT);
     if (native) gl.enable(depthClamp.DEPTH_CLAMP_EXT);
-    scene.overrideMaterial = this.shadowMaterial;
+    // Every caster draws with a shadow material: the shared one, or its LitMaterial's variant
+    // when that cuts out by alpha or draws both faces.
+    const casters = [];
+    scene.traverse((o) => {
+      if (o.material) casters.push([o, o.material]);
+    });
+    const assign = (local) => {
+      const pick = (m) => this.#shadowMaterial(m, local, native, localNative);
+      for (const [o, m] of casters) o.material = Array.isArray(m) ? m.map(pick) : pick(m);
+    };
+    assign(false);
     cascades.forEach((c, i) => {
       // Culling camera: the cascade's x/y extent, unbounded towards the sun (pancaked casters).
       const half = c.diameter / 2;
@@ -686,7 +861,10 @@ export class Lighting {
       renderer.render(scene, cam);
     });
     if (native) gl.disable(depthClamp.DEPTH_CLAMP_EXT);
-    this.#renderLocalShadows(renderer, scene, local);
+    if (local.spotViews.length || local.pointViews.length) {
+      this.#renderLocalShadows(renderer, scene, local, () => assign(true));
+    }
+    for (const [o, m] of casters) o.material = m;
     if (clipControl) {
       const reversed = state.buffers.depth.getReversed();
       clipControl.clipControlEXT(
@@ -695,18 +873,56 @@ export class Lighting {
       );
     }
     state.buffers.depth.setClear(1);
-    scene.overrideMaterial = null;
   }
 
-  /** Spot maps, then point-light cube faces (render-engine's pass order). */
-  #renderLocalShadows(renderer, scene, local) {
-    if (!local.spotViews.length && !local.pointViews.length) return;
+  /**
+   * The shadow material `material`'s casters draw with: a LitMaterial's own variant when it is
+   * masked, blended or double-sided (sharing its uniforms), otherwise the shared one.
+   */
+  #shadowMaterial(material, local, native, localNative) {
+    const shared = local ? this.localShadowMaterial : this.shadowMaterial;
+    if (!material.isLitMaterial || (material.alphaMode === 'opaque' && !material.doubleSided)) return shared;
+    let variants = this.shadowVariants.get(material);
+    if (!variants) {
+      const discard = material.alphaMode !== 'opaque';
+      const variant = (base) => {
+        const m = base.clone();
+        // Clones copy uniforms; share the pass's and the material's instead.
+        m.uniforms = {
+          ...base.uniforms,
+          baseColor: material.uniforms.baseColor,
+          alphaCutoff: material.uniforms.alphaCutoff,
+          baseColorTexture: material.uniforms.baseColorTexture,
+        };
+        m.defines = { ...base.defines };
+        if (discard) m.defines.LIT_ALPHA_DISCARD = '';
+        if (discard && material.uniforms.baseColorTexture.value) m.defines.LIT_BASE_COLOR_TEXTURE = '';
+        return m;
+      };
+      variants = { cascade: variant(this.shadowMaterial), local: variant(this.localShadowMaterial) };
+      this.shadowVariants.set(material, variants);
+      material.addEventListener('dispose', () => {
+        variants.cascade.dispose();
+        variants.local.dispose();
+        this.shadowVariants.delete(material);
+      });
+    }
+    const m = local ? variants.local : variants.cascade;
+    setDefine(m, 'NATIVE_DEPTH', local ? localNative : native);
+    m.side = material.doubleSided ? DoubleSide : shared.side;
+    return m;
+  }
+
+  /**
+   * Spot maps, then point-light cube faces (render-engine's pass order). `assign` gives the
+   * casters their local shadow materials, whose faces follow the shared material's side.
+   */
+  #renderLocalShadows(renderer, scene, local, assign) {
     const state = renderer.state;
     const material = this.localShadowMaterial;
     const cam = this.localShadowCamera;
     cam.matrixAutoUpdate = false;
     cam.matrixWorldAutoUpdate = false;
-    scene.overrideMaterial = material;
     renderer.setClearColor(new Color(0, 0, 0), 0);
     state.buffers.color.setMask(true);
     const pass = (view, target, face) => {
@@ -726,10 +942,12 @@ export class Lighting {
     };
     material.uniforms.flipY.value = 1;
     material.side = FrontSide;
+    assign();
     local.spotViews.forEach((view, i) => pass(view, this.spotShadowTargets[i]));
     // Cube faces render upside down (see localShadowVertex), which flips the winding.
     material.uniforms.flipY.value = -1;
     material.side = BackSide;
+    assign();
     local.pointViews.forEach((view, i) => pass(view, this.pointShadowTargets[Math.floor(i / 6)], i % 6));
   }
 
@@ -781,7 +999,11 @@ export class Lighting {
     // The shadow material left colour writes off.
     renderer.state.buffers.color.setMask(true);
     renderer.clear(true, true, false);
+    renderer.setOpaqueSort(opaqueSort);
+    renderer.setTransparentSort(transparentSort(camera));
     renderer.render(scene, camera);
+    renderer.setOpaqueSort(null);
+    renderer.setTransparentSort(null);
 
     const tm = this.tonemapQuad.material.uniforms;
     tm.hdrTexture.value = this.hdrTarget.texture;

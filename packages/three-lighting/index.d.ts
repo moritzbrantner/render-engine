@@ -1,9 +1,12 @@
 import type {
   CubeTexture,
   Data3DTexture,
+  DataTexture,
+  Material,
   PerspectiveCamera,
   Scene,
   ShaderMaterial,
+  Texture,
   WebGLRenderer,
   WebGLRenderTarget,
 } from 'three';
@@ -151,8 +154,40 @@ export function loadLut(url: string): Promise<Data3DTexture>;
 export function loadCubemap(url: string): Promise<CubeTexture>;
 export function loadToneMappingLuts(urls?: { tonyMcMapface?: string; agx?: string }): Promise<ToneMappingLuts>;
 
+export type AddressMode = 'repeat' | 'clampToEdge' | 'mirrorRepeat';
+export type FilterMode = 'linear' | 'nearest';
+
+/** How a texture is sampled (glTF `sampler`, render-engine `Sampler`). */
+export interface Sampler {
+  addressModeU: AddressMode;
+  addressModeV: AddressMode;
+  magFilter: FilterMode;
+  minFilter: FilterMode;
+  mipmapFilter: FilterMode;
+}
+
+/** glTF's default: repeat, trilinear. */
+export const DEFAULT_SAMPLER: Readonly<Sampler>;
+
+/**
+ * A material texture as render-engine uploads one (`TextureData`): RGBA8 texels, level 0 first,
+ * each level half the previous one (one level: no mipmaps, none generated). `srgb` for base
+ * colour and emissive, linear for normal, metallic-roughness and occlusion. Rows run top-down
+ * from v = 0, as in glTF.
+ */
+export function textureFromData(data: {
+  width: number;
+  height: number;
+  srgb: boolean;
+  levels: Uint8Array[];
+  sampler?: Sampler;
+}): DataTexture;
+
+/** Bevy `AlphaMode`. */
+export type AlphaMode = 'opaque' | 'mask' | 'blend';
+
 export interface LitMaterialParameters {
-  /** Linear RGB. */
+  /** Linear RGB (glTF `baseColorFactor`). */
   baseColor?: Vec3;
   alpha?: number;
   metallic?: number;
@@ -161,12 +196,43 @@ export interface LitMaterialParameters {
   reflectance?: number;
   /** Emissive radiance, cd/m². */
   emissive?: Vec3;
+  /** sRGB colour texture; its alpha feeds `alphaMode`. Textures sample the mesh's `uv` (TEXCOORD_0). */
+  baseColorTexture?: Texture | null;
+  /** sRGB, multiplies `emissive`. */
+  emissiveTexture?: Texture | null;
+  /** Linear; green scales roughness, blue scales metallic (glTF). */
+  metallicRoughnessTexture?: Texture | null;
+  /** Linear tangent-space normal map (OpenGL convention, +Y up); needs the mesh's MikkTSpace `tangent` attribute. */
+  normalMapTexture?: Texture | null;
+  /** Linear; red darkens ambient and environment diffuse light. */
+  occlusionTexture?: Texture | null;
+  /**
+   * 'opaque' (default); 'mask': fragments and shadows cut out below `alphaCutoff`; 'blend':
+   * straight alpha, drawn after opaque and masked meshes from back to front by object origin,
+   * without depth writes, shadows cut out below 0.05.
+   */
+  alphaMode?: AlphaMode;
+  /** glTF `alphaCutoff` for 'mask' (default 0.5). */
+  alphaCutoff?: number;
+  /** Draws back faces too, with the normal flipped (glTF `doubleSided`). */
+  doubleSided?: boolean;
+  /** Outputs the base colour as is, without lighting or exposure (glTF `KHR_materials_unlit`). */
+  unlit?: boolean;
 }
 
-/** Bevy `StandardMaterial` (untextured subset), shaded by `Lighting`. */
+/**
+ * Bevy `StandardMaterial` (the glTF core subset render-engine covers), shaded by `Lighting`. The
+ * mesh's `color` attribute (glTF `COLOR_0`) multiplies the base colour. Parameters are fixed at
+ * construction.
+ */
 export class LitMaterial extends ShaderMaterial {
   constructor(parameters?: LitMaterialParameters);
+  /** The LitMaterial for a material three's GLTFLoader made (standard, physical or unlit basic). */
+  static fromGltf(material: Material): LitMaterial;
   readonly isLitMaterial: true;
+  readonly alphaMode: AlphaMode;
+  readonly doubleSided: boolean;
+  readonly unlit: boolean;
 }
 
 export class Lighting {
@@ -191,7 +257,11 @@ export class Lighting {
   fog: Fog | null;
   readonly shadowMapSize: number;
   readonly pointShadowMapSize: number;
-  /** Shadow cascades, spot maps and point-light cube faces, MSAA HDR pass, tone mapping and sRGB output into `target` (null: canvas). */
+  /**
+   * Shadow cascades, spot maps and point-light cube faces, MSAA HDR pass, tone mapping and sRGB
+   * output into `target` (null: canvas). The HDR pass sorts like Bevy (opaque, then masked, then
+   * blended back to front), replacing any custom opaque or transparent sort while it draws.
+   */
   render(
     renderer: WebGLRenderer,
     scene: Scene,
