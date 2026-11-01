@@ -1,11 +1,13 @@
 // render-engine's lighting on three.js (WebGLRenderer, GLSL ES 3.0): Bevy's PBR BRDF, sun
-// cascades with Bevy's fitting and filters, ambient and image-based light from prefiltered cube
-// maps, distance fog and Bevy's tone mappers. Scene values use Bevy's physical units (lux, cd/m²,
-// EV100, linear RGB), so a frame matches render-engine's and Bevy's (the oracle's `three` side).
+// cascades with Bevy's fitting and filters, point and spot lights, ambient and image-based light
+// from prefiltered cube maps, Bevy's atmosphere with the sun and moon and the ambient light it
+// generates (sky.js), distance fog and Bevy's tone mappers. Scene values use Bevy's physical
+// units (lux, cd/m², EV100, linear RGB), so a frame matches render-engine's and Bevy's (the
+// oracle's `three` side).
 //
 // The consumer owns the WebGLRenderer, the Scene and the camera. Meshes use `LitMaterial`;
-// `Lighting.render` draws the sun's shadow cascades, the 4× MSAA HDR main pass, tone mapping and
-// the sRGB output.
+// `Lighting.render` draws the sky's LUTs, the shadow maps, the 4× MSAA HDR main pass (with the
+// sky), tone mapping and the sRGB output.
 
 import {
   BackSide,
@@ -44,6 +46,7 @@ import {
   UnsignedByteType,
   UnsignedInt5999Type,
   UnsignedIntType,
+  Vector2,
   Vector3,
   Vector4,
   WebGLCubeRenderTarget,
@@ -53,6 +56,7 @@ import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import { read as readKtx2 } from 'three/addons/libs/ktx-parse.module.js';
 import { ZSTDDecoder } from 'three/addons/libs/zstddec.module.js';
 import { cascadeRanges, fitCascade } from './cascades.js';
+import { ENVIRONMENT_MIPS, INNER_RADIUS, OUTER_RADIUS, SkyPasses, worldToAtmosphere } from './sky.js';
 import {
   fullscreenVertex,
   litFragment,
@@ -73,6 +77,66 @@ export { DEFAULT_SUN_SHADOWS, singleCascade, farBounds, cascadeRanges, fitCascad
 /** Bevy `Exposure::exposure()` for an EV100. */
 export function exposureFromEv100(ev100) {
   return Math.pow(2, -ev100) / 1.2;
+}
+
+/** Bevy `lux::RAW_SUNLIGHT`: sunlight above the atmosphere, the sun's illuminance under a sky. */
+export const RAW_SUNLIGHT = 130_000;
+
+/** The visible disc of a directional light in the sky (Bevy `SunDisk`): radians, brightness. */
+export const SunDisk = Object.freeze({
+  /** Bevy `SunDisk::EARTH`: the sun seen from Earth (about 32′). */
+  EARTH: Object.freeze({ angularSize: 0.00930842, intensity: 1 }),
+  /** The moon seen from Earth (about 31′). */
+  MOON: Object.freeze({ angularSize: 0.00904, intensity: 1 }),
+  /** No disc (Bevy `SunDisk::OFF`). */
+  OFF: Object.freeze({ angularSize: 0, intensity: 0 }),
+});
+
+/**
+ * render-engine's `Sky::default()`: Bevy's Earth atmosphere with its ground albedo, the sun and
+ * moon discs, and the sky's environment-map light at intensity 1 (`environmentIntensity: null`
+ * leaves ambient light to `Lighting.ambient` and `Lighting.environment`).
+ */
+export const DEFAULT_SKY = Object.freeze({
+  groundAlbedo: Object.freeze([0.3, 0.3, 0.3]),
+  sunDisk: SunDisk.EARTH,
+  moonDisk: SunDisk.MOON,
+  environmentIntensity: 1,
+});
+
+/**
+ * Sun and moon directions for a time of day (render-engine `DayCycle`). The game owns the clock;
+ * this only maps an hour to directions. The sun rises in the east (+X) at 06:00, culminates
+ * towards the south (+Z) at `noonElevation` at 12:00 and sets in the west at 18:00; the moon
+ * follows the same path `moonLagHours` behind it. Directions point towards the light (negate
+ * them for `Lighting.sun.direction`).
+ */
+export class DayCycle {
+  constructor({ noonElevation = (60 * Math.PI) / 180, moonLagHours = 12 } = {}) {
+    this.noonElevation = noonElevation;
+    this.moonLagHours = moonLagHours;
+  }
+
+  /** Unit direction towards the sun at `hours` (any value; the path repeats every 24 h). */
+  toSun(hours) {
+    const angle = ((hours - 6) / 12) * Math.PI;
+    const [c, s] = [Math.cos(angle), Math.sin(angle)];
+    return [c, Math.sin(this.noonElevation) * s, Math.cos(this.noonElevation) * s];
+  }
+
+  /** Unit direction towards the moon at `hours`. */
+  toMoon(hours) {
+    return this.toSun(hours - this.moonLagHours);
+  }
+
+  /**
+   * The hour between noon and midnight at which the sun stands `elevation` radians above (or,
+   * negative, below) the horizon; clamped to noon and midnight.
+   */
+  afternoonHour(elevation) {
+    const s = Math.min(Math.max(Math.sin(elevation) / Math.sin(this.noonElevation), -1), 1);
+    return 6 + (12 * (Math.PI - Math.asin(s))) / Math.PI;
+  }
 }
 
 /** Bevy `REVISED_KOSCHMIEDER_CONTRAST_THRESHOLD`. */
@@ -254,6 +318,16 @@ function frameUniforms() {
     fogBe: { value: new Vector4() },
     fogBi: { value: new Vector4() },
     localLights: { value: [] },
+    // The moon: direction to it (w 1 when there is one), colour × illuminance.
+    moonDirectionToLight: { value: new Vector4() },
+    moonColor: { value: new Vector3() },
+    // The sky's atmosphere: x planet radius, y atmosphere radius, z 1 with a sky, w 1 when the
+    // moon is shaded before the sun (Bevy's directional-light order); the sun and moon disc
+    // sizes; its transmittance LUT.
+    worldToAtmosphere: { value: worldToAtmosphere() },
+    atmosphere: { value: new Vector4(INNER_RADIUS, OUTER_RADIUS, 0, 0) },
+    disks: { value: new Vector2() },
+    atmosphereTransmittance: { value: null },
     ...Object.fromEntries(
       ['pointShadowMap', 'pointShadowDepth', 'spotShadowMap', 'spotShadowDepth'].flatMap((name) =>
         Array.from({ length: 4 }, (_, i) => [`${name}${i}`, { value: null }]),
@@ -657,6 +731,21 @@ export class Lighting {
      * off the axis, and `SPOT_LIGHT_SHADOWS`-shaped shadows or null.
      */
     this.spotLights = [];
+    /**
+     * `{ direction, color, illuminance }`: an unshadowed directional light, the moon (lux; its
+     * disc shows under a sky).
+     */
+    this.moon = null;
+    /**
+     * `DEFAULT_SKY`-shaped: Bevy's physically based atmosphere (transmittance, multiscattering,
+     * sky-view and aerial-view LUTs every frame) with the sun and moon discs, the sky drawn where
+     * nothing else is and aerial perspective over the scene. With `environmentIntensity` it is
+     * also the ambient light: rendered into a cube and filtered like Bevy's
+     * `GeneratedEnvironmentMapLight` every frame (then `environment` must be null). Under a sky
+     * the sun's illuminance is the light above the atmosphere (`RAW_SUNLIGHT`). Needs
+     * `EXT_color_buffer_float` and `OES_texture_float_linear`.
+     */
+    this.sky = null;
 
     this.uniforms = frameUniforms();
     this.shadowMapSize = shadowMapSize;
@@ -729,7 +818,13 @@ export class Lighting {
       magFilter: NearestFilter,
       colorSpace: LinearSRGBColorSpace,
     };
-    this.hdrTarget = new WebGLRenderTarget(width, height, { ...options, samples: 4, depthBuffer: true });
+    // The depth resolves into a texture after each draw, for the sky's aerial perspective.
+    this.hdrTarget = new WebGLRenderTarget(width, height, {
+      ...options,
+      samples: 4,
+      depthBuffer: true,
+      depthTexture: new DepthTexture(width, height, UnsignedIntType),
+    });
     this.postTarget = new WebGLRenderTarget(width, height, { ...options, depthBuffer: false });
     this.size = [width, height];
   }
@@ -781,8 +876,35 @@ export class Lighting {
     for (let i = 0; i < MAX_CASCADES; i++) {
       u[`shadowMap${i}`].value = this.shadowTargets[i].depthTexture;
     }
-    const env = this.environment;
-    u.environment.value.set(env ? env.intensity : 0, env ? env.specular.userData.mipLevels - 1 : 0, env ? 1 : 0);
+    const moon = this.moon;
+    u.moonDirectionToLight.value.set(0, 0, 0, 0);
+    u.moonColor.value.set(0, 0, 0);
+    if (moon) {
+      const d = new Vector3(...moon.direction).normalize().negate();
+      u.moonDirectionToLight.value.set(d.x, d.y, d.z, 1);
+      u.moonColor.value.set(...moon.color).multiplyScalar(moon.illuminance);
+    }
+    const sky = this.sky;
+    u.atmosphere.value.z = sky ? 1 : 0;
+    u.atmosphere.value.w = sun?.shadows ? 1 : 0;
+    u.disks.value.set(sky?.sunDisk.angularSize ?? 0, sky?.moonDisk.angularSize ?? 0);
+    u.atmosphereTransmittance.value = sky ? this.skyPasses.transmittance.texture : null;
+    const skyEnvironment = sky?.environmentIntensity ?? null;
+    if (this.environment && skyEnvironment !== null) {
+      throw new Error('a sky with environment light replaces Lighting.environment; set one of them');
+    }
+    const env =
+      this.environment ??
+      (skyEnvironment === null
+        ? null
+        : {
+            intensity: skyEnvironment,
+            diffuse: this.skyPasses.diffuse.texture,
+            specular: this.skyPasses.specular.texture,
+            mipLevels: ENVIRONMENT_MIPS,
+          });
+    const mips = env ? (env.mipLevels ?? env.specular.userData.mipLevels) : 1;
+    u.environment.value.set(env ? env.intensity : 0, mips - 1, env ? 1 : 0);
     u.diffuseEnvironmentMap.value = env?.diffuse ?? null;
     u.specularEnvironmentMap.value = env?.specular ?? null;
     const fog = this.fog;
@@ -962,6 +1084,42 @@ export class Lighting {
     local.pointViews.forEach((view, i) => pass(view, this.pointShadowTargets[Math.floor(i / 6)], i % 6));
   }
 
+  /** The sky's LUTs and environment cubes, created with the first sky. */
+  get skyPasses() {
+    this.#sky ??= new SkyPasses();
+    return this.#sky;
+  }
+
+  #sky = null;
+
+  /**
+   * The sky's directional lights in Bevy's order (`prepare_lights` sorts unshadowed lights
+   * first, then by spawn order, sun before moon), each with its disc.
+   */
+  #skyLights() {
+    const light = (l, disk) => ({
+      directionToLight: new Vector3(...l.direction).normalize().negate(),
+      color: l.color.map((c) => c * l.illuminance),
+      diskSize: disk.angularSize,
+      diskIntensity: disk.intensity,
+    });
+    const sun = this.sun ? light(this.sun, this.sky.sunDisk) : null;
+    const moon = this.moon ? light(this.moon, this.sky.moonDisk) : null;
+    const ordered = this.sun?.shadows ? [moon, sun] : [sun, moon];
+    return ordered.filter(Boolean);
+  }
+
+  #renderSky(renderer, camera, aspect) {
+    this.skyPasses.render(renderer, {
+      groundAlbedo: this.sky.groundAlbedo,
+      lights: this.#skyLights(),
+      worldFromView: camera.matrixWorld,
+      clipFromView: perspectiveInfiniteReverse((camera.fov * Math.PI) / 180, aspect, camera.near),
+      exposure: exposureFromEv100(this.ev100),
+      environment: (this.sky.environmentIntensity ?? null) !== null,
+    });
+  }
+
   /**
    * Renders `scene` from `camera` into `target` (null: the canvas), sized `width × height`.
    */
@@ -999,11 +1157,14 @@ export class Lighting {
     while (this.pointShadowTargets.length < local.pointViews.length / 6) {
       this.pointShadowTargets.push(pointShadowTarget(this.pointShadowMapSize));
     }
+    if (this.sky) this.#renderSky(renderer, camera, width / height);
     this.#updateUniforms(camera, cascades, local);
     const definesKey = JSON.stringify(local.defines);
+    const sceneMaterials = new Set();
     scene.traverse((o) => {
       const materials = Array.isArray(o.material) ? o.material : [o.material];
       for (const m of materials) {
+        if (m) sceneMaterials.add(m);
         if (!m?.isLitMaterial) continue;
         // The frame uniforms are shared objects whose values #updateUniforms sets: a material
         // takes them once.
@@ -1038,16 +1199,34 @@ export class Lighting {
     const upright = projection.clone();
     const state = renderer.state;
     const setMaterial = state.setMaterial;
-    try {
-      projection.premultiply(FLIP_Y);
-      state.setMaterial = (material, frontFaceCW) => setMaterial(material, !frontFaceCW);
-      renderer.render(scene, camera);
-    } finally {
-      state.setMaterial = setMaterial;
-      projection.copy(upright);
-      renderer.setOpaqueSort(null);
-      renderer.setTransparentSort(null);
+    const drawScene = () => {
+      try {
+        projection.premultiply(FLIP_Y);
+        state.setMaterial = (material, frontFaceCW) => setMaterial(material, !frontFaceCW);
+        renderer.render(scene, camera);
+      } finally {
+        state.setMaterial = setMaterial;
+        projection.copy(upright);
+      }
+    };
+    if (this.sky) {
+      // Like Bevy's main pass with a sky: the opaque and alpha-masked draws, the sky over them
+      // (reading their depth), then the blended draws.
+      const visible = new Map([...sceneMaterials].map((m) => [m, m.visible]));
+      try {
+        for (const [m, v] of visible) m.visible = v && !m.transparent;
+        drawScene();
+        this.skyPasses.composite(renderer, this.hdrTarget, this.hdrTarget.depthTexture, camera.projectionMatrixInverse);
+        for (const [m, v] of visible) m.visible = v && m.transparent;
+        drawScene();
+      } finally {
+        for (const [m, v] of visible) m.visible = v;
+      }
+    } else {
+      drawScene();
     }
+    renderer.setOpaqueSort(null);
+    renderer.setTransparentSort(null);
 
     const tm = this.tonemapQuad.material.uniforms;
     tm.hdrTexture.value = this.hdrTarget.texture;
@@ -1073,5 +1252,6 @@ export class Lighting {
     this.noShadow.dispose();
     this.tonemapQuad.material.dispose();
     this.outputQuad.material.dispose();
+    this.#sky?.dispose();
   }
 }

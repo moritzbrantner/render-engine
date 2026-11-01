@@ -24,18 +24,16 @@ use std::{collections::HashMap, path::Path};
 pub const GAPS: &[(&str, u32)] = &[];
 
 /// Follow-up issue per capability the port does not cover yet.
-const UNPORTED_ISSUE: &[(&str, u32)] = &[("sky and moon", 39)];
+const UNPORTED_ISSUE: &[(&str, u32)] = &[];
 
 pub fn gap_issue(name: &str) -> Option<u32> {
     GAPS.iter().find(|(n, _)| *n == name).map(|(_, i)| *i)
 }
 
-/// Why `s` cannot be exported yet, if anything is missing on the three.js side.
-pub fn unsupported(s: &Scenario) -> Option<&'static str> {
-    let scene = &s.scene;
-    if scene.sky.is_some() || scene.moon.is_some() {
-        return Some("sky and moon");
-    }
+/// Why `s` cannot be exported yet, if anything is missing on the three.js side. The port covers
+/// every lighting capability today; a scenario with one it does not cover returns its reason
+/// here, with the follow-up issue in `UNPORTED_ISSUE`.
+pub fn unsupported(_s: &Scenario) -> Option<&'static str> {
     None
 }
 
@@ -310,6 +308,22 @@ pub fn export(s: &Scenario, dir: &Path) -> Result<(), String> {
             "falloff": falloff,
         })
     });
+    let moon = scene.moon.map(|m| {
+        json!({
+            "direction": v3(m.direction),
+            "color": v3(m.color),
+            "illuminance": m.illuminance,
+        })
+    });
+    let disk = |d: render_engine::scene::SunDisk| json!({ "angularSize": d.angular_size, "intensity": d.intensity });
+    let sky = scene.sky.map(|s| {
+        json!({
+            "groundAlbedo": v3(s.ground_albedo),
+            "sunDisk": disk(s.sun_disk),
+            "moonDisk": disk(s.moon_disk),
+            "environmentIntensity": s.environment_intensity,
+        })
+    });
     let doc = json!({
         "name": s.name,
         "width": s.width,
@@ -332,6 +346,8 @@ pub fn export(s: &Scenario, dir: &Path) -> Result<(), String> {
         },
         "clearColor": v3(scene.clear_color),
         "sun": sun,
+        "moon": moon,
+        "sky": sky,
         "ambient": { "color": v3(scene.ambient.color), "brightness": scene.ambient.brightness },
         "shadowMapSize": scene.shadow_maps.directional,
         "pointShadowMapSize": scene.shadow_maps.point,

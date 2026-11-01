@@ -52,6 +52,64 @@ export interface Sun {
   shadows: SunShadows | null;
 }
 
+/** An unshadowed directional light: the moon (Bevy `DirectionalLight` without shadow maps). */
+export interface Moon {
+  /** Direction the light travels. */
+  direction: Vec3;
+  /** Linear RGB. */
+  color: Vec3;
+  /** Lux. */
+  illuminance: number;
+}
+
+/** Bevy `lux::RAW_SUNLIGHT`: sunlight above the atmosphere, the sun's illuminance under a sky. */
+export const RAW_SUNLIGHT: number;
+
+/** The visible disc of a directional light in the sky (Bevy `SunDisk`). */
+export interface SunDiskValue {
+  /** Angular diameter in radians. */
+  angularSize: number;
+  /** Brightness multiplier; 0 hides the disc. */
+  intensity: number;
+}
+export const SunDisk: {
+  readonly EARTH: Readonly<SunDiskValue>;
+  readonly MOON: Readonly<SunDiskValue>;
+  readonly OFF: Readonly<SunDiskValue>;
+};
+
+/**
+ * Bevy's physically based atmosphere (`Atmosphere::earth`, Hillaire's LUTs) with the sun and moon
+ * discs (render-engine `Sky`).
+ */
+export interface Sky {
+  /** Average albedo of the planet's surface, for light reflected into the sky. */
+  groundAlbedo: Vec3;
+  sunDisk: SunDiskValue;
+  moonDisk: SunDiskValue;
+  /**
+   * Ambient and reflected light from the sky, filtered every frame like Bevy's
+   * `GeneratedEnvironmentMapLight` (cd/m² scale); null leaves it to `ambient` and `environment`.
+   */
+  environmentIntensity: number | null;
+}
+
+/** render-engine `Sky::default()`. */
+export const DEFAULT_SKY: Readonly<Sky>;
+
+/** Sun and moon directions for a time of day (render-engine `DayCycle`); directions point towards the light. */
+export class DayCycle {
+  constructor(options?: { noonElevation?: number; moonLagHours?: number });
+  /** Radians above the horizon at noon (default 60°). */
+  noonElevation: number;
+  /** Hours the moon trails the sun (default 12). */
+  moonLagHours: number;
+  toSun(hours: number): Vec3;
+  toMoon(hours: number): Vec3;
+  /** The hour between noon and midnight at which the sun stands `elevation` radians above the horizon. */
+  afternoonHour(elevation: number): number;
+}
+
 /** Shadows of a point or spot light (Bevy `shadow_depth_bias`, `shadow_normal_bias`, `shadow_map_near_z`, `soft_shadows_enabled`). */
 export interface LightShadows {
   /** World-space offset towards the light (m). */
@@ -256,6 +314,15 @@ export class Lighting {
   /** Filter of the sun's shadows and of point and spot shadows that are not soft. */
   shadowFilter: ShadowFilter;
   sun: Sun | null;
+  /** Shaded with the sun (unshadowed lights first, Bevy's order); its disc shows under a sky. */
+  moon: Moon | null;
+  /**
+   * The atmosphere: LUTs every frame, the sky where nothing is drawn, aerial perspective over the
+   * scene, the sun and moon filtered by its transmittance and, with `environmentIntensity`, the
+   * ambient light (then `environment` must be null). Needs `EXT_color_buffer_float` and
+   * `OES_texture_float_linear`.
+   */
+  sky: Sky | null;
   /** Shaded before the spot lights and the sun (Bevy's order), shadow casters first. */
   pointLights: PointLight[];
   spotLights: SpotLight[];
@@ -265,9 +332,11 @@ export class Lighting {
   readonly shadowMapSize: number;
   readonly pointShadowMapSize: number;
   /**
-   * Shadow cascades, spot maps and point-light cube faces, MSAA HDR pass, tone mapping and sRGB
-   * output into `target` (null: canvas). The HDR pass sorts like Bevy (opaque, then masked, then
-   * blended back to front), replacing any custom opaque or transparent sort while it draws. It
+   * Sky LUTs and environment cubes, shadow cascades, spot maps and point-light cube faces, MSAA
+   * HDR pass, tone mapping and sRGB output into `target` (null: canvas). The HDR pass sorts like
+   * Bevy (opaque, then masked, then blended back to front), replacing any custom opaque or
+   * transparent sort while it draws; with a sky it draws the opaque and masked materials, the
+   * sky, then the blended (`transparent`) ones, toggling `material.visible` meanwhile. It
    * renders upside down, as wgpu stores a frame (projection y negated, winding inverted), and
    * the output pass flips it back: a custom shader in the scene that reads `gl_FragCoord.y`
    * sees it mirrored (counting down from the top row). Only objects drawn with a `LitMaterial`

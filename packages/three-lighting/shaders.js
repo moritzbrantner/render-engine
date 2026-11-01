@@ -157,6 +157,16 @@ uniform vec4 fogColor;
 uniform vec4 fogDirectionalLightColor;
 uniform vec4 fogBe;
 uniform vec4 fogBi;
+// The moon: xyz direction to it, w 1 when there is one; colour × illuminance (lux).
+uniform vec4 moonDirectionToLight;
+uniform vec3 moonColor;
+// The sky's atmosphere (Bevy Atmosphere): world to atmosphere space; x planet radius,
+// y atmosphere radius (m), z 1 with a sky, w 1 when the moon is shaded before the sun (Bevy's
+// directional-light order); the sun and moon disc sizes (radians); the transmittance LUT.
+uniform mat4 worldToAtmosphere;
+uniform vec4 atmosphere;
+uniform vec2 disks;
+uniform sampler2D atmosphereTransmittance;
 
 // Point lights then spot lights, shadow casters first (Bevy's clustered order), LIGHT_STRIDE
 // vec4s each, laid out like render-engine's GpuLight: custom data (point: the cube projection's
@@ -404,9 +414,65 @@ void environmentMapLight(vec3 N, vec3 V, float pr, float roughness, vec3 diffuse
     specular = FssEss * radiance;
 }
 
+// Bevy atmosphere clamp_to_surface: at least 1 m above the planet.
+vec3 atmosphereClampToSurface(vec3 position) {
+    float minRadius = atmosphere.x + 1.0;
+    float r = length(position);
+    if (r < minRadius) {
+        vec3 up = normalize(position);
+        return up * minRadius;
+    }
+    return position;
+}
+
+// Bevy fast_acos_4.
+float fastAcos4(float x) {
+    float x1 = abs(x);
+    float x2 = x1 * x1;
+    float x3 = x2 * x1;
+    float s;
+    s = -0.2121144 * x1 + 1.5707288;
+    s = 0.0742610 * x2 + s;
+    s = -0.0187293 * x3 + s;
+    s = sqrt(1.0 - x1) * s;
+    return x >= 0.0 ? s : PI - s;
+}
+
+// Bevy calculate_visible_sun_ratio: the share of the light's disc above the horizon.
+float visibleSunRatio(float r, float mu, float sunAngularSize) {
+    float innerRadius = atmosphere.x;
+    float horizonCos = -sqrt(1.0 - (innerRadius * innerRadius) / (r * r));
+    float horizonAngle = fastAcos4(horizonCos);
+    float sunZenithAngle = fastAcos4(mu);
+    if (sunZenithAngle + sunAngularSize * 0.5 <= horizonAngle) {
+        return 1.0;
+    }
+    if (sunZenithAngle - sunAngularSize * 0.5 >= horizonAngle) {
+        return 0.0;
+    }
+    float d = (horizonAngle - sunZenithAngle) / (sunAngularSize * 0.5);
+    float visibleRatio = 0.5 + d * 0.5;
+    return clamp(visibleRatio, 0.0, 1.0);
+}
+
+// Bevy sample_transmittance_lut with transmittance_lut_r_mu_to_uv (Bruneton).
+vec3 atmosphereTransmittanceAt(float r, float mu) {
+    float inner = atmosphere.x;
+    float outer = atmosphere.y;
+    float H = sqrt(outer * outer - inner * inner);
+    float rho = sqrt(max(r * r - inner * inner, 0.0));
+    float positiveDiscriminant = max(r * r * (mu * mu - 1.0) + outer * outer, 0.0);
+    float d = max(-r * mu + sqrt(positiveDiscriminant), 0.0);
+    float dMin = outer - r;
+    float dMax = rho + H;
+    vec2 uv = vec2((d - dMin) / (dMax - dMin), rho / H);
+    return textureLod(atmosphereTransmittance, uv, 0.0).rgb;
+}
+
 // Bevy directional_light (without the shadow): Burley diffuse and GGX specular with the
-// multiscatter compensation.
-vec3 directionalLight(vec3 L, vec3 lightColor, vec3 N, vec3 V, float NdotV, float roughness,
+// multiscatter compensation, filtered by the sky's transmittance and the share of the disc
+// above the horizon when there is a sky.
+vec3 directionalLight(vec3 L, vec3 lightColor, float diskSize, vec3 N, vec3 V, float NdotV, float roughness,
     vec3 diffuseColor, vec3 F0, vec2 fab) {
     vec3 H = normalize(L + V);
     float NdotL = clamp(dot(N, L), 0.0, 1.0);
@@ -423,7 +489,15 @@ vec3 directionalLight(vec3 L, vec3 lightColor, vec3 N, vec3 V, float NdotV, floa
     vec3 spec = (D * Vis) * F;
     spec *= 1.0 + F0 * (1.0 / (fab.x + fab.y) - 1.0);
 
-    return (diffuse + spec) * NdotL * lightColor;
+    vec3 color = (diffuse + spec) * NdotL;
+    color *= lightColor;
+    if (atmosphere.z > 0.5) {
+        vec3 P = atmosphereClampToSurface((worldToAtmosphere * vec4(vWorld, 1.0)).xyz);
+        float r = length(P);
+        float muLight = dot(L, normalize(P));
+        color *= atmosphereTransmittanceAt(r, muLight) * visibleSunRatio(r, muLight, diskSize);
+    }
+    return color;
 }
 
 // ------------------------------------------------------------ point and spot lights
@@ -843,12 +917,21 @@ vec3 litRadiance(vec3 worldNormal, vec3 N, MaterialSample m) {
             * spotAttenuation(i, vWorld) * shadow;
     }
 #endif
+    // Directional lights in Bevy's order: unshadowed first, then by spawn order (sun, moon).
+    bool hasMoon = moonDirectionToLight.w > 0.5;
+    bool moonFirst = atmosphere.w > 0.5;
+    if (hasMoon && moonFirst) {
+        direct += directionalLight(moonDirectionToLight.xyz, moonColor, disks.y, N, V, NdotV, roughness, diffuseColor, F0, fab);
+    }
     if (hasSun > 0.5) {
         float shadow = 1.0;
         if (sunShadows > 0.5) {
             shadow = sunShadow(vWorld, worldNormal);
         }
-        direct += directionalLight(directionToLight, sunColor, N, V, NdotV, roughness, diffuseColor, F0, fab) * shadow;
+        direct += directionalLight(directionToLight, sunColor, disks.x, N, V, NdotV, roughness, diffuseColor, F0, fab) * shadow;
+    }
+    if (hasMoon && !moonFirst) {
+        direct += directionalLight(moonDirectionToLight.xyz, moonColor, disks.y, N, V, NdotV, roughness, diffuseColor, F0, fab);
     }
 
     vec3 diffuseAmbient = envBrdfApprox(diffuseColor, F_AB(1.0, NdotV));

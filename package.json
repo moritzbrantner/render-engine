@@ -1,7 +1,7 @@
 {
   "name": "@moritzbrantner/three-lighting",
   "version": "0.1.0",
-  "description": "render-engine's lighting on three.js: Bevy's PBR, sun cascades, IBL, fog and tone mapping, gated against Bevy",
+  "description": "render-engine's lighting on three.js: Bevy's PBR, sun cascades, point and spot lights, IBL, atmosphere and sky, fog and tone mapping, gated against Bevy",
   "type": "module",
   "license": "MIT",
   "files": [

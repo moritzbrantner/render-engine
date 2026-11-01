@@ -241,8 +241,8 @@ As built (#11):
   splits and fitting; Bevy snaps cascades to texels and rounds their diameter), `PMREMGenerator`
   (its own cube-UV filtering, not Bevy's split-sum maps; the port samples the same prefiltered
   KTX2 maps as render-engine), `Fog`/`FogExp2` (view depth and a smoothstep, not distance),
-  `AgXToneMapping` (an analytic fit, not Bevy's LUT) and Tony McMapface (not in three.js). `Sky`
-  is not used yet; the sky is #39.
+  `AgXToneMapping` (an analytic fit, not Bevy's LUT), Tony McMapface (not in three.js) and the
+  `Sky` addon (Preetham's analytic model, not Bevy's Hillaire LUTs).
 - **Shadow pass like Bevy's pipeline:** with `EXT_clip_control` and `EXT_depth_clamp` the cascades
   render in zero-to-one clip space with rasterizer-clamped (pancaked) reverse-Z depth into
   `DEPTH_COMPONENT32F`; without them the depth is remapped and clamped per fragment. The sun-glow
@@ -282,6 +282,41 @@ As built (#11):
   which is now wgpu's. Caveat: a consumer shader that reads `gl_FragCoord.y` in the main pass
   sees it mirrored. With it, every exported scenario matches Bevy about as closely as
   render-engine does (table in the README).
+- **Sky, moon and the sky's ambient light (#39)** port `src/sky.rs` and `src/shaders/sky/` term
+  by term (`packages/three-lighting/sky.js`, `sky-shaders.js`). WebGL 2 has no compute shaders,
+  so every LUT texel and cube texel is a fragment of a fullscreen pass that writes it at its
+  `gl_FragCoord` (GL and wgpu both put row 0 at t = 0, so cube faces and LUTs need no flip);
+  the medium LUTs are built on the CPU as `Rgba32Float` like Bevy's, so a sky needs
+  `OES_texture_float_linear` (Bevy: `FLOAT32_FILTERABLE`) and `EXT_color_buffer_float` for the
+  float targets. Where a compute pass shares work, the port keeps its arithmetic: the
+  multiscattering LUT evaluates the 64 directions of a texel in one fragment and sums them in the
+  workgroup's tree order; the aerial-view LUT marches slice by slice (32 passes), carrying the
+  running inscattering, throughput and last sample distance in `Rgba32Float` targets, and each
+  slice is stored in log space into a layer of the 3D LUT. Bevy's downsampler writes each mip of
+  the source cube while reading the previous one, which WebGL forbids within one texture
+  (feedback loop), so each level goes through a scratch array and is copied back; the first
+  level keeps Bevy's point sample (D5). The radiance and irradiance filters write a level's six
+  faces side by side into an atlas in one draw, as Bevy dispatches them together, and copy them
+  into the cube: one draw per face left the GPU mostly idle (three.js sky frames 8.6–9.5 ms on the
+  RTX 3060 Ti, now 3.1–3.7 ms; Bevy 1.6–1.7 ms; advisory). `bitfieldReverse` is GLSL ES 3.1, so
+  the Hammersley sequence reverses bits by hand. **Dual-source blending:** Bevy blends the sky as
+  `inscattering + dst × transmittance`, with the per-channel transmittance as the second blend
+  source where the device has `DUAL_SOURCE_BLENDING` (lavapipe and the RTX 3060 Ti do;
+  render-engine follows). WebGL 2 has no second source (`WEBGL_blend_func_extended` exists in
+  some browsers; three.js does not expose it), and Bevy's fallback, the mean transmittance in
+  alpha, would grey the aerial perspective. The equivalent: the sky pass runs three times, each
+  writing one colour channel (`colorMask`) with that channel's transmittance in alpha and the
+  blend `src + dst × src alpha`, so every channel is blended once, exactly as with dual-source
+  blending. A first version that multiplied by the transmittance and then added the
+  inscattering in two passes rounded the HDR frame to f16 twice and scored 0.0012–0.0016 /
+  ≤ 0.021; the per-channel passes score 0.0001–0.0002 / ≤ 0.0048, render-engine 0.0001 /
+  ≤ 0.0022. The sky pass reads the opaque draws' depth from a `DepthTexture` that three resolves
+  the MSAA depth into after each draw call (one sample per pixel, as Bevy reads the first), and
+  reconstructs the distance with three's projection (three's main camera keeps standard depth,
+  so "nothing drawn" is depth 1 where Bevy's reverse Z has 0). The main pass is split like
+  Bevy's: opaque and masked materials, the sky, then blended (`transparent`) materials, with
+  the others' `visible` cleared for each half. With the sky, the three.js side renders every
+  lighting scenario; none is reported as not ported.
 - **Oracle side.** `oracle --no-three` skips it; otherwise the oracle exports every lighting
   scenario the port covers (`oracle/src/three_side.rs`: scene in Bevy units plus vertex data) and
   renders them in one headless Chromium run (`oracle/three/render.mjs`, Playwright) through

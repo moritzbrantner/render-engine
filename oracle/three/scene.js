@@ -140,6 +140,8 @@ async function main() {
   lighting.tonemapping = c.tonemapping;
   lighting.shadowFilter = c.shadowFilter;
   lighting.sun = doc.sun;
+  lighting.moon = doc.moon;
+  lighting.sky = doc.sky;
   lighting.ambient = doc.ambient;
   lighting.fog = doc.fog;
   if (doc.environment) {

@@ -377,6 +377,39 @@ them, and three updates the skeleton once per frame. three culls a `SkinnedMesh`
 sphere it computes on the CPU from the first pose it sees; a figure whose pose moves far from that
 calls `mesh.computeBoundingSphere()` after posing, or sets `frustumCulled = false`.
 
+### Sky and day cycle (web)
+
+`Lighting.sky` is the engine's `Scene::sky`: Bevy's atmosphere with the sun and moon discs,
+aerial perspective over the scene and, with `environmentIntensity`, the sky's own ambient light
+(it replaces `Lighting.environment`). `Lighting.moon` is the unshadowed second directional light.
+The sun's illuminance is the light above the atmosphere (`RAW_SUNLIGHT`); the atmosphere dims and
+reddens it, so the game only moves the sun and adjusts exposure. `DayCycle` maps an hour to sun
+and moon directions like the engine's:
+
+```js
+import { DayCycle, DEFAULT_SKY, DEFAULT_SUN_SHADOWS, RAW_SUNLIGHT } from '@moritzbrantner/three-lighting';
+
+const cycle = new DayCycle({ noonElevation: (60 * Math.PI) / 180, moonLagHours: 12 });
+const negate = ([x, y, z]) => [-x, -y, -z];
+lighting.sky = DEFAULT_SKY;                       // or { ...DEFAULT_SKY, environmentIntensity: null }
+lighting.environment = null;                      // the sky's ambient light replaces it
+lighting.ambient = { color: [1, 1, 1], brightness: 0 };
+lighting.clearColor = [0, 0, 0];
+// every frame, from the game's clock:
+lighting.sun = { direction: negate(cycle.toSun(hours)), color: [1, 1, 1], illuminance: RAW_SUNLIGHT, shadows: DEFAULT_SUN_SHADOWS };
+lighting.moon = { direction: negate(cycle.toMoon(hours)), color: [0.8, 0.85, 1], illuminance: 0.3 };
+lighting.ev100 = 14.5;                            // the oracle's views: 14.5 noon … 3.5 night
+```
+
+Each frame `Lighting.render` recomputes the atmosphere LUTs, renders the sky into a 128² cube and
+filters it into the specular and diffuse cubes (Bevy's `GeneratedEnvironmentMapLight`), all as
+fullscreen WebGL 2 passes (about 220 small draws; the oracle's sky frames take 3.1–3.7 ms of GPU
+time in all on an RTX 3060 Ti, Bevy's 1.6–1.7 ms); then the main pass draws opaque and masked
+meshes, the sky over them, and the blended meshes. It needs `EXT_color_buffer_float` and
+`OES_texture_float_linear`, which desktop and most mobile browsers have. Use the camera's real
+near plane; its far plane must lie beyond the scene, since the sky fills what the depth buffer
+leaves at the far plane.
+
 ## Not covered yet
 
 - Stars, clouds and moon phases: the sky is Bevy's clear atmosphere; the moon is a full disc.

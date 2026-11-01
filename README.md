@@ -116,8 +116,10 @@ The mmorpg web client (three.js 0.186) gets the same lighting from
 [`packages/three-lighting`](packages/three-lighting) (`@moritzbrantner/three-lighting`, pinned as
 `github:moritzbrantner/render-engine#<commit>`; see [consumer integration](docs/consumer-integration.md#web-client-threejs)
 and [D8](docs/technical-decisions.md#d8--web-path-a-threejs-port-gated-by-the-same-oracle)). The
-oracle renders each lighting scenario it covers in headless Chromium and holds it to the same
-FLIP gate against Bevy. CI run on lavapipe (ANGLE on Vulkan), FLIP mean / p99 against Bevy:
+oracle renders every lighting scenario in headless Chromium and holds it to the same FLIP gate
+against Bevy; the port covers all of them, including Bevy's atmosphere, the moon and the ambient
+light the sky generates every frame. CI run on lavapipe (ANGLE on Vulkan), FLIP mean / p99
+against Bevy:
 
 | Scenario | three.js vs Bevy | Result |
 | --- | --- | --- |
@@ -130,7 +132,7 @@ FLIP gate against Bevy. CI run on lavapipe (ANGLE on Vulkan), FLIP mean / p99 ag
 | `point_spot` (3 views: Gaussian, 2×2 PCF, PCSS) | ≤ 0.0001 / 0.0014 | pass |
 | `textured_props` | 0.0000 / 0.0007 | pass |
 | `skinned_figure` | 0.0000 / 0.0002 | pass |
-| `sky_day_cycle` (4 views) | – | not ported, #39 |
+| `sky_day_cycle` (4 views: noon, golden hour, dusk, night with the moon) | ≤ 0.0002 / 0.0048 | pass |
 
 ## Development
 
