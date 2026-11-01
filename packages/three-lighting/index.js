@@ -106,6 +106,9 @@ export const FogFalloff = {
 
 const TONEMAPPING = { acesFitted: 0, tonyMcMapface: 1, agx: 2 };
 
+// Negates clip-space y: the main pass renders upside down (Lighting.render).
+const FLIP_Y = new Matrix4().makeScale(1, -1, 1);
+
 let zstd;
 async function decoder() {
   zstd ??= (async () => {
@@ -250,7 +253,6 @@ function frameUniforms() {
     fogDirectionalLightColor: { value: new Vector4() },
     fogBe: { value: new Vector4() },
     fogBi: { value: new Vector4() },
-    viewportHeight: { value: 1 },
     localLights: { value: [] },
     ...Object.fromEntries(
       ['pointShadowMap', 'pointShadowDepth', 'spotShadowMap', 'spotShadowDepth'].flatMap((name) =>
@@ -736,9 +738,8 @@ export class Lighting {
     }));
   }
 
-  #updateUniforms(camera, cascades, local, height) {
+  #updateUniforms(camera, cascades, local) {
     const u = this.uniforms;
-    u.viewportHeight.value = height;
     u.localLights.value = local.data;
     for (let i = 0; i < MAX_POINT_SHADOWS; i++) {
       const t = this.pointShadowTargets[i];
@@ -976,7 +977,7 @@ export class Lighting {
     while (this.pointShadowTargets.length < local.pointViews.length / 6) {
       this.pointShadowTargets.push(pointShadowTarget(this.pointShadowMapSize));
     }
-    this.#updateUniforms(camera, cascades, local, height);
+    this.#updateUniforms(camera, cascades, local);
     const definesKey = JSON.stringify(local.defines);
     scene.traverse((o) => {
       const materials = Array.isArray(o.material) ? o.material : [o.material];
@@ -1002,9 +1003,25 @@ export class Lighting {
     renderer.clear(true, true, false);
     renderer.setOpaqueSort(opaqueSort);
     renderer.setTransparentSort(transparentSort(camera));
-    renderer.render(scene, camera);
-    renderer.setOpaqueSort(null);
-    renderer.setTransparentSort(null);
+    // WebGL stores NDC y = -1 in row 0 where wgpu stores +1, which mirrors the frame and its 4×
+    // MSAA sample pattern relative to Bevy's. So the main pass renders upside down (projection y
+    // negated, winding inverted so culling and gl_FrontFacing hold) and stores the HDR frame top
+    // row first, like wgpu; the output pass flips it back. three derives the winding from each
+    // object's world matrix alone, so the inversion wraps state.setMaterial for this pass.
+    const projection = camera.projectionMatrix;
+    const upright = projection.clone();
+    const state = renderer.state;
+    const setMaterial = state.setMaterial;
+    try {
+      projection.premultiply(FLIP_Y);
+      state.setMaterial = (material, frontFaceCW) => setMaterial(material, !frontFaceCW);
+      renderer.render(scene, camera);
+    } finally {
+      state.setMaterial = setMaterial;
+      projection.copy(upright);
+      renderer.setOpaqueSort(null);
+      renderer.setTransparentSort(null);
+    }
 
     const tm = this.tonemapQuad.material.uniforms;
     tm.hdrTexture.value = this.hdrTarget.texture;

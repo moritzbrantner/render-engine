@@ -268,9 +268,20 @@ As built (#11):
   Bevy's phases (opaque, then masked, then blended back to front by object origin; three's own
   transparent sort uses the bounding-sphere centre) and draws double-sided blended meshes in one
   pass (`forceSinglePass`). Textures upload with the engine's mip chain and sampler
-  (`textureFromData`). The remaining FLIP error on `textured_props` sits on silhouette pixels
-  whose MSAA coverage differs by a sample or two, probably because a WebGL framebuffer is stored
-  upside down relative to wgpu's, which mirrors the 4× sample pattern.
+  (`textureFromData`).
+- **Main pass upside down (#42).** WebGL stores NDC y = −1 in row 0 where wgpu stores +1, so a
+  GL frame is mirrored relative to Bevy's, and so is the 4× MSAA sample pattern: silhouette
+  pixels resolved a sample or two differently (`many_instances` FLIP 0.0058 / 0.0869, failing;
+  `textured_props` 0.0016 / 0.0438). `Lighting.render` therefore draws the HDR pass upside down:
+  it negates the camera projection's y and inverts the winding, so culling and `gl_FrontFacing`
+  hold, and stores the frame top row first like wgpu; the output pass reads it back flipped,
+  so consumers' canvases and targets stay upright. three derives the winding from each
+  object's world matrix alone (no camera or per-pass hook; toggling `material.side` would swap
+  programs and flip normals), so the pass wraps `renderer.state.setMaterial` and restores it,
+  and the projection, in a `finally`. The local lights' noise reads `gl_FragCoord.xy` directly,
+  which is now wgpu's. Caveat: a consumer shader that reads `gl_FragCoord.y` in the main pass
+  sees it mirrored. With it, every exported scenario matches Bevy about as closely as
+  render-engine does (table in the README).
 - **Oracle side.** `oracle --no-three` skips it; otherwise the oracle exports every lighting
   scenario the port covers (`oracle/src/three_side.rs`: scene in Bevy units plus vertex data) and
   renders them in one headless Chromium run (`oracle/three/render.mjs`, Playwright) through

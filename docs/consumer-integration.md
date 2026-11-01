@@ -325,6 +325,12 @@ mapping and the sRGB output. Environment maps are the same prefiltered KTX2 cube
 native client loads (`assets/ibl`); the tone-mapping LUTs ship with the package. The port
 covers what the oracle's three.js side passes; the report lists the rest with its issues.
 
+The HDR pass renders upside down, as wgpu stores a frame, so its MSAA samples match Bevy's; the
+output pass flips it back and the canvas or target comes out upright. Other three.js materials
+in the scene still render correctly, since the projection and the winding flip together. The
+one visible effect: a custom shader in the scene that reads `gl_FragCoord.y` sees it mirrored,
+counting down from the top row.
+
 ### Textured glTF materials (web)
 
 `LitMaterial` takes the same textured `StandardMaterial` as the engine: base-colour, emissive,

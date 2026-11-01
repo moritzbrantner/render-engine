@@ -21,7 +21,7 @@ use std::{collections::HashMap, path::Path};
 
 /// Scenarios whose three.js side does not pass yet, with the issue that tracks each. A listed
 /// scenario's failure does not fail the run; every other exported scenario must pass the gate.
-pub const GAPS: &[(&str, u32)] = &[("many_instances", 42)];
+pub const GAPS: &[(&str, u32)] = &[];
 
 /// Follow-up issue per capability the port does not cover yet.
 const UNPORTED_ISSUE: &[(&str, u32)] = &[("sky and moon", 39)];

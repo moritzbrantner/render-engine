@@ -144,8 +144,6 @@ uniform vec4 fogColor;
 uniform vec4 fogDirectionalLightColor;
 uniform vec4 fogBe;
 uniform vec4 fogBi;
-// Height of the main pass in pixels: fragment coordinates as wgpu's (y down) for the noise.
-uniform float viewportHeight;
 
 // Point lights then spot lights, shadow casters first (Bevy's clustered order), LIGHT_STRIDE
 // vec4s each, laid out like render-engine's GpuLight: custom data (point: the cube projection's
@@ -806,7 +804,8 @@ vec3 litRadiance(vec3 worldNormal, vec3 N, MaterialSample m) {
     vec3 direct = vec3(0.0);
 #if LIT_LOCAL_LIGHTS > 0
     vec3 R = reflect(-V, N);
-    vec2 fragCoord = vec2(gl_FragCoord.x, viewportHeight - gl_FragCoord.y);
+    // The main pass renders upside down (Lighting.render), so these are wgpu's (y down).
+    vec2 fragCoord = gl_FragCoord.xy;
 #endif
 #if LIT_POINT_LIGHTS > 0
     for (int i = 0; i < LIT_POINT_LIGHTS; i++) {
@@ -1136,7 +1135,9 @@ vec3 srgbEncode(vec3 c) {
     return mix(1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, 12.92 * c, vec3(lessThanEqual(c, vec3(0.0031308))));
 }
 void main() {
-    vec4 c = texelFetch(postTexture, ivec2(gl_FragCoord.xy), 0);
+    // The main pass rendered upside down (Lighting.render): flip it back.
+    ivec2 p = ivec2(gl_FragCoord.xy);
+    vec4 c = texelFetch(postTexture, ivec2(p.x, textureSize(postTexture, 0).y - 1 - p.y), 0);
     vec3 rgb = clamp(c.rgb, 0.0, 1.0);
     fragColor = vec4(encodeSrgb > 0.5 ? srgbEncode(rgb) : rgb, 1.0);
 }
