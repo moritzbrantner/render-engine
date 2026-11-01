@@ -24,7 +24,7 @@ use std::{collections::HashMap, path::Path};
 pub const GAPS: &[(&str, u32)] = &[("many_instances", 42)];
 
 /// Follow-up issue per capability the port does not cover yet.
-const UNPORTED_ISSUE: &[(&str, u32)] = &[("sky and moon", 39), ("skinning", 41)];
+const UNPORTED_ISSUE: &[(&str, u32)] = &[("sky and moon", 39)];
 
 pub fn gap_issue(name: &str) -> Option<u32> {
     GAPS.iter().find(|(n, _)| *n == name).map(|(_, i)| *i)
@@ -35,9 +35,6 @@ pub fn unsupported(s: &Scenario) -> Option<&'static str> {
     let scene = &s.scene;
     if scene.sky.is_some() || scene.moon.is_some() {
         return Some("sky and moon");
-    }
-    if s.objects.iter().any(|o| o.skin.is_some()) {
-        return Some("skinning");
     }
     None
 }
@@ -78,6 +75,15 @@ pub fn export(s: &Scenario, dir: &Path) -> Result<(), String> {
         let uvs = optional(m.uvs.iter().flat_map(|v| v.to_array()).collect());
         let tangents = optional(m.tangents.iter().flat_map(|v| v.to_array()).collect());
         let colors = optional(m.colors.iter().flat_map(|v| v.to_array()).collect());
+        let weights = optional(m.weights.iter().flat_map(|v| v.to_array()).collect());
+        // Four u16 per vertex: 8-byte multiples, so the data that follows stays aligned.
+        let joints = (!m.joints.is_empty()).then(|| {
+            let offset = bin.len();
+            for j in m.joints.iter().flatten() {
+                bin.extend_from_slice(&j.to_le_bytes());
+            }
+            json!({ "offset": offset, "count": m.joints.len() * 4 })
+        });
         let offset = bin.len();
         for i in &m.indices {
             bin.extend_from_slice(&i.to_le_bytes());
@@ -88,6 +94,8 @@ pub fn export(s: &Scenario, dir: &Path) -> Result<(), String> {
             "uvs": uvs,
             "tangents": tangents,
             "colors": colors,
+            "joints": joints,
+            "weights": weights,
             "indices": { "offset": offset, "count": m.indices.len() },
         })
     };
@@ -135,6 +143,21 @@ pub fn export(s: &Scenario, dir: &Path) -> Result<(), String> {
             })
         })
         .collect();
+    // Per skin, its joints' mesh-local transforms and inverse bind matrices (column major).
+    let mats = |m: &[render_engine::glam::Mat4]| -> Vec<f32> {
+        m.iter().flat_map(|m| m.to_cols_array()).collect()
+    };
+    let skins: Vec<Value> = s
+        .assets
+        .skins
+        .iter()
+        .map(|skin| {
+            json!({
+                "modelFromJoint": push_f32(&mut bin, &mats(&skin.model_from_joint)),
+                "inverseBindposes": push_f32(&mut bin, &mats(&skin.inverse_bindposes)),
+            })
+        })
+        .collect();
     let mut objects = Vec::new();
     for o in &s.objects {
         let mesh = match o.geometry {
@@ -165,6 +188,7 @@ pub fn export(s: &Scenario, dir: &Path) -> Result<(), String> {
         objects.push(json!({
             "mesh": mesh,
             "matrix": o.transform().to_cols_array(),
+            "skin": o.skin,
             "material": {
                 "baseColor": v3(m.base_color),
                 "alpha": m.alpha,
@@ -317,6 +341,7 @@ pub fn export(s: &Scenario, dir: &Path) -> Result<(), String> {
         "fog": fog,
         "meshes": meshes,
         "textures": textures,
+        "skins": skins,
         "objects": objects,
     });
     std::fs::write(dir.join(format!("{}.three.json", s.name)), doc.to_string())

@@ -349,6 +349,18 @@ explicit mip chain and sampler, as the engine's `TextureData` does. Not mapped: 
 texture transforms, a second UV set (occlusion on `TEXCOORD_1`) and the physical extensions,
 which the engine does not cover either.
 
+### Skinned meshes (web)
+
+`LitMaterial` skins three's `SkinnedMesh` on the GPU with the engine's linear blend skinning (four
+influences from `skinIndex`/`skinWeight`, the blended palette replacing the model matrix, normals
+through its inverse transpose), in the main pass and every shadow pass. three's palette is
+`bone.matrixWorld × boneInverse` per joint, the engine's `local_from_joint × joint_from_bind`, with
+three's `bindMatrix` around it; both bind modes work. A glTF figure from `GLTFLoader` needs only
+the material conversion above: its bones sit in the scene, an `AnimationMixer` (or the game) poses
+them, and three updates the skeleton once per frame. three culls a `SkinnedMesh` by a bounding
+sphere it computes on the CPU from the first pose it sees; a figure whose pose moves far from that
+calls `mesh.computeBoundingSphere()` after posing, or sets `frustumCulled = false`.
+
 ## Not covered yet
 
 - Stars, clouds and moon phases: the sky is Bevy's clear atmosphere; the moon is a full disc.

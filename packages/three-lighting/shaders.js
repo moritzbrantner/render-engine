@@ -11,7 +11,27 @@ export const MAX_CASCADES = 4;
 export const MAX_POINT_SHADOWS = 4;
 export const MAX_SPOT_SHADOWS = 4;
 
+// Bevy skin_model: four-influence linear blend skinning through three's SkinnedMesh (USE_SKINNING,
+// skinIndex/skinWeight, boneTexture = bone.matrixWorld × boneInverse per joint). The blended
+// palette replaces the model matrix like render-engine's; three's bind matrices bracket it (the
+// identity for a skin detached at the mesh's own space, as render-engine's palettes are).
+const skinnedModel = /* glsl */ `
+#include <skinning_pars_vertex>
+mat4 litModelMatrix() {
+#ifdef USE_SKINNING
+    mat4 skin = skinWeight.x * getBoneMatrix(skinIndex.x)
+        + skinWeight.y * getBoneMatrix(skinIndex.y)
+        + skinWeight.z * getBoneMatrix(skinIndex.z)
+        + skinWeight.w * getBoneMatrix(skinIndex.w);
+    return modelMatrix * bindMatrixInverse * skin * bindMatrix;
+#else
+    return modelMatrix;
+#endif
+}
+`;
+
 export const litVertex = /* glsl */ `
+${skinnedModel}
 // glTF TANGENT and COLOR_0 (three declares uv, TEXCOORD_0). Declared here rather than by three,
 // which only does for its own materials; absent attributes read LitMaterial's
 // defaultAttributeValues (no tangent, white).
@@ -36,19 +56,22 @@ mat3 inverseTranspose3x3(mat3 m) {
 
 // Bevy mesh_normal_local_to_world and mesh_tangent_local_to_world: normalised per vertex
 // (MikkTSpace), not again per fragment; a mirroring model matrix flips the bitangent sign.
+// Skinned: positions and tangents go through the skinned model matrix and normals through its
+// inverse transpose (Bevy skin_normals); the sign stays the object's.
 void main() {
-    vec4 world = modelMatrix * vec4(position, 1.0);
+    mat4 model = litModelMatrix();
+    vec4 world = model * vec4(position, 1.0);
     vWorld = world.xyz;
     vec3 n = normal;
     if (any(notEqual(n, vec3(0.0)))) {
-        n = normalize(inverseTranspose3x3(mat3(modelMatrix)) * n);
+        n = normalize(inverseTranspose3x3(mat3(model)) * n);
     }
     vNormal = n;
     vTangent = tangent;
     vHasTangents = 0.0;
     if (any(notEqual(tangent, vec4(0.0)))) {
         float sign = determinant(mat3(modelMatrix)) < 0.0 ? -1.0 : 1.0;
-        vTangent = vec4(normalize(mat3(modelMatrix) * tangent.xyz), tangent.w * sign);
+        vTangent = vec4(normalize(mat3(model) * tangent.xyz), tangent.w * sign);
         vHasTangents = 1.0;
     }
     vUv = uv;
@@ -973,9 +996,10 @@ export const shadowVertex = /* glsl */ `
 uniform mat4 cascadeClip;
 out float vDepth;
 ${shadowUv}
+${skinnedModel}
 void main() {
     LIT_PASS_UV
-    vec4 clip = cascadeClip * (modelMatrix * vec4(position, 1.0));
+    vec4 clip = cascadeClip * (litModelMatrix() * vec4(position, 1.0));
     vDepth = clip.z;
 #ifdef NATIVE_DEPTH
     gl_Position = clip;
@@ -1008,9 +1032,10 @@ export const localShadowVertex = /* glsl */ `
 uniform mat4 lightClip;
 uniform float flipY;
 ${shadowUv}
+${skinnedModel}
 void main() {
     LIT_PASS_UV
-    vec4 clip = lightClip * (modelMatrix * vec4(position, 1.0));
+    vec4 clip = lightClip * (litModelMatrix() * vec4(position, 1.0));
     clip.y *= flipY;
 #ifdef NATIVE_DEPTH
     gl_Position = clip;

@@ -446,7 +446,8 @@ const TEXTURE_DEFINES = {
  * each times its texture (`TEXCOORD_0`, three's `uv`); the mesh's `color` attribute (glTF
  * `COLOR_0`) multiplies the base colour. Normal maps need the mesh's MikkTSpace `tangent`
  * attribute. Alpha modes sort and draw like Bevy's phases (opaque, then masked, then blended back
- * to front by object origin) and masked or blended materials cut their shadows out.
+ * to front by object origin) and masked or blended materials cut their shadows out. On a
+ * `SkinnedMesh` it skins on the GPU (Bevy's four-influence linear blend), shadows included.
  * The parameters are fixed at construction.
  */
 export class LitMaterial extends ShaderMaterial {
