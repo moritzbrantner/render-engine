@@ -1,6 +1,6 @@
 {
-  "commit": "8f636fb5f8d56828d760f855c62976b12b68d68d",
-  "date": "2026-10-31",
+  "commit": "3b8ccfbc385dc2850c40704f88e2d87e684c005a",
+  "date": "2026-11-01",
   "adapter": "NVIDIA GeForce RTX 3060 Ti",
   "features": [
     {
@@ -84,7 +84,7 @@
   "gpu_margin": 1.1,
   "particles": [
     {
-      "bevy_gpu_ms": 0.166912,
+      "bevy_gpu_ms": 0.16588799999999998,
       "bevy_sim_ms": 0.03584,
       "bevy_spans": [
         "render/tonemapping/elapsed_gpu",
@@ -104,7 +104,7 @@
         {
           "alive": 144,
           "bevy_coverage": 0.0068565537221729755,
-          "flip_mean": 1.2547704386633995E-7,
+          "flip_mean": 0.0,
           "flip_p99": 0.0,
           "frame": 32,
           "label": "t0500",
@@ -136,8 +136,8 @@
       ],
       "decision": "d9--particle-parity-seeded-replay-then-statistics",
       "dt": 0.015625,
-      "engine_gpu_ms": 0.077344,
-      "engine_sim_ms": 0.015776,
+      "engine_gpu_ms": 0.097664,
+      "engine_sim_ms": 0.015808,
       "feature": "particles",
       "height": 720,
       "passed": true,
@@ -1226,15 +1226,15 @@
         {
           "alive": 40800,
           "bevy_coverage": 0.04264214262366295,
-          "flip_mean": 0.00014094187645241618,
-          "flip_p99": 0.003711517434567213,
+          "flip_mean": 0.00013833922275807709,
+          "flip_p99": 0.0036220524925738573,
           "frame": 48,
           "label": "t0750",
           "passed": true,
           "stats": {
-            "colour": 0.00024533370742574334,
+            "colour": 0.00021988252410665154,
             "coverage": 0.000025422255930607207,
-            "spatial": 0.00003096974978689104
+            "spatial": 0.000031656541978009045
           },
           "tier": "exact",
           "time": 0.75
@@ -1242,15 +1242,15 @@
         {
           "alive": 104750,
           "bevy_coverage": 0.09495117515325546,
-          "flip_mean": 0.00022097898181527853,
-          "flip_p99": 0.005612759850919247,
+          "flip_mean": 0.00022117009211797267,
+          "flip_p99": 0.005609031766653061,
           "frame": 192,
           "label": "t3000",
           "passed": true,
           "stats": {
-            "colour": 0.0001491392613388598,
+            "colour": 0.00016120454529300332,
             "coverage": 0.000022912507120054215,
-            "spatial": 0.000015041782717162278
+            "spatial": 0.000014535444279317744
           },
           "tier": "statistical",
           "time": 3.0
@@ -1258,8 +1258,8 @@
       ],
       "decision": "d9--particle-parity-seeded-replay-then-statistics",
       "dt": 0.015625,
-      "engine_gpu_ms": 0.301376,
-      "engine_sim_ms": 0.109664,
+      "engine_gpu_ms": 0.30192,
+      "engine_sim_ms": 0.110624,
       "feature": "particles",
       "height": 720,
       "passed": true,
@@ -41109,8 +41109,8 @@
       "width": 1280
     },
     {
-      "bevy_gpu_ms": 0.21401599999999998,
-      "bevy_sim_ms": 0.043008,
+      "bevy_gpu_ms": 0.205824,
+      "bevy_sim_ms": 0.041984,
       "bevy_spans": [
         "render/tonemapping/elapsed_gpu",
         "render/upscaling/elapsed_gpu",
@@ -41129,31 +41129,31 @@
         {
           "alive": 512,
           "bevy_coverage": 0.03943033888936043,
-          "flip_mean": 0.0008584953611716628,
-          "flip_p99": 0.034331198781728745,
+          "flip_mean": 0.0008900350076146424,
+          "flip_p99": 0.035066623240709305,
           "frame": 64,
           "label": "t1000",
           "passed": true,
           "stats": {
-            "colour": 0.010099347680807114,
+            "colour": 0.004100276157259941,
             "coverage": 0.0,
-            "spatial": 0.0016085414681583643
+            "spatial": 0.001947144977748394
           },
           "tier": "statistical",
           "time": 1.0
         },
         {
           "alive": 1016,
-          "bevy_coverage": 0.11426649242639542,
-          "flip_mean": 0.001896425848826766,
-          "flip_p99": 0.04277569055557251,
+          "bevy_coverage": 0.11426323652267456,
+          "flip_mean": 0.0016793952090665698,
+          "flip_p99": 0.04009261354804039,
           "frame": 192,
           "label": "t3000",
           "passed": true,
           "stats": {
-            "colour": 0.008706935681402683,
-            "coverage": 0.0013939967611804605,
-            "spatial": 0.00214431737549603
+            "colour": 0.00409829942509532,
+            "coverage": 0.00016144858091138303,
+            "spatial": 0.001284395344555378
           },
           "tier": "statistical",
           "time": 3.0
@@ -41161,8 +41161,8 @@
       ],
       "decision": "d9--particle-parity-seeded-replay-then-statistics",
       "dt": 0.015625,
-      "engine_gpu_ms": 0.114624,
-      "engine_sim_ms": 0.01696,
+      "engine_gpu_ms": 0.113056,
+      "engine_sim_ms": 0.015616,
       "feature": "particles",
       "height": 720,
       "passed": true,
@@ -42743,7 +42743,7 @@
       "width": 1280
     },
     {
-      "bevy_gpu_ms": 0.308224,
+      "bevy_gpu_ms": 0.306176,
       "bevy_sim_ms": 0.041984,
       "bevy_spans": [
         "render/tonemapping/elapsed_gpu",
@@ -42763,15 +42763,15 @@
         {
           "alive": 340,
           "bevy_coverage": 0.0266384556889534,
-          "flip_mean": 0.0000616554607404396,
-          "flip_p99": 0.0017515866784378886,
+          "flip_mean": 0.00006513520202133805,
+          "flip_p99": 0.0019463482312858105,
           "frame": 40,
           "label": "t0625",
           "passed": true,
           "stats": {
-            "colour": 0.00014168029883876443,
+            "colour": 0.00007260969141498208,
             "coverage": 0.000040693626942811534,
-            "spatial": 0.00007368577644228935
+            "spatial": 0.00007436750456690788
           },
           "tier": "exact",
           "time": 0.625
@@ -42779,15 +42779,15 @@
         {
           "alive": 520,
           "bevy_coverage": 0.05884440243244171,
-          "flip_mean": 0.00014264756464399397,
-          "flip_p99": 0.0048190332017838955,
+          "flip_mean": 0.00013720523566007614,
+          "flip_p99": 0.00468453299254179,
           "frame": 160,
           "label": "t2500",
           "passed": true,
           "stats": {
-            "colour": 0.00023972243070602417,
+            "colour": 0.0002212701365351677,
             "coverage": 0.0,
-            "spatial": 0.000013327177839528304
+            "spatial": 0.000013372509783948772
           },
           "tier": "statistical",
           "time": 2.5
@@ -42795,8 +42795,8 @@
       ],
       "decision": "d9--particle-parity-seeded-replay-then-statistics",
       "dt": 0.015625,
-      "engine_gpu_ms": 0.166976,
-      "engine_sim_ms": 0.016288,
+      "engine_gpu_ms": 0.167776,
+      "engine_sim_ms": 0.016128,
       "feature": "particles",
       "height": 720,
       "passed": true,
@@ -44121,8 +44121,8 @@
       "width": 1280
     },
     {
-      "bevy_gpu_ms": 0.42188800000000004,
-      "bevy_sim_ms": 0.041984,
+      "bevy_gpu_ms": 0.422912,
+      "bevy_sim_ms": 0.043008,
       "bevy_spans": [
         "render/tonemapping/elapsed_gpu",
         "render/upscaling/elapsed_gpu",
@@ -44141,31 +44141,31 @@
         {
           "alive": 410,
           "bevy_coverage": 0.029968533664941788,
-          "flip_mean": 0.0003541510959621519,
-          "flip_p99": 0.011963525786995888,
+          "flip_mean": 0.00032320345053449273,
+          "flip_p99": 0.009220337495207787,
           "frame": 64,
           "label": "t1000",
           "passed": true,
           "stats": {
-            "colour": 0.0003620767965912819,
-            "coverage": 0.0,
-            "spatial": 0.0014278467278927565
+            "colour": 0.0003557333839125931,
+            "coverage": 0.00014479637320619076,
+            "spatial": 0.0015100103337317705
           },
           "tier": "statistical",
           "time": 1.0
         },
         {
           "alive": 664,
-          "bevy_coverage": 0.12668511271476746,
-          "flip_mean": 0.001282925484701991,
-          "flip_p99": 0.030825475230813026,
+          "bevy_coverage": 0.1266862004995346,
+          "flip_mean": 0.001442405628040433,
+          "flip_p99": 0.03404825180768967,
           "frame": 192,
           "label": "t3000",
           "passed": true,
           "stats": {
-            "colour": 0.00038674831739626825,
-            "coverage": 0.00005139887798577547,
-            "spatial": 0.0008932515629567206
+            "colour": 0.00022849446395412087,
+            "coverage": 0.000025759351046872325,
+            "spatial": 0.0008799804490990937
           },
           "tier": "statistical",
           "time": 3.0
@@ -44173,8 +44173,8 @@
       ],
       "decision": "d9--particle-parity-seeded-replay-then-statistics",
       "dt": 0.015625,
-      "engine_gpu_ms": 0.2816,
-      "engine_sim_ms": 0.016064,
+      "engine_gpu_ms": 0.282336,
+      "engine_sim_ms": 0.016032,
       "feature": "particles",
       "height": 720,
       "passed": true,
@@ -45757,9 +45757,9 @@
   ],
   "scenarios": [
     {
-      "bevy_gpu_ms": 0.22835199999999997,
+      "bevy_gpu_ms": 0.21504,
       "capability": "sun+shadow+ambient",
-      "engine_gpu_ms": 0.11568,
+      "engine_gpu_ms": 0.135168,
       "feature": "shadows",
       "flip_mean": 0.000003844148977805162,
       "flip_p99": 0.0,
@@ -45767,13 +45767,24 @@
       "passed": true,
       "result": "ok",
       "scenario": "sun_shadows",
+      "three": {
+        "blocking": false,
+        "flip_mean": 0.000004745133537653601,
+        "flip_p99": 0.000018089443983626552,
+        "gpu_ms": 0.126976,
+        "issue": null,
+        "passed": true,
+        "renderer": "ANGLE (NVIDIA, Vulkan 1.4.329 (NVIDIA NVIDIA GeForce RTX 3060 Ti (0x00002489)), NVIDIA)",
+        "result": "ok",
+        "status": "passed"
+      },
       "timing_rounds": 2,
       "width": 1280
     },
     {
-      "bevy_gpu_ms": 0.33587200000000006,
+      "bevy_gpu_ms": 0.33894399999999997,
       "capability": "sun+cascaded shadows (Gaussian)",
-      "engine_gpu_ms": 0.182208,
+      "engine_gpu_ms": 0.205824,
       "feature": "shadows",
       "flip_mean": 0.0000073305518526467495,
       "flip_p99": 0.00005287070234771818,
@@ -45781,13 +45792,24 @@
       "passed": true,
       "result": "ok",
       "scenario": "sun_cascades",
+      "three": {
+        "blocking": false,
+        "flip_mean": 0.00002091356691380497,
+        "flip_p99": 0.0004589639720506966,
+        "gpu_ms": 0.290816,
+        "issue": null,
+        "passed": true,
+        "renderer": "ANGLE (NVIDIA, Vulkan 1.4.329 (NVIDIA NVIDIA GeForce RTX 3060 Ti (0x00002489)), NVIDIA)",
+        "result": "ok",
+        "status": "passed"
+      },
       "timing_rounds": 2,
       "width": 1280
     },
     {
-      "bevy_gpu_ms": 0.8939520000000001,
+      "bevy_gpu_ms": 0.86016,
       "capability": "frustum culling (camera + cascades)",
-      "engine_gpu_ms": 0.779264,
+      "engine_gpu_ms": 0.805888,
       "feature": "culling",
       "flip_mean": 0.00004026912574772723,
       "flip_p99": 0.000672797323204577,
@@ -45795,13 +45817,24 @@
       "passed": true,
       "result": "ok",
       "scenario": "many_instances",
+      "three": {
+        "blocking": false,
+        "flip_mean": 0.00004664566949941218,
+        "flip_p99": 0.000858346582390368,
+        "gpu_ms": 82.811904,
+        "issue": null,
+        "passed": true,
+        "renderer": "ANGLE (NVIDIA, Vulkan 1.4.329 (NVIDIA NVIDIA GeForce RTX 3060 Ti (0x00002489)), NVIDIA)",
+        "result": "ok",
+        "status": "passed"
+      },
       "timing_rounds": 2,
       "width": 1280
     },
     {
-      "bevy_gpu_ms": 0.21504,
+      "bevy_gpu_ms": 0.216064,
       "capability": "HDR + tone mapping",
-      "engine_gpu_ms": 0.115712,
+      "engine_gpu_ms": 0.136192,
       "feature": "tonemap",
       "flip_mean": 0.0000028582992399606155,
       "flip_p99": 0.0,
@@ -45809,13 +45842,24 @@
       "passed": true,
       "result": "ok",
       "scenario": "tonemap_range_noon_tony",
+      "three": {
+        "blocking": false,
+        "flip_mean": 0.000004175115918769734,
+        "flip_p99": 0.000015188246834441088,
+        "gpu_ms": 0.188416,
+        "issue": null,
+        "passed": true,
+        "renderer": "ANGLE (NVIDIA, Vulkan 1.4.329 (NVIDIA NVIDIA GeForce RTX 3060 Ti (0x00002489)), NVIDIA)",
+        "result": "ok",
+        "status": "passed"
+      },
       "timing_rounds": 2,
       "width": 1280
     },
     {
       "bevy_gpu_ms": 0.216064,
       "capability": "HDR + tone mapping",
-      "engine_gpu_ms": 0.116736,
+      "engine_gpu_ms": 0.137216,
       "feature": "tonemap",
       "flip_mean": 0.0000017984119722314063,
       "flip_p99": 0.0,
@@ -45823,13 +45867,24 @@
       "passed": true,
       "result": "ok",
       "scenario": "tonemap_range_noon_agx",
+      "three": {
+        "blocking": false,
+        "flip_mean": 0.0000023206725927593652,
+        "flip_p99": 0.0,
+        "gpu_ms": 0.159744,
+        "issue": null,
+        "passed": true,
+        "renderer": "ANGLE (NVIDIA, Vulkan 1.4.329 (NVIDIA NVIDIA GeForce RTX 3060 Ti (0x00002489)), NVIDIA)",
+        "result": "ok",
+        "status": "passed"
+      },
       "timing_rounds": 2,
       "width": 1280
     },
     {
       "bevy_gpu_ms": 0.216064,
       "capability": "HDR + tone mapping",
-      "engine_gpu_ms": 0.116512,
+      "engine_gpu_ms": 0.136192,
       "feature": "tonemap",
       "flip_mean": 9.370957627652388E-7,
       "flip_p99": 0.0,
@@ -45837,13 +45892,24 @@
       "passed": true,
       "result": "ok",
       "scenario": "tonemap_range_dim_tony",
+      "three": {
+        "blocking": false,
+        "flip_mean": 7.738338467788708E-7,
+        "flip_p99": 0.0,
+        "gpu_ms": 0.14336,
+        "issue": null,
+        "passed": true,
+        "renderer": "ANGLE (NVIDIA, Vulkan 1.4.329 (NVIDIA NVIDIA GeForce RTX 3060 Ti (0x00002489)), NVIDIA)",
+        "result": "ok",
+        "status": "passed"
+      },
       "timing_rounds": 2,
       "width": 1280
     },
     {
-      "bevy_gpu_ms": 0.22015999999999997,
+      "bevy_gpu_ms": 0.22016,
       "capability": "HDR + tone mapping",
-      "engine_gpu_ms": 0.119808,
+      "engine_gpu_ms": 0.140288,
       "feature": "tonemap",
       "flip_mean": 0.0000010645352404026198,
       "flip_p99": 0.0,
@@ -45851,13 +45917,24 @@
       "passed": true,
       "result": "ok",
       "scenario": "tonemap_range_dim_agx",
+      "three": {
+        "blocking": false,
+        "flip_mean": 0.0000014114873465587152,
+        "flip_p99": 0.0,
+        "gpu_ms": 0.146432,
+        "issue": null,
+        "passed": true,
+        "renderer": "ANGLE (NVIDIA, Vulkan 1.4.329 (NVIDIA NVIDIA GeForce RTX 3060 Ti (0x00002489)), NVIDIA)",
+        "result": "ok",
+        "status": "passed"
+      },
       "timing_rounds": 2,
       "width": 1280
     },
     {
-      "bevy_gpu_ms": 0.260096,
+      "bevy_gpu_ms": 0.262144,
       "capability": "environment map (IBL)",
-      "engine_gpu_ms": 0.130048,
+      "engine_gpu_ms": 0.149504,
       "feature": "ibl",
       "flip_mean": 2.7748174602493236E-7,
       "flip_p99": 0.0,
@@ -45865,13 +45942,24 @@
       "passed": true,
       "result": "ok",
       "scenario": "ibl_materials",
+      "three": {
+        "blocking": false,
+        "flip_mean": 0.0000014210236258804798,
+        "flip_p99": 0.0,
+        "gpu_ms": 0.129024,
+        "issue": null,
+        "passed": true,
+        "renderer": "ANGLE (NVIDIA, Vulkan 1.4.329 (NVIDIA NVIDIA GeForce RTX 3060 Ti (0x00002489)), NVIDIA)",
+        "result": "ok",
+        "status": "passed"
+      },
       "timing_rounds": 2,
       "width": 1280
     },
     {
-      "bevy_gpu_ms": 0.33689600000000003,
+      "bevy_gpu_ms": 0.335872,
       "capability": "IBL + sun + shadow",
-      "engine_gpu_ms": 0.182272,
+      "engine_gpu_ms": 0.201728,
       "feature": "ibl",
       "flip_mean": 0.0000031299989586841548,
       "flip_p99": 0.0,
@@ -45879,13 +45967,24 @@
       "passed": true,
       "result": "ok",
       "scenario": "ibl_materials_sun",
+      "three": {
+        "blocking": false,
+        "flip_mean": 0.000010945456779154483,
+        "flip_p99": 0.0001735041878418997,
+        "gpu_ms": 0.223232,
+        "issue": null,
+        "passed": true,
+        "renderer": "ANGLE (NVIDIA, Vulkan 1.4.329 (NVIDIA NVIDIA GeForce RTX 3060 Ti (0x00002489)), NVIDIA)",
+        "result": "ok",
+        "status": "passed"
+      },
       "timing_rounds": 2,
       "width": 1280
     },
     {
       "bevy_gpu_ms": 0.33382400000000007,
       "capability": "distance fog",
-      "engine_gpu_ms": 0.177056,
+      "engine_gpu_ms": 0.2016,
       "feature": "fog",
       "flip_mean": 0.0000051014922064496204,
       "flip_p99": 0.00003344588549225591,
@@ -45893,13 +45992,24 @@
       "passed": true,
       "result": "ok",
       "scenario": "fog_linear",
+      "three": {
+        "blocking": false,
+        "flip_mean": 0.000011477588486741297,
+        "flip_p99": 0.00020180174033157527,
+        "gpu_ms": 0.334848,
+        "issue": null,
+        "passed": true,
+        "renderer": "ANGLE (NVIDIA, Vulkan 1.4.329 (NVIDIA NVIDIA GeForce RTX 3060 Ti (0x00002489)), NVIDIA)",
+        "result": "ok",
+        "status": "passed"
+      },
       "timing_rounds": 2,
       "width": 1280
     },
     {
-      "bevy_gpu_ms": 0.362496,
+      "bevy_gpu_ms": 0.36352,
       "capability": "distance fog + sun inscattering",
-      "engine_gpu_ms": 0.212992,
+      "engine_gpu_ms": 0.238592,
       "feature": "fog",
       "flip_mean": 0.00002046868576144334,
       "flip_p99": 0.0004552674072328955,
@@ -45907,13 +46017,24 @@
       "passed": true,
       "result": "ok",
       "scenario": "fog_linear_sun",
+      "three": {
+        "blocking": false,
+        "flip_mean": 0.00004230394188198261,
+        "flip_p99": 0.0010032507125288248,
+        "gpu_ms": 0.315392,
+        "issue": null,
+        "passed": true,
+        "renderer": "ANGLE (NVIDIA, Vulkan 1.4.329 (NVIDIA NVIDIA GeForce RTX 3060 Ti (0x00002489)), NVIDIA)",
+        "result": "ok",
+        "status": "passed"
+      },
       "timing_rounds": 2,
       "width": 1280
     },
     {
-      "bevy_gpu_ms": 0.33382400000000007,
+      "bevy_gpu_ms": 0.333824,
       "capability": "distance fog",
-      "engine_gpu_ms": 0.175968,
+      "engine_gpu_ms": 0.200608,
       "feature": "fog",
       "flip_mean": 0.00000431895614383393,
       "flip_p99": 0.0,
@@ -45921,13 +46042,24 @@
       "passed": true,
       "result": "ok",
       "scenario": "fog_exponential",
+      "three": {
+        "blocking": false,
+        "flip_mean": 0.000009664605386205949,
+        "flip_p99": 0.00013339141150936484,
+        "gpu_ms": 0.387072,
+        "issue": null,
+        "passed": true,
+        "renderer": "ANGLE (NVIDIA, Vulkan 1.4.329 (NVIDIA NVIDIA GeForce RTX 3060 Ti (0x00002489)), NVIDIA)",
+        "result": "ok",
+        "status": "passed"
+      },
       "timing_rounds": 2,
       "width": 1280
     },
     {
-      "bevy_gpu_ms": 0.361472,
+      "bevy_gpu_ms": 0.362496,
       "capability": "distance fog + sun inscattering",
-      "engine_gpu_ms": 0.212928,
+      "engine_gpu_ms": 0.237568,
       "feature": "fog",
       "flip_mean": 0.00002927388959506061,
       "flip_p99": 0.0006574657163582742,
@@ -45935,13 +46067,24 @@
       "passed": true,
       "result": "ok",
       "scenario": "fog_exponential_sun",
+      "three": {
+        "blocking": false,
+        "flip_mean": 0.00005854311166331172,
+        "flip_p99": 0.0013850528048351407,
+        "gpu_ms": 0.316416,
+        "issue": null,
+        "passed": true,
+        "renderer": "ANGLE (NVIDIA, Vulkan 1.4.329 (NVIDIA NVIDIA GeForce RTX 3060 Ti (0x00002489)), NVIDIA)",
+        "result": "ok",
+        "status": "passed"
+      },
       "timing_rounds": 2,
       "width": 1280
     },
     {
       "bevy_gpu_ms": 0.333824,
       "capability": "distance fog",
-      "engine_gpu_ms": 0.175104,
+      "engine_gpu_ms": 0.19968,
       "feature": "fog",
       "flip_mean": 0.000006067986305424711,
       "flip_p99": 0.000047741050366312265,
@@ -45949,13 +46092,24 @@
       "passed": true,
       "result": "ok",
       "scenario": "fog_exponential_squared",
+      "three": {
+        "blocking": false,
+        "flip_mean": 0.000012208001862745732,
+        "flip_p99": 0.0002149353240383789,
+        "gpu_ms": 0.350208,
+        "issue": null,
+        "passed": true,
+        "renderer": "ANGLE (NVIDIA, Vulkan 1.4.329 (NVIDIA NVIDIA GeForce RTX 3060 Ti (0x00002489)), NVIDIA)",
+        "result": "ok",
+        "status": "passed"
+      },
       "timing_rounds": 2,
       "width": 1280
     },
     {
-      "bevy_gpu_ms": 0.365568,
+      "bevy_gpu_ms": 0.362496,
       "capability": "distance fog + sun inscattering",
-      "engine_gpu_ms": 0.211872,
+      "engine_gpu_ms": 0.237568,
       "feature": "fog",
       "flip_mean": 0.000020094606952625327,
       "flip_p99": 0.00041387349483557045,
@@ -45963,13 +46117,24 @@
       "passed": true,
       "result": "ok",
       "scenario": "fog_exponential_squared_sun",
+      "three": {
+        "blocking": false,
+        "flip_mean": 0.00003996534724137746,
+        "flip_p99": 0.0009244712418876588,
+        "gpu_ms": 0.315392,
+        "issue": null,
+        "passed": true,
+        "renderer": "ANGLE (NVIDIA, Vulkan 1.4.329 (NVIDIA NVIDIA GeForce RTX 3060 Ti (0x00002489)), NVIDIA)",
+        "result": "ok",
+        "status": "passed"
+      },
       "timing_rounds": 2,
       "width": 1280
     },
     {
-      "bevy_gpu_ms": 0.333824,
+      "bevy_gpu_ms": 0.335872,
       "capability": "distance fog",
-      "engine_gpu_ms": 0.177088,
+      "engine_gpu_ms": 0.201728,
       "feature": "fog",
       "flip_mean": 0.000005817691544507397,
       "flip_p99": 0.00003576360541046597,
@@ -45977,13 +46142,24 @@
       "passed": true,
       "result": "ok",
       "scenario": "fog_atmospheric",
+      "three": {
+        "blocking": false,
+        "flip_mean": 0.000012089119991287589,
+        "flip_p99": 0.0002002941764658317,
+        "gpu_ms": 0.352256,
+        "issue": null,
+        "passed": true,
+        "renderer": "ANGLE (NVIDIA, Vulkan 1.4.329 (NVIDIA NVIDIA GeForce RTX 3060 Ti (0x00002489)), NVIDIA)",
+        "result": "ok",
+        "status": "passed"
+      },
       "timing_rounds": 2,
       "width": 1280
     },
     {
-      "bevy_gpu_ms": 0.36352,
+      "bevy_gpu_ms": 0.364544,
       "capability": "distance fog + sun inscattering",
-      "engine_gpu_ms": 0.212992,
+      "engine_gpu_ms": 0.238592,
       "feature": "fog",
       "flip_mean": 0.000019507893739501014,
       "flip_p99": 0.0003867182822432369,
@@ -45991,13 +46167,24 @@
       "passed": true,
       "result": "ok",
       "scenario": "fog_atmospheric_sun",
+      "three": {
+        "blocking": false,
+        "flip_mean": 0.00003905886842403561,
+        "flip_p99": 0.0008773818262852728,
+        "gpu_ms": 0.319488,
+        "issue": null,
+        "passed": true,
+        "renderer": "ANGLE (NVIDIA, Vulkan 1.4.329 (NVIDIA NVIDIA GeForce RTX 3060 Ti (0x00002489)), NVIDIA)",
+        "result": "ok",
+        "status": "passed"
+      },
       "timing_rounds": 2,
       "width": 1280
     },
     {
-      "bevy_gpu_ms": 1.0752,
+      "bevy_gpu_ms": 1.01376,
       "capability": "point + spot lights, cube + spot shadows (Gaussian)",
-      "engine_gpu_ms": 0.277408,
+      "engine_gpu_ms": 0.300992,
       "feature": "point_spot",
       "flip_mean": 0.000013872851923224516,
       "flip_p99": 0.0002510654157958925,
@@ -46005,13 +46192,24 @@
       "passed": true,
       "result": "ok",
       "scenario": "point_spot",
+      "three": {
+        "blocking": false,
+        "flip_mean": 0.00004598126542987302,
+        "flip_p99": 0.0010393450502306223,
+        "gpu_ms": 0.371712,
+        "issue": null,
+        "passed": true,
+        "renderer": "ANGLE (NVIDIA, Vulkan 1.4.329 (NVIDIA NVIDIA GeForce RTX 3060 Ti (0x00002489)), NVIDIA)",
+        "result": "ok",
+        "status": "passed"
+      },
       "timing_rounds": 2,
       "width": 1280
     },
     {
-      "bevy_gpu_ms": 0.990208,
+      "bevy_gpu_ms": 0.973824,
       "capability": "point + spot lights, cube + spot shadows (2×2 PCF)",
-      "engine_gpu_ms": 0.230368,
+      "engine_gpu_ms": 0.250816,
       "feature": "point_spot",
       "flip_mean": 0.000014701021427754313,
       "flip_p99": 0.00027973687974736094,
@@ -46019,13 +46217,24 @@
       "passed": true,
       "result": "ok",
       "scenario": "point_spot_hardware",
+      "three": {
+        "blocking": false,
+        "flip_mean": 0.000043763397115981206,
+        "flip_p99": 0.0010041595669463277,
+        "gpu_ms": 0.24576,
+        "issue": null,
+        "passed": true,
+        "renderer": "ANGLE (NVIDIA, Vulkan 1.4.329 (NVIDIA NVIDIA GeForce RTX 3060 Ti (0x00002489)), NVIDIA)",
+        "result": "ok",
+        "status": "passed"
+      },
       "timing_rounds": 2,
       "width": 1280
     },
     {
-      "bevy_gpu_ms": 1.130496,
+      "bevy_gpu_ms": 1.1325439999999998,
       "capability": "point + spot lights, soft shadows (PCSS)",
-      "engine_gpu_ms": 0.423936,
+      "engine_gpu_ms": 0.448448,
       "feature": "point_spot",
       "flip_mean": 0.00003860933429677971,
       "flip_p99": 0.0008670188253745437,
@@ -46033,13 +46242,24 @@
       "passed": true,
       "result": "ok",
       "scenario": "point_spot_soft",
+      "three": {
+        "blocking": false,
+        "flip_mean": 0.00008241482282755896,
+        "flip_p99": 0.0019888924434781075,
+        "gpu_ms": 0.523264,
+        "issue": null,
+        "passed": true,
+        "renderer": "ANGLE (NVIDIA, Vulkan 1.4.329 (NVIDIA NVIDIA GeForce RTX 3060 Ti (0x00002489)), NVIDIA)",
+        "result": "ok",
+        "status": "passed"
+      },
       "timing_rounds": 2,
       "width": 1280
     },
     {
       "bevy_gpu_ms": 0.667648,
       "capability": "consumer meshes + textured StandardMaterial",
-      "engine_gpu_ms": 0.337856,
+      "engine_gpu_ms": 0.347104,
       "feature": "textured_props",
       "flip_mean": 0.000032528281735721976,
       "flip_p99": 0.0006694167386740446,
@@ -46047,13 +46267,24 @@
       "passed": true,
       "result": "ok",
       "scenario": "textured_props",
+      "three": {
+        "blocking": false,
+        "flip_mean": 0.000041803963540587574,
+        "flip_p99": 0.0008436253410764039,
+        "gpu_ms": 0.393216,
+        "issue": null,
+        "passed": true,
+        "renderer": "ANGLE (NVIDIA, Vulkan 1.4.329 (NVIDIA NVIDIA GeForce RTX 3060 Ti (0x00002489)), NVIDIA)",
+        "result": "ok",
+        "status": "passed"
+      },
       "timing_rounds": 2,
       "width": 1280
     },
     {
       "bevy_gpu_ms": 0.423936,
       "capability": "GPU skinning (SkinnedMesh)",
-      "engine_gpu_ms": 0.205792,
+      "engine_gpu_ms": 0.216,
       "feature": "skinning",
       "flip_mean": 0.000012713559954136144,
       "flip_p99": 0.0001917583285830915,
@@ -46061,13 +46292,24 @@
       "passed": true,
       "result": "ok",
       "scenario": "skinned_figure",
+      "three": {
+        "blocking": false,
+        "flip_mean": 0.00001609104947419837,
+        "flip_p99": 0.0003278657386545092,
+        "gpu_ms": 0.280576,
+        "issue": null,
+        "passed": true,
+        "renderer": "ANGLE (NVIDIA, Vulkan 1.4.329 (NVIDIA NVIDIA GeForce RTX 3060 Ti (0x00002489)), NVIDIA)",
+        "result": "ok",
+        "status": "passed"
+      },
       "timing_rounds": 2,
       "width": 1280
     },
     {
-      "bevy_gpu_ms": 1.8339840000000005,
+      "bevy_gpu_ms": 1.6117759999999997,
       "capability": "time-of-day sky (atmosphere)",
-      "engine_gpu_ms": 1.279712,
+      "engine_gpu_ms": 1.198976,
       "feature": "sky",
       "flip_mean": 0.0000991180568234995,
       "flip_p99": 0.00245389761403203,
@@ -46075,13 +46317,21 @@
       "passed": true,
       "result": "ok",
       "scenario": "sky_day_cycle_noon",
+      "three": {
+        "blocking": false,
+        "issue": 39,
+        "passed": false,
+        "reason": "sky and moon",
+        "result": "not ported (sky and moon)",
+        "status": "unported"
+      },
       "timing_rounds": 2,
       "width": 1280
     },
     {
-      "bevy_gpu_ms": 1.7684479999999998,
+      "bevy_gpu_ms": 1.6117759999999997,
       "capability": "time-of-day sky (atmosphere)",
-      "engine_gpu_ms": 1.295488,
+      "engine_gpu_ms": 1.200768,
       "feature": "sky",
       "flip_mean": 0.00009231853618985042,
       "flip_p99": 0.0020879250951111317,
@@ -46089,13 +46339,21 @@
       "passed": true,
       "result": "ok",
       "scenario": "sky_day_cycle_golden",
+      "three": {
+        "blocking": false,
+        "issue": 39,
+        "passed": false,
+        "reason": "sky and moon",
+        "result": "not ported (sky and moon)",
+        "status": "unported"
+      },
       "timing_rounds": 2,
       "width": 1280
     },
     {
-      "bevy_gpu_ms": 1.6988160000000003,
+      "bevy_gpu_ms": 1.767424,
       "capability": "time-of-day sky (atmosphere)",
-      "engine_gpu_ms": 1.158432,
+      "engine_gpu_ms": 1.290272,
       "feature": "sky",
       "flip_mean": 0.00011326350067975,
       "flip_p99": 0.0027030447963625193,
@@ -46103,13 +46361,21 @@
       "passed": true,
       "result": "ok",
       "scenario": "sky_day_cycle_dusk",
+      "three": {
+        "blocking": false,
+        "issue": 39,
+        "passed": false,
+        "reason": "sky and moon",
+        "result": "not ported (sky and moon)",
+        "status": "unported"
+      },
       "timing_rounds": 2,
       "width": 1280
     },
     {
-      "bevy_gpu_ms": 1.849344,
+      "bevy_gpu_ms": 1.864704,
       "capability": "time-of-day sky (atmosphere)",
-      "engine_gpu_ms": 1.460064,
+      "engine_gpu_ms": 1.532544,
       "feature": "sky",
       "flip_mean": 0.0001303602330153808,
       "flip_p99": 0.003350399900227785,
@@ -46117,6 +46383,14 @@
       "passed": true,
       "result": "ok",
       "scenario": "sky_day_cycle_night",
+      "three": {
+        "blocking": false,
+        "issue": 39,
+        "passed": false,
+        "reason": "sky and moon",
+        "result": "not ported (sky and moon)",
+        "status": "unported"
+      },
       "timing_rounds": 2,
       "width": 1280
     }

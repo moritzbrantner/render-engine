@@ -261,7 +261,10 @@ export class Lighting {
   /**
    * Shadow cascades, spot maps and point-light cube faces, MSAA HDR pass, tone mapping and sRGB
    * output into `target` (null: canvas). The HDR pass sorts like Bevy (opaque, then masked, then
-   * blended back to front), replacing any custom opaque or transparent sort while it draws.
+   * blended back to front), replacing any custom opaque or transparent sort while it draws. It
+   * renders upside down, as wgpu stores a frame (projection y negated, winding inverted), and
+   * the output pass flips it back: a custom shader in the scene that reads `gl_FragCoord.y`
+   * sees it mirrored (counting down from the top row).
    */
   render(
     renderer: WebGLRenderer,
