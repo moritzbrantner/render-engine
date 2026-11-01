@@ -56,6 +56,7 @@ import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import { read as readKtx2 } from 'three/addons/libs/ktx-parse.module.js';
 import { ZSTDDecoder } from 'three/addons/libs/zstddec.module.js';
 import { cascadeRanges, fitCascade } from './cascades.js';
+import { ShadowCulling } from './culling.js';
 import { ENVIRONMENT_MIPS, INNER_RADIUS, OUTER_RADIUS, SkyPasses, worldToAtmosphere } from './sky.js';
 import {
   fullscreenVertex,
@@ -765,6 +766,8 @@ export class Lighting {
     this.shadowVariants = new WeakMap();
     // Objects without a LitMaterial skip the shadow passes.
     this.noShadow = new ShaderMaterial({ visible: false });
+    // Per shadow view, an InstancedMesh draws only its instances inside (culling.js).
+    this.shadowCulling = new ShadowCulling(this.noShadow);
     this.shadowTargets = Array.from({ length: MAX_CASCADES }, () => shadowTarget(shadowMapSize));
     this.shadowCamera = new OrthographicCamera();
     this.shadowMaterial = new ShaderMaterial({
@@ -966,11 +969,19 @@ export class Lighting {
     if (clipControl) clipControl.clipControlEXT(clipControl.LOWER_LEFT_EXT, clipControl.ZERO_TO_ONE_EXT);
     if (native) gl.enable(depthClamp.DEPTH_CLAMP_EXT);
     // Every caster draws with a shadow material: the shared one, or its LitMaterial's variant
-    // when that cuts out by alpha or draws both faces.
+    // when that cuts out by alpha or draws both faces. three culls a plain mesh per view by its
+    // sphere; culling.js culls the instances of each visible InstancedMesh.
     const casters = [];
     scene.traverse((o) => {
       if (o.material) casters.push([o, o.material]);
     });
+    // Only drawn meshes: a stand-in would draw a mesh whose parent is hidden.
+    const instanced = [];
+    scene.traverseVisible((o) => {
+      if (o.isInstancedMesh && o.count > 0) instanced.push(o);
+    });
+    const culling = this.shadowCulling;
+    culling.begin(scene, instanced);
     const assign = (local) => {
       const pick = (m) => this.#shadowMaterial(m, local, native, localNative);
       for (const [o, m] of casters) o.material = Array.isArray(m) ? m.map(pick) : pick(m);
@@ -981,20 +992,23 @@ export class Lighting {
       const half = c.diameter / 2;
       cam.matrixWorldInverse.fromArray(c.cascadeFromWorld);
       cam.matrixWorld.copy(cam.matrixWorldInverse).invert();
-      cam.projectionMatrix.makeOrthographic(-half, half, half, -half, -1e7, c.depthRange);
+      cam.projectionMatrix.makeOrthographic(-half, half, half, -half, -1e7, c.depthRange, cam.coordinateSystem, cam.reversedDepth);
       cam.projectionMatrixInverse.copy(cam.projectionMatrix).invert();
       cam.matrixAutoUpdate = false;
       cam.matrixWorldAutoUpdate = false;
+      culling.view(i, cam);
       this.shadowMaterial.uniforms.cascadeClip.value.fromArray(c.clipFromWorld);
       renderer.setRenderTarget(this.shadowTargets[i]);
       state.buffers.depth.setClear(0);
       renderer.clear(false, true, false);
       renderer.render(scene, cam);
     });
+    culling.reset();
     if (native) gl.disable(depthClamp.DEPTH_CLAMP_EXT);
     if (local.spotViews.length || local.pointViews.length) {
       this.#renderLocalShadows(renderer, scene, local, () => assign(true));
     }
+    culling.end();
     for (const [o, m] of casters) o.material = m;
     if (clipControl) {
       const reversed = state.buffers.depth.getReversed();
@@ -1058,6 +1072,7 @@ export class Lighting {
     cam.matrixWorldAutoUpdate = false;
     renderer.setClearColor(new Color(0, 0, 0), 0);
     state.buffers.color.setMask(true);
+    let index = MAX_CASCADES;
     const pass = (view, target, face) => {
       // Culling camera: the light's frustum out to its range (Bevy also culls casters beyond it).
       cam.fov = (view.fovY * 180) / Math.PI;
@@ -1067,6 +1082,7 @@ export class Lighting {
       cam.updateProjectionMatrix();
       cam.matrixWorld.copy(view.world);
       cam.matrixWorldInverse.copy(view.world).invert();
+      this.shadowCulling.view(index++, cam);
       material.uniforms.lightClip.value.copy(view.clipFromWorld);
       renderer.setRenderTarget(target, face);
       state.buffers.depth.setClear(0);
