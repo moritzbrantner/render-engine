@@ -978,6 +978,19 @@ export class Lighting {
 
     scene.updateMatrixWorld();
     camera.updateMatrixWorld();
+    // The world matrices hold for every pass of this frame: three need not update them per pass.
+    const matrixWorldAutoUpdate = scene.matrixWorldAutoUpdate;
+    scene.matrixWorldAutoUpdate = false;
+    try {
+      this.#renderPasses(renderer, scene, camera, target, width, height);
+    } finally {
+      scene.matrixWorldAutoUpdate = matrixWorldAutoUpdate;
+      renderer.setClearColor(clearColor, clearAlpha);
+      renderer.autoClear = autoClear;
+    }
+  }
+
+  #renderPasses(renderer, scene, camera, target, width, height) {
     const cascades = this.cascades(camera, width / height);
     const local = packLocalLights(this.pointLights, this.spotLights, this.shadowMapSize, this.pointShadowMapSize);
     while (this.spotShadowTargets.length < local.spotViews.length) {
@@ -992,7 +1005,9 @@ export class Lighting {
       const materials = Array.isArray(o.material) ? o.material : [o.material];
       for (const m of materials) {
         if (!m?.isLitMaterial) continue;
-        Object.assign(m.uniforms, this.uniforms);
+        // The frame uniforms are shared objects whose values #updateUniforms sets: a material
+        // takes them once.
+        if (m.uniforms.exposure !== this.uniforms.exposure) Object.assign(m.uniforms, this.uniforms);
         // Light counts size the shader's loops and samplers: a change recompiles, as in three.
         if (m.userData.localLights !== definesKey) {
           delete m.defines.LIT_SOFT_SHADOWS;
@@ -1047,9 +1062,6 @@ export class Lighting {
     this.outputQuad.material.uniforms.encodeSrgb.value = target?.texture.colorSpace === SRGBColorSpace ? 0 : 1;
     renderer.setRenderTarget(target);
     this.outputQuad.render(renderer);
-
-    renderer.setClearColor(clearColor, clearAlpha);
-    renderer.autoClear = autoClear;
   }
 
   dispose() {
