@@ -3,9 +3,9 @@
 //! (`GeneratedEnvironmentMapLight`).
 //!
 //! Each frame, before the shadow and main passes: the transmittance, multiscattering, sky-view
-//! and aerial-view LUTs (one compute pass), then, with sky ambient light, the sky rendered into
-//! a 128² cube, its mip chain, the GGX-prefiltered specular cube (one dispatch per mip) and the
-//! 32² irradiance cube. After the opaque draws a fullscreen pass blends the sky and the aerial
+//! and aerial-view LUTs (one compute pass), then, with sky ambient light and only when the sky
+//! changed ([`EnvironmentInputs`]), the sky rendered into a 128² cube, its mip chain, the
+//! GGX-prefiltered specular cube (one dispatch per mip) and the 32² irradiance cube. After the opaque draws a fullscreen pass blends the sky and the aerial
 //! perspective into the HDR frame; the main pass reads the transmittance LUT to filter the
 //! sun and moon light.
 
@@ -29,6 +29,13 @@ const AERIAL_VIEW_SIZE: [u32; 3] = [32, 32, 32];
 const ENVIRONMENT_SIZE: u32 = 128;
 const ENVIRONMENT_MIPS: u32 = ENVIRONMENT_SIZE.ilog2() + 1;
 const IRRADIANCE_SIZE: u32 = 32;
+/// The environment cubes are re-filtered when a sky light turns by more than this (radians)
+/// or the camera's distance from the planet centre moves by more than
+/// [`ENVIRONMENT_ALTITUDE_TOLERANCE`] metres since the last filter, and when the ground albedo or
+/// a light's colour or disc changes at all. Bevy re-filters every frame; within these
+/// tolerances the cubes barely change.
+pub(crate) const ENVIRONMENT_TURN_TOLERANCE: f32 = 0.25 * std::f32::consts::PI / 180.0;
+pub(crate) const ENVIRONMENT_ALTITUDE_TOLERANCE: f32 = 100.0;
 /// `ScatteringMedium::earth(256, 256)`.
 const FALLOFF_RESOLUTION: u32 = 256;
 const PHASE_RESOLUTION: u32 = 256;
@@ -750,8 +757,43 @@ pub(crate) struct SkyTargets {
     /// The filtered sky cubes the main pass samples (Rgba16Float, like Bevy's).
     pub diffuse_view: wgpu::TextureView,
     pub specular_view: wgpu::TextureView,
-    /// Whether this frame renders the sky's environment light.
-    environment: bool,
+    /// The inputs the environment cubes were last filtered for (`None`: no environment light).
+    filtered: Option<EnvironmentInputs>,
+    /// Whether encodes after the last prepare re-filter the environment cubes.
+    refilter: bool,
+    /// Set once an encode has recorded the re-filter, so the next prepare can drop it.
+    refiltered: std::cell::Cell<bool>,
+}
+
+/// What the environment cubes depend on: the sky-view LUT at the camera's distance from the
+/// planet centre, which the ground albedo and the sky lights shape.
+#[derive(Clone, Copy, Debug)]
+struct EnvironmentInputs {
+    ground_albedo: Vec3,
+    radius: f32,
+    lights: [Option<SkyLight>; 2],
+}
+
+impl EnvironmentInputs {
+    /// Whether cubes filtered for `self` still stand for `now`.
+    fn covers(&self, now: &Self) -> bool {
+        let cos_turn = ENVIRONMENT_TURN_TOLERANCE.cos();
+        self.ground_albedo == now.ground_albedo
+            && (self.radius - now.radius).abs() <= ENVIRONMENT_ALTITUDE_TOLERANCE
+            && self.lights.iter().zip(&now.lights).all(|pair| match pair {
+                (None, None) => true,
+                (Some(a), Some(b)) => {
+                    a.color == b.color
+                        && a.disk_size == b.disk_size
+                        && a.disk_intensity == b.disk_intensity
+                        && a.direction_to_light
+                            .normalize()
+                            .dot(b.direction_to_light.normalize())
+                            >= cos_turn
+                }
+                _ => false,
+            })
+    }
 }
 
 /// Mip levels of the specular cube the main pass samples.
@@ -1056,7 +1098,9 @@ impl SkyTargets {
             luts,
             diffuse_view: cube_view(&diffuse),
             specular_view: cube_view(&specular),
-            environment: false,
+            filtered: None,
+            refilter: false,
+            refiltered: std::cell::Cell::new(false),
         }
     }
 
@@ -1079,7 +1123,6 @@ impl SkyTargets {
         clip_from_view: Mat4,
         depth_view: &wgpu::TextureView,
     ) {
-        self.environment = sky.environment_intensity.is_some();
         let world_to_atmosphere = world_to_atmosphere();
         let atmosphere = GpuAtmosphere {
             ground_albedo: sky.ground_albedo,
@@ -1106,6 +1149,27 @@ impl SkyTargets {
         // Bevy `prepare_atmosphere_transforms`.
         let cam_world = world_from_view.w_axis.truncate();
         let cam_pos = Vec3A::from(world_to_atmosphere.transform_point3(cam_world));
+        if sky.environment_intensity.is_some() {
+            let mut sky_lights = [None; 2];
+            for (slot, l) in sky_lights.iter_mut().zip(lights) {
+                *slot = Some(*l);
+            }
+            let now = EnvironmentInputs {
+                ground_albedo: sky.ground_albedo,
+                radius: cam_pos.length(),
+                lights: sky_lights,
+            };
+            if self.filtered.is_none_or(|f| !f.covers(&now)) {
+                self.filtered = Some(now);
+                self.refilter = true;
+                self.refiltered.set(false);
+            } else if self.refiltered.get() {
+                self.refilter = false;
+            }
+        } else {
+            self.filtered = None;
+            self.refilter = false;
+        }
         let atmo_y = cam_pos.try_normalize().unwrap_or(Vec3A::Y);
         let world_ref = Vec3A::NEG_Z;
         let ref_horizontal = world_ref - atmo_y * atmo_y.dot(world_ref);
@@ -1197,10 +1261,11 @@ impl SkyTargets {
 
     /// The compute passes [`Self::encode_luts`] records.
     pub fn compute_passes(&self) -> u32 {
-        1 + u32::from(self.environment)
+        1 + u32::from(self.refilter)
     }
 
-    /// Records the LUT passes and, with sky ambient light, the environment cubes.
+    /// Records the LUT passes and, with sky ambient light whose inputs changed at the last
+    /// prepare, the environment cubes.
     pub fn encode_luts(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -1229,9 +1294,10 @@ impl SkyTargets {
         pass.dispatch_workgroups(x, y, 1);
         drop(pass);
 
-        if !self.environment {
+        if !self.refilter {
             return;
         }
+        self.refiltered.set(true);
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("sky environment"),
             timestamp_writes: stamps.compute(),

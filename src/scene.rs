@@ -208,10 +208,11 @@ pub struct Sky {
     pub sun_disk: SunDisk,
     /// The moon's visible disc (Bevy `SunDisk` on the moon light).
     pub moon_disk: SunDisk,
-    /// Ambient and reflected light from the sky: each frame the sky is rendered into a 128²
-    /// cube map and filtered into diffuse and specular maps on the GPU (Bevy
+    /// Ambient and reflected light from the sky: the sky is rendered into a 128² cube map and
+    /// filtered into diffuse and specular maps on the GPU (Bevy
     /// `AtmosphereEnvironmentMapLight` with this `intensity`, which drives a
-    /// `GeneratedEnvironmentMapLight`). `None` leaves ambient light to `Scene::ambient` and
+    /// `GeneratedEnvironmentMapLight`), whenever the sun, moon, ground albedo or camera
+    /// altitude changed since the last filter (Bevy filters every frame). `None` leaves ambient light to `Scene::ambient` and
     /// `Scene::environment`; with `Some`, `Scene::environment` must be `None`.
     pub environment_intensity: Option<f32>,
 }

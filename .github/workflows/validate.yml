@@ -111,6 +111,9 @@ jobs:
           bun install --frozen-lockfile
           bunx --no-install playwright install --with-deps chromium-headless-shell
 
+      - name: three-lighting tests
+        run: bun test packages
+
       - name: Bevy oracle (FLIP image gate on render-engine and three.js; GPU time advisory)
         run: cargo run --release --locked --manifest-path oracle/Cargo.toml -- --out target/oracle
 
