@@ -42,6 +42,7 @@ cargo fmt --all -- --check && (cd oracle && cargo fmt -- --check)
 cargo clippy --all-targets --locked -- -D warnings
 (cd oracle && cargo clippy --release --all-targets --locked -- -D warnings)
 cargo test --locked                                   # includes a headless render (needs any wgpu adapter)
+bun test packages                                     # three-lighting unit tests (no GPU)
 (cd oracle && cargo test --release --locked)
 cargo run --release --locked --manifest-path oracle/Cargo.toml                    # GPU: image + GPU-time gates
 cargo run --release --locked --manifest-path oracle/Cargo.toml -- --only sun_shadows --no-timing   # debugging; --list

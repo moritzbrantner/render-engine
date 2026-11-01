@@ -742,7 +742,7 @@ export class Lighting {
      * sky-view and aerial-view LUTs every frame) with the sun and moon discs, the sky drawn where
      * nothing else is and aerial perspective over the scene. With `environmentIntensity` it is
      * also the ambient light: rendered into a cube and filtered like Bevy's
-     * `GeneratedEnvironmentMapLight` every frame (then `environment` must be null). Under a sky
+     * `GeneratedEnvironmentMapLight` when its inputs change (then `environment` must be null). Under a sky
      * the sun's illuminance is the light above the atmosphere (`RAW_SUNLIGHT`). Needs
      * `EXT_color_buffer_float` and `OES_texture_float_linear`.
      */

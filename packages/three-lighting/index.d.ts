@@ -88,8 +88,9 @@ export interface Sky {
   sunDisk: SunDiskValue;
   moonDisk: SunDiskValue;
   /**
-   * Ambient and reflected light from the sky, filtered every frame like Bevy's
-   * `GeneratedEnvironmentMapLight` (cd/m² scale); null leaves it to `ambient` and `environment`.
+   * Ambient and reflected light from the sky, filtered like Bevy's
+   * `GeneratedEnvironmentMapLight` (cd/m² scale) when the sun, moon, ground albedo or camera altitude
+   * changed (Bevy filters every frame); null leaves it to `ambient` and `environment`.
    */
   environmentIntensity: number | null;
 }

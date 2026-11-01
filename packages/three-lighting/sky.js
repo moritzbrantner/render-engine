@@ -3,9 +3,9 @@
 // `AtmosphereEnvironmentMapLight` drives (`GeneratedEnvironmentMapLight`), on WebGL 2.
 //
 // Each frame, before the shadow and main passes: the transmittance, multiscattering, sky-view and
-// aerial-view LUTs, then, with sky ambient light, the sky rendered into a 128² cube, its mip
-// chain, the GGX-prefiltered specular cube (one pass per mip) and the 32² irradiance
-// cube. After the opaque draws `composite` blends the sky and the aerial perspective into the
+// aerial-view LUTs, then, with sky ambient light and only when the sky changed, the sky rendered
+// into a 128² cube, its mip chain, the GGX-prefiltered specular cube (one pass per mip) and the
+// 32² irradiance cube. After the opaque draws `composite` blends the sky and the aerial perspective into the
 // HDR frame; the main pass samples the transmittance LUT to filter the sun and moon light.
 // Every pass is a fullscreen fragment pass (WebGL 2 has no compute), so the sky needs
 // EXT_color_buffer_float (float targets) and OES_texture_float_linear (the Rgba32Float medium
@@ -70,6 +70,14 @@ const AERIAL_VIEW_SIZE = 32;
 const ENVIRONMENT_SIZE = 128;
 export const ENVIRONMENT_MIPS = Math.log2(ENVIRONMENT_SIZE) + 1;
 const IRRADIANCE_SIZE = 32;
+/**
+ * The environment cubes are re-filtered when a sky light turns by more than this (radians) or the
+ * camera's distance from the planet centre moves by more than `ENVIRONMENT_ALTITUDE_TOLERANCE`
+ * metres since the last filter, and when the ground albedo or a light's colour or disc changes at
+ * all. Bevy re-filters every frame; within these tolerances the cubes barely change.
+ */
+export const ENVIRONMENT_TURN_TOLERANCE = (0.25 * Math.PI) / 180;
+export const ENVIRONMENT_ALTITUDE_TOLERANCE = 100;
 /** `ScatteringMedium::earth(256, 256)`. */
 const FALLOFF_RESOLUTION = 256;
 const PHASE_RESOLUTION = 256;
@@ -292,6 +300,30 @@ export class SkyPasses {
     this.compositeMesh.onAfterRender = (renderer) => renderer.getContext().colorMask(true, true, true, true);
     this.compositeCamera = new OrthographicCamera(-1, 1, 1, -1, 0, 1);
     this.quad = new FullScreenQuad(this.materials.transmittance);
+    /** How many times `render` has filtered the environment cubes. */
+    this.environmentFilters = 0;
+  }
+
+  /** The inputs the environment cubes were last filtered for (null: not filtered). */
+  #filtered = null;
+
+  /** Whether the cubes filtered for `#filtered` still stand for `inputs`. */
+  #environmentCurrent(inputs) {
+    const was = this.#filtered;
+    if (!was || was.lights.length !== inputs.lights.length) return false;
+    const same = (a, b) => a.every((x, i) => x === b[i]);
+    if (!same(was.groundAlbedo, inputs.groundAlbedo)) return false;
+    if (Math.abs(was.radius - inputs.radius) > ENVIRONMENT_ALTITUDE_TOLERANCE) return false;
+    const cosTurn = Math.cos(ENVIRONMENT_TURN_TOLERANCE);
+    return was.lights.every((l, i) => {
+      const n = inputs.lights[i];
+      return (
+        same(l.color, n.color) &&
+        l.diskSize === n.diskSize &&
+        l.diskIntensity === n.diskIntensity &&
+        l.direction.dot(n.direction) >= cosTurn
+      );
+    });
   }
 
   /** A fullscreen pass into `target`'s `layer` (or cube face) and `mip`, or its `w × h` corner. */
@@ -303,7 +335,8 @@ export class SkyPasses {
   }
 
   /**
-   * Updates the LUTs (and, with `environment`, the environment cubes) for a frame.
+   * Updates the LUTs (and, with `environment`, the environment cubes when their inputs changed)
+   * for a frame.
    * @param lights the directional lights in Bevy's order: `{ directionToLight, color, diskSize,
    *   diskIntensity }`, colour × illuminance
    */
@@ -344,7 +377,24 @@ export class SkyPasses {
       m.aerialStore.uniforms.totalIn.value = to.textures[0];
       this.#draw(renderer, m.aerialStore, this.aerialView, slice);
     }
-    if (!environment) return;
+    if (!environment) {
+      this.#filtered = null;
+      return;
+    }
+    // The cubes sample the sky-view LUT at the camera's distance from the planet centre.
+    const inputs = {
+      groundAlbedo: [...groundAlbedo],
+      radius: camPos.length(),
+      lights: lights.slice(0, 2).map((l) => ({
+        direction: new Vector3().copy(l.directionToLight).normalize(),
+        color: [...l.color],
+        diskSize: l.diskSize,
+        diskIntensity: l.diskIntensity,
+      })),
+    };
+    if (this.#environmentCurrent(inputs)) return;
+    this.#filtered = inputs;
+    this.environmentFilters++;
 
     for (let face = 0; face < 6; face++) {
       m.environment.uniforms.face.value = face;

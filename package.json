@@ -6,6 +6,7 @@
   "license": "MIT",
   "files": [
     "packages/three-lighting",
+    "!packages/three-lighting/*.test.js",
     "src/luts/*.ktx2",
     "src/luts/LICENSE-*",
     "src/luts/README.md"
@@ -15,6 +16,9 @@
       "types": "./packages/three-lighting/index.d.ts",
       "import": "./packages/three-lighting/index.js"
     }
+  },
+  "scripts": {
+    "test": "bun test packages"
   },
   "peerDependencies": {
     "three": ">=0.186.0 <0.187.0"

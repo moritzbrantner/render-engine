@@ -330,6 +330,50 @@ fn sky_follows_the_time_of_day() {
     assert!(top[2] > 150 && top[0] < 50, "clear colour again: {top:?}");
 }
 
+/// The sky's environment cubes are filtered at the first frame and again only when the sky
+/// changes (render-engine#54): the filter is its own timestamped compute pass.
+#[test]
+fn sky_environment_is_filtered_only_when_the_sky_changes() {
+    let gpu = Headless::new().expect("a wgpu adapter");
+    let mut world = World::new(gpu.renderer());
+    let ground = world.add_mesh(&MeshData::shape(Shape::Plane(Vec2::splat(200.0))));
+    let grey = world.add_material(&StandardMaterial::default());
+    let instances = [at(ground, grey, Vec3::ZERO)];
+    let cycle = DayCycle::default();
+    let at_hour = |hours: f32| {
+        let mut s = scene(false, Tonemapping::TonyMcMapface);
+        s.sun = Some(Sun {
+            direction: -cycle.to_sun(hours),
+            color: Vec3::ONE,
+            illuminance: RAW_SUNLIGHT,
+            shadows: None,
+        });
+        s.sky = Some(Sky::default());
+        s
+    };
+    let mut viewport = Viewport::new(gpu.renderer(), 32, 32);
+    let mut filters = |s: &Scene| {
+        gpu.render(&mut viewport, &world, s, &instances).unwrap();
+        viewport.timestamp_queries()
+    };
+    let first = filters(&at_hour(10.0));
+    let still = filters(&at_hour(10.0));
+    assert_eq!(
+        first,
+        still + 2,
+        "a static sky skips the environment filter"
+    );
+    for _ in 0..3 {
+        assert_eq!(filters(&at_hour(10.0)), still);
+    }
+    // An hour moves the sun by 15°.
+    assert_eq!(filters(&at_hour(11.0)), first, "a moving sun re-filters");
+    assert_eq!(filters(&at_hour(11.0)), still);
+    let mut albedo = at_hour(11.0);
+    albedo.sky.as_mut().unwrap().ground_albedo = Vec3::splat(0.1);
+    assert_eq!(filters(&albedo), first, "a new ground albedo re-filters");
+}
+
 /// GPU particles: alive counts follow the spawns and fixed lifetimes (a particle spawned in a
 /// step is aged in it too), capacity caps a burst, slots are reused, and an emitter in front of
 /// the camera lights the frame.
