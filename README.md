@@ -121,15 +121,15 @@ FLIP gate against Bevy. CI run on lavapipe (ANGLE on Vulkan), FLIP mean / p99 ag
 
 | Scenario | three.js vs Bevy | Result |
 | --- | --- | --- |
-| `sun_shadows` | 0.0003 / 0.0083 | pass |
-| `sun_cascades` | 0.0003 / 0.0070 | pass |
-| `tonemap_range` (4 views) | ≤ 0.0004 / 0.0107 | pass |
-| `ibl_materials`, `ibl_materials_sun` | ≤ 0.0010 / 0.0304 | pass |
-| `fog_modes` (8 views) | ≤ 0.0001 / 0.0026 | pass |
-| `point_spot` (3 views: Gaussian, 2×2 PCF, PCSS) | ≤ 0.0006 / 0.0153 | pass |
-| `many_instances` | 0.0058 / 0.0869 | known gap, #42 |
-| `textured_props` | 0.0016 / 0.0438 | pass |
-| `skinned_figure` | 0.0009 / 0.0224 | pass |
+| `sun_shadows` | 0.0000 / 0.0000 | pass |
+| `sun_cascades` | 0.0000 / 0.0001 | pass |
+| `many_instances` | 0.0000 / 0.0006 | pass |
+| `tonemap_range` (4 views) | 0.0000 / 0.0000 | pass |
+| `ibl_materials`, `ibl_materials_sun` | ≤ 0.0000 / 0.0001 | pass |
+| `fog_modes` (8 views) | ≤ 0.0000 / 0.0007 | pass |
+| `point_spot` (3 views: Gaussian, 2×2 PCF, PCSS) | ≤ 0.0001 / 0.0014 | pass |
+| `textured_props` | 0.0000 / 0.0007 | pass |
+| `skinned_figure` | 0.0000 / 0.0002 | pass |
 | `sky_day_cycle` (4 views) | – | not ported, #39 |
 
 ## Development
