@@ -355,6 +355,16 @@ explicit mip chain and sampler, as the engine's `TextureData` does. Not mapped: 
 texture transforms, a second UV set (occlusion on `TEXCOORD_1`) and the physical extensions,
 which the engine does not cover either.
 
+### Instanced meshes, other materials and a page background (web)
+
+`LitMaterial` draws three's `InstancedMesh` like the engine's instances: each instance takes its
+`instanceMatrix`, and its `setColorAt` colour (linear) multiplies the base colour, in the main
+pass and every shadow pass. three draws plain meshes one draw call each, so keep repeated props
+instanced. Only `LitMaterial` objects cast shadows; anything else in the scene (sprites,
+overlays) is drawn into the HDR pass as three draws it, tone mapped but not exposed. A page that
+paints its own backdrop behind a transparent canvas (`new WebGLRenderer({ alpha: true })`) sets
+`lighting.clearAlpha = 0`: the output is premultiplied where nothing is drawn.
+
 ### Skinned meshes (web)
 
 `LitMaterial` skins three's `SkinnedMesh` on the GPU with the engine's linear blend skinning (four

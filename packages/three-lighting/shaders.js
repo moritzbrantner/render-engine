@@ -15,17 +15,26 @@ export const MAX_SPOT_SHADOWS = 4;
 // skinIndex/skinWeight, boneTexture = bone.matrixWorld × boneInverse per joint). The blended
 // palette replaces the model matrix like render-engine's; three's bind matrices bracket it (the
 // identity for a skin detached at the mesh's own space, as render-engine's palettes are).
+// An InstancedMesh (USE_INSTANCING) places each instance by its instanceMatrix after the
+// object's model matrix, like render-engine's per-instance world_from_local.
 const skinnedModel = /* glsl */ `
 #include <skinning_pars_vertex>
+mat4 litObjectMatrix() {
+#ifdef USE_INSTANCING
+    return modelMatrix * instanceMatrix;
+#else
+    return modelMatrix;
+#endif
+}
 mat4 litModelMatrix() {
 #ifdef USE_SKINNING
     mat4 skin = skinWeight.x * getBoneMatrix(skinIndex.x)
         + skinWeight.y * getBoneMatrix(skinIndex.y)
         + skinWeight.z * getBoneMatrix(skinIndex.z)
         + skinWeight.w * getBoneMatrix(skinIndex.w);
-    return modelMatrix * bindMatrixInverse * skin * bindMatrix;
+    return litObjectMatrix() * bindMatrixInverse * skin * bindMatrix;
 #else
-    return modelMatrix;
+    return litObjectMatrix();
 #endif
 }
 `;
@@ -70,12 +79,16 @@ void main() {
     vTangent = tangent;
     vHasTangents = 0.0;
     if (any(notEqual(tangent, vec4(0.0)))) {
-        float sign = determinant(mat3(modelMatrix)) < 0.0 ? -1.0 : 1.0;
+        float sign = determinant(mat3(litObjectMatrix())) < 0.0 ? -1.0 : 1.0;
         vTangent = vec4(normalize(mat3(model) * tangent.xyz), tangent.w * sign);
         vHasTangents = 1.0;
     }
     vUv = uv;
     vColor = color;
+#ifdef USE_INSTANCING_COLOR
+    // InstancedMesh.setColorAt: a linear per-instance colour times the vertex colour.
+    vColor.rgb *= instanceColor;
+#endif
     gl_Position = projectionMatrix * viewMatrix * world;
 }
 `;
@@ -1192,7 +1205,9 @@ vec3 agx(vec3 color) {
 
 void main() {
     vec4 hdr = texelFetch(hdrTexture, ivec2(gl_FragCoord.xy), 0);
-    vec3 color = max(hdr.rgb, vec3(0.0));
+    // Premultiplied by alpha (below 1 only with Lighting.clearAlpha): tone map the straight colour.
+    float alpha = clamp(hdr.a, 0.0, 1.0);
+    vec3 color = alpha > 0.0 ? max(hdr.rgb, vec3(0.0)) / alpha : vec3(0.0);
     vec3 outColor;
     if (method == 0) {
         outColor = ACESFilmicToneMapping(color);
@@ -1203,7 +1218,7 @@ void main() {
     }
     float luma = bevyLuminance(outColor);
     outColor = mix(vec3(luma), outColor, vec3(1.0));
-    fragColor = vec4(outColor, hdr.a);
+    fragColor = vec4(outColor, alpha);
 }
 `;
 
@@ -1222,6 +1237,8 @@ void main() {
     ivec2 p = ivec2(gl_FragCoord.xy);
     vec4 c = texelFetch(postTexture, ivec2(p.x, textureSize(postTexture, 0).y - 1 - p.y), 0);
     vec3 rgb = clamp(c.rgb, 0.0, 1.0);
-    fragColor = vec4(encodeSrgb > 0.5 ? srgbEncode(rgb) : rgb, 1.0);
+    // Straight colour in, premultiplied out: the canvas composites premultiplied alpha.
+    float alpha = clamp(c.a, 0.0, 1.0);
+    fragColor = vec4((encodeSrgb > 0.5 ? srgbEncode(rgb) : rgb) * alpha, alpha);
 }
 `;

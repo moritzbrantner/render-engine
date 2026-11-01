@@ -6,6 +6,7 @@ import {
   BufferAttribute,
   BufferGeometry,
   DetachedBindMode,
+  InstancedMesh,
   Matrix4,
   Mesh,
   PerspectiveCamera,
@@ -83,19 +84,43 @@ async function main() {
   });
   const scene = new Scene();
   const materials = new Map();
+  // Unskinned opaque objects sharing a mesh and a material draw as one InstancedMesh, as the
+  // engine instances them; the rest as one Mesh each.
+  const batches = new Map();
   for (const o of doc.objects) {
     const key = JSON.stringify(o.material);
     const params = { ...o.material };
     for (const name of TEXTURES) params[name] = params[name] == null ? null : textures[params[name]];
     if (!materials.has(key)) materials.set(key, new LitMaterial(params));
+    const material = materials.get(key);
     const skinned = o.skin != null;
-    const mesh = new (skinned ? SkinnedMesh : Mesh)(geometries[o.mesh], materials.get(key));
+    if (!skinned && material.alphaMode === 'opaque') {
+      const batchKey = `${o.mesh}:${key}`;
+      if (!batches.has(batchKey)) batches.set(batchKey, { geometry: geometries[o.mesh], material, matrices: [] });
+      batches.get(batchKey).matrices.push(o.matrix);
+      continue;
+    }
+    const mesh = new (skinned ? SkinnedMesh : Mesh)(geometries[o.mesh], material);
     mesh.matrixAutoUpdate = false;
     mesh.matrix.fromArray(o.matrix);
     if (skinned) {
       mesh.bindMode = DetachedBindMode;
       mesh.bind(skeletons[o.skin], new Matrix4());
     }
+    scene.add(mesh);
+  }
+  const instance = new Matrix4();
+  for (const { geometry, material, matrices } of batches.values()) {
+    if (matrices.length === 1) {
+      const mesh = new Mesh(geometry, material);
+      mesh.matrixAutoUpdate = false;
+      mesh.matrix.fromArray(matrices[0]);
+      scene.add(mesh);
+      continue;
+    }
+    const mesh = new InstancedMesh(geometry, material, matrices.length);
+    matrices.forEach((m, i) => mesh.setMatrixAt(i, instance.fromArray(m)));
+    mesh.computeBoundingSphere();
     scene.add(mesh);
   }
 
