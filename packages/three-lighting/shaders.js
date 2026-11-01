@@ -7,6 +7,9 @@
 // exposed HDR until the tone-mapping pass.
 
 export const MAX_CASCADES = 4;
+/** Shadow-casting point and spot lights per frame (each takes texture units). */
+export const MAX_POINT_SHADOWS = 4;
+export const MAX_SPOT_SHADOWS = 4;
 
 export const litVertex = /* glsl */ `
 out vec3 vWorld;
@@ -76,6 +79,72 @@ uniform vec4 fogColor;
 uniform vec4 fogDirectionalLightColor;
 uniform vec4 fogBe;
 uniform vec4 fogBi;
+// Height of the main pass in pixels: fragment coordinates as wgpu's (y down) for the noise.
+uniform float viewportHeight;
+
+// Point lights then spot lights, shadow casters first (Bevy's clustered order), LIGHT_STRIDE
+// vec4s each, laid out like render-engine's GpuLight: custom data (point: the cube projection's
+// lower-right 2×2 terms; spot: direction x and z, spot scale, spot offset), colour × lm/sr and
+// 1/range², position and radius, (depth bias, normal bias, near z, soft shadow size), (tan of the
+// outer angle, shadow index, 1 for shadows, 1 when the spot points down).
+// (three.js rewrites NUM_POINT_LIGHTS and friends in every shader, hence the LIT_ names.)
+#define LIGHT_STRIDE 5
+#define LIT_LOCAL_LIGHTS (LIT_POINT_LIGHTS + LIT_SPOT_LIGHTS)
+#if LIT_LOCAL_LIGHTS > 0
+uniform vec4 localLights[LIT_LOCAL_LIGHTS * LIGHT_STRIDE];
+#endif
+#if LIT_POINT_SHADOWS > 0
+uniform samplerCubeShadow pointShadowMap0;
+#endif
+#if LIT_POINT_SHADOWS > 1
+uniform samplerCubeShadow pointShadowMap1;
+#endif
+#if LIT_POINT_SHADOWS > 2
+uniform samplerCubeShadow pointShadowMap2;
+#endif
+#if LIT_POINT_SHADOWS > 3
+uniform samplerCubeShadow pointShadowMap3;
+#endif
+#if LIT_SPOT_SHADOWS > 0
+uniform sampler2DShadow spotShadowMap0;
+#endif
+#if LIT_SPOT_SHADOWS > 1
+uniform sampler2DShadow spotShadowMap1;
+#endif
+#if LIT_SPOT_SHADOWS > 2
+uniform sampler2DShadow spotShadowMap2;
+#endif
+#if LIT_SPOT_SHADOWS > 3
+uniform sampler2DShadow spotShadowMap3;
+#endif
+// Soft shadows search the raw depth with a linear filter. WebGL 2 cannot filter a depth texture
+// without comparison, so the local shadow passes also write their depth into an R32F target.
+#ifdef LIT_SOFT_SHADOWS
+#if LIT_POINT_SHADOWS > 0
+uniform samplerCube pointShadowDepth0;
+#endif
+#if LIT_POINT_SHADOWS > 1
+uniform samplerCube pointShadowDepth1;
+#endif
+#if LIT_POINT_SHADOWS > 2
+uniform samplerCube pointShadowDepth2;
+#endif
+#if LIT_POINT_SHADOWS > 3
+uniform samplerCube pointShadowDepth3;
+#endif
+#if LIT_SPOT_SHADOWS > 0
+uniform sampler2D spotShadowDepth0;
+#endif
+#if LIT_SPOT_SHADOWS > 1
+uniform sampler2D spotShadowDepth1;
+#endif
+#if LIT_SPOT_SHADOWS > 2
+uniform sampler2D spotShadowDepth2;
+#endif
+#if LIT_SPOT_SHADOWS > 3
+uniform sampler2D spotShadowDepth3;
+#endif
+#endif
 
 float perceptualRoughnessToRoughness(float p) {
     float c = clamp(p, 0.089, 1.0);
@@ -122,8 +191,21 @@ vec3 envBrdfApprox(vec3 f0, vec2 fab) {
     return f0 * fab.x + fab.y;
 }
 
+// Layers 0-3 are the sun cascades, 4 and up the spot maps (Bevy keeps both in one array).
 float sampleHardware(vec2 uv, float depth, int layer) {
     vec3 p = vec3(uv, depth);
+#if LIT_SPOT_SHADOWS > 0
+    if (layer == 4) return texture(spotShadowMap0, p);
+#endif
+#if LIT_SPOT_SHADOWS > 1
+    if (layer == 5) return texture(spotShadowMap1, p);
+#endif
+#if LIT_SPOT_SHADOWS > 2
+    if (layer == 6) return texture(spotShadowMap2, p);
+#endif
+#if LIT_SPOT_SHADOWS > 3
+    if (layer == 7) return texture(spotShadowMap3, p);
+#endif
     if (layer == 0) return texture(shadowMap0, p);
     if (layer == 1) return texture(shadowMap1, p);
     if (layer == 2) return texture(shadowMap2, p);
@@ -268,6 +350,337 @@ vec3 directionalLight(vec3 L, vec3 lightColor, vec3 N, vec3 V, float NdotV, floa
     return (diffuse + spec) * NdotL * lightColor;
 }
 
+// ------------------------------------------------------------ point and spot lights
+
+// Bevy's shadow_sampling.wesl constants ("determined by trial and error").
+const float SPOT_SHADOW_TEXEL_SIZE = 0.0134277345;
+const float POINT_SHADOW_SCALE = 0.003;
+const float POINT_SHADOW_TEMPORAL_OFFSET_SCALE = 0.5;
+
+// The D3D 8× MSAA sample positions and a unit Gaussian's weights at them.
+const vec2 D3D_SAMPLE_POINT_POSITIONS[8] = vec2[8](
+    vec2( 0.125, -0.375),
+    vec2(-0.125,  0.375),
+    vec2( 0.625,  0.125),
+    vec2(-0.375, -0.625),
+    vec2(-0.625,  0.625),
+    vec2(-0.875, -0.125),
+    vec2( 0.375,  0.875),
+    vec2( 0.875, -0.875)
+);
+const float D3D_SAMPLE_POINT_COEFFS[8] = float[8](
+    0.157112, 0.157112, 0.138651, 0.130251, 0.114946, 0.114946, 0.107982, 0.079001
+);
+// Jimenez 2014 spiral (Bevy utils::SPIRAL_OFFSET_*).
+const vec2 SPIRAL_OFFSETS[8] = vec2[8](
+    vec2(-0.7071,  0.7071),
+    vec2(-0.0000, -0.8750),
+    vec2( 0.5303,  0.5303),
+    vec2(-0.6250, -0.0000),
+    vec2( 0.3536, -0.3536),
+    vec2(-0.0000,  0.3750),
+    vec2(-0.1768, -0.1768),
+    vec2( 0.1250,  0.0000)
+);
+
+// Bevy maths::orthonormalize (columns x, y, z).
+mat3 orthonormalize(vec3 zBasis) {
+    float s = zBasis.z >= 0.0 ? 1.0 : -1.0;
+    float a = -1.0 / (s + zBasis.z);
+    float b = zBasis.x * zBasis.y * a;
+    vec3 xBasis = vec3(1.0 + s * zBasis.x * zBasis.x * a, s * b, -s * zBasis.x);
+    vec3 yBasis = vec3(b, s + zBasis.y * zBasis.y * a, -zBasis.y);
+    return mat3(xBasis, yBasis, zBasis);
+}
+
+// Bevy interleaved_gradient_noise.
+float interleavedGradientNoise(vec2 pixelCoordinates, uint frameIndex) {
+    vec2 xy = pixelCoordinates + 5.588238 * float(frameIndex % 64u);
+    return fract(52.9829189 * fract(0.06711056 * xy.x + 0.00583715 * xy.y));
+}
+
+// Bevy random_rotation_matrix, non-temporal (frame 1).
+mat2 randomRotationMatrix(vec2 scale) {
+    float randomAngle = 2.0 * PI * interleavedGradientNoise(scale, 1u);
+    vec2 m = vec2(sin(randomAngle), cos(randomAngle));
+    return mat2(m.y, -m.x, m.x, m.y);
+}
+
+// Bevy getDistanceAttenuation: inverse square with a smooth window at the light's range.
+float getDistanceAttenuation(float distanceSquare, float inverseRangeSquared) {
+    float factor = distanceSquare * inverseRangeSquared;
+    float smoothFactor = clamp(1.0 - factor * factor, 0.0, 1.0);
+    return smoothFactor * smoothFactor * 1.0 / max(distanceSquare, 0.0001);
+}
+
+float specularFixRemap(float a) {
+    float invASq = (1.0 - a) * (1.0 - a);
+    return 1.0 - invASq * invASq;
+}
+
+#if LIT_LOCAL_LIGHTS > 0
+vec4 lightData(int light, int field) {
+    return localLights[light * LIGHT_STRIDE + field];
+}
+
+// Bevy point_light (no clearcoat, anisotropy or light textures): Karis's representative-point
+// sphere light for specular, Burley diffuse towards the centre.
+vec3 pointLight(int light, vec3 P, vec3 N, vec3 V, vec3 R, float NdotV, float roughness,
+    vec3 diffuseColor, vec3 F0, vec2 fab) {
+    vec4 colorInverseSquareRange = lightData(light, 1);
+    vec4 positionRadius = lightData(light, 2);
+    vec3 lightToFrag = positionRadius.xyz - P;
+    vec3 L = normalize(lightToFrag);
+    float distanceSquare = dot(lightToFrag, lightToFrag);
+    float distance = sqrt(distanceSquare);
+    float rangeAttenuation = getDistanceAttenuation(distanceSquare, colorInverseSquareRange.w);
+    float radius = positionRadius.w;
+    float a = roughness;
+
+    // compute_specular_layer_values_for_point_light.
+    float LtFdotR = max(0.0001, dot(lightToFrag, R));
+    vec3 centerToRay = LtFdotR * R - lightToFrag;
+    vec3 closestPoint = lightToFrag
+        + centerToRay * clamp(radius * inversesqrt(dot(centerToRay, centerToRay)), 0.0, 1.0);
+    vec3 LSpec = closestPoint * inversesqrt(dot(closestPoint, closestPoint));
+    float aPrime = clamp(a + radius / (2.0 * distance), 0.0, 1.0);
+
+    vec3 HSpec = normalize(LSpec + V);
+    float NdotLSpec = clamp(dot(N, LSpec), 0.0, 1.0);
+    float NdotHSpec = clamp(dot(N, HSpec), 0.0, 1.0);
+    float LdotHSpec = clamp(dot(LSpec, HSpec), 0.0, 1.0);
+    float normalizationFactor = a / aPrime;
+    float specularIntensity = normalizationFactor * normalizationFactor;
+    float brdfRoughness = mix(a, aPrime, specularFixRemap(a));
+
+    float D = D_GGX(brdfRoughness, NdotHSpec);
+    float Vis = V_SmithGGXCorrelated(brdfRoughness, NdotV, NdotLSpec);
+    vec3 F = fresnelTerm(F0, LdotHSpec);
+    vec3 specularLight = (specularIntensity * D * Vis) * F;
+    specularLight *= 1.0 + F0 * (1.0 / (fab.x + fab.y) - 1.0);
+    // Sphere-light visibility (solid-angle attenuation).
+    if (radius > 0.0) {
+        float solidAngle = radius * radius / (distance * distance);
+        specularLight *= clamp(NdotLSpec / max(NdotLSpec + solidAngle, 1e-4), 0.0, 1.0);
+    }
+
+    vec3 H = normalize(L + V);
+    float NdotL = clamp(dot(N, L), 0.0, 1.0);
+    float LdotH = clamp(dot(L, H), 0.0, 1.0);
+    float f90 = 0.5 + 2.0 * roughness * LdotH * LdotH;
+    float fd = F_Schlick(1.0, f90, NdotL) * F_Schlick(1.0, f90, NdotV) * (1.0 / PI);
+    vec3 diffuse = diffuseColor * fd;
+
+    vec3 colorTimesNdotL = diffuse * NdotL + specularLight * NdotLSpec;
+    return colorTimesNdotL * colorInverseSquareRange.rgb * rangeAttenuation;
+}
+
+// The spot axis, rebuilt from x, z and the sign of y like Bevy.
+vec3 spotDirection(int light) {
+    vec4 custom = lightData(light, 0);
+    vec3 spotDir = vec3(custom.x, 0.0, custom.y);
+    spotDir.y = sqrt(max(0.0, 1.0 - spotDir.x * spotDir.x - spotDir.z * spotDir.z));
+    if (lightData(light, 4).w > 0.5) {
+        spotDir.y = -spotDir.y;
+    }
+    return spotDir;
+}
+
+// Bevy spot_light: the point light times Filament's smooth cone falloff.
+float spotAttenuation(int light, vec3 P) {
+    vec4 custom = lightData(light, 0);
+    vec3 lightToFrag = lightData(light, 2).xyz - P;
+    float cd = dot(-spotDirection(light), normalize(lightToFrag));
+    float attenuation = clamp(cd * custom.z + custom.w, 0.0, 1.0);
+    return attenuation * attenuation;
+}
+#endif
+
+#if LIT_POINT_SHADOWS > 0
+float sampleCubeHardware(vec3 lightLocal, float depth, int cube) {
+    vec4 p = vec4(lightLocal, depth);
+#if LIT_POINT_SHADOWS > 1
+    if (cube == 1) return texture(pointShadowMap1, p);
+#endif
+#if LIT_POINT_SHADOWS > 2
+    if (cube == 2) return texture(pointShadowMap2, p);
+#endif
+#if LIT_POINT_SHADOWS > 3
+    if (cube == 3) return texture(pointShadowMap3, p);
+#endif
+    return texture(pointShadowMap0, p);
+}
+
+// Bevy sample_shadow_cubemap_gaussian: a Gaussian over the D3D pattern on the plane facing the
+// light.
+float sampleCubeGaussian(vec3 lightLocal, float depth, float scale, float distanceToLight, int cube) {
+    mat3 basis = orthonormalize(normalize(lightLocal)) * scale * distanceToLight;
+    float sum = 0.0;
+    for (int i = 0; i < 8; i++) {
+        vec2 p = D3D_SAMPLE_POINT_POSITIONS[i];
+        sum += sampleCubeHardware(lightLocal + p.x * basis[0] + p.y * basis[1], depth, cube)
+            * D3D_SAMPLE_POINT_COEFFS[i];
+    }
+    return sum;
+}
+
+#ifdef LIT_SOFT_SHADOWS
+float sampleCubeDepth(vec3 lightLocal, int cube) {
+#if LIT_POINT_SHADOWS > 1
+    if (cube == 1) return textureLod(pointShadowDepth1, lightLocal, 0.0).r;
+#endif
+#if LIT_POINT_SHADOWS > 2
+    if (cube == 2) return textureLod(pointShadowDepth2, lightLocal, 0.0).r;
+#endif
+#if LIT_POINT_SHADOWS > 3
+    if (cube == 3) return textureLod(pointShadowDepth3, lightLocal, 0.0).r;
+#endif
+    return textureLod(pointShadowDepth0, lightLocal, 0.0).r;
+}
+
+// Bevy sample_shadow_cubemap_jittered (non-temporal): the spiral, rotated per pixel.
+float sampleCubeJittered(vec3 lightLocal, float depth, vec2 fragCoord, float scale, float distanceToLight, int cube) {
+    mat2 rotation = randomRotationMatrix(fragCoord);
+    mat3 basis = orthonormalize(normalize(lightLocal)) * scale * distanceToLight;
+    float sum = 0.0;
+    for (int i = 0; i < 8; i++) {
+        vec2 p = rotation * SPIRAL_OFFSETS[i] * POINT_SHADOW_TEMPORAL_OFFSET_SCALE;
+        sum += sampleCubeHardware(lightLocal + p.x * basis[0] + p.y * basis[1], depth, cube) * 0.125;
+    }
+    return sum;
+}
+
+// Bevy search_for_blockers_in_shadow_cubemap: mean depth of the occluding texels.
+float searchCubeBlockers(vec3 lightLocal, float depth, float scale, float distanceToLight, int cube) {
+    mat3 basis = orthonormalize(normalize(lightLocal)) * scale * distanceToLight;
+    vec2 sum = vec2(0.0);
+    for (int i = 0; i < 8; i++) {
+        vec2 p = D3D_SAMPLE_POINT_POSITIONS[i];
+        float sampledDepth = sampleCubeDepth(lightLocal + p.x * basis[0] + p.y * basis[1], cube);
+        sum += sampledDepth >= depth ? vec2(sampledDepth, 1.0) : vec2(0.0);
+    }
+    if (sum.y == 0.0) {
+        return 0.0;
+    }
+    return sum.x / sum.y;
+}
+#endif
+
+// Bevy fetch_point_shadow.
+float fetchPointShadow(int light, vec3 P, vec3 N, vec2 fragCoord) {
+    vec4 custom = lightData(light, 0);
+    vec3 position = lightData(light, 2).xyz;
+    vec4 shadow = lightData(light, 3);
+    vec3 surfaceToLight = position - P;
+    vec3 surfaceToLightAbs = abs(surfaceToLight);
+    float distanceToLight = max(surfaceToLightAbs.x, max(surfaceToLightAbs.y, surfaceToLightAbs.z));
+
+    // The normal bias is per texel at 1 m; texels grow with the distance to the light.
+    vec3 normalOffset = shadow.y * distanceToLight * N;
+    vec3 depthOffset = shadow.x * normalize(surfaceToLight);
+    vec3 offsetPosition = P + normalOffset + depthOffset;
+
+    vec3 fragLs = offsetPosition - position;
+    vec3 absPositionLs = abs(fragLs);
+    float majorAxisMagnitude = max(absPositionLs.x, max(absPositionLs.y, absPositionLs.z));
+    vec2 zw = -majorAxisMagnitude * custom.xy + custom.zw;
+    float depth = zw.x / zw.y;
+
+    // Cube maps are left-handed: z is flipped for the lookup.
+    vec3 lightLocal = fragLs * vec3(1.0, 1.0, -1.0);
+    int cube = int(lightData(light, 4).y + 0.5);
+#ifdef LIT_SOFT_SHADOWS
+    if (shadow.w > 0.0) {
+        float lightSize = shadow.w;
+        float zBlocker = searchCubeBlockers(lightLocal, depth, lightSize, distanceToLight, cube);
+        float blurSize = max((zBlocker - depth) * lightSize / depth, 0.5);
+        return sampleCubeJittered(lightLocal, depth, fragCoord, POINT_SHADOW_SCALE * blurSize, distanceToLight, cube);
+    }
+#endif
+    if (gaussianFilter > 0.5) {
+        return sampleCubeGaussian(lightLocal, depth, POINT_SHADOW_SCALE, distanceToLight, cube);
+    }
+    return sampleCubeHardware(lightLocal, depth, cube);
+}
+#endif
+
+#if LIT_SPOT_SHADOWS > 0
+#ifdef LIT_SOFT_SHADOWS
+float sampleSpotDepth(vec2 uv, int layer) {
+#if LIT_SPOT_SHADOWS > 1
+    if (layer == 5) return textureLod(spotShadowDepth1, uv, 0.0).r;
+#endif
+#if LIT_SPOT_SHADOWS > 2
+    if (layer == 6) return textureLod(spotShadowDepth2, uv, 0.0).r;
+#endif
+#if LIT_SPOT_SHADOWS > 3
+    if (layer == 7) return textureLod(spotShadowDepth3, uv, 0.0).r;
+#endif
+    return textureLod(spotShadowDepth0, uv, 0.0).r;
+}
+
+// Bevy sample_shadow_map_jimenez_fourteen (non-temporal).
+float sampleJimenez(vec2 lightLocal, float depth, int layer, vec2 fragCoord, float texelSize, float blurSize) {
+    mat2 rotation = randomRotationMatrix(fragCoord);
+    // Bevy's fudge factor (map(0.00390625, 0.022949219, 0.015, 0.035, texel_size)).
+    float f = 0.015 + (texelSize - 0.00390625) * (0.035 - 0.015) / (0.022949219 - 0.00390625);
+    float uvOffsetScale = f * blurSize / (texelSize * shadowMapSize);
+    float sum = 0.0;
+    for (int i = 0; i < 8; i++) {
+        sum += sampleHardware(lightLocal + (rotation * SPIRAL_OFFSETS[i]) * uvOffsetScale, depth, layer);
+    }
+    return sum / 8.0;
+}
+
+// Bevy search_for_blockers_in_shadow_map.
+float searchBlockers(vec2 lightLocal, float depth, int layer, float texelSize, float searchSize) {
+    float uvOffsetScale = searchSize / (texelSize * shadowMapSize);
+    vec2 sum = vec2(0.0);
+    for (int i = 0; i < 8; i++) {
+        float sampledDepth = sampleSpotDepth(lightLocal + D3D_SAMPLE_POINT_POSITIONS[i] * uvOffsetScale, layer);
+        sum += sampledDepth >= depth ? vec2(sampledDepth, 1.0) : vec2(0.0);
+    }
+    if (sum.y == 0.0) {
+        return 0.0;
+    }
+    return sum.x / sum.y;
+}
+#endif
+
+// Bevy fetch_spot_shadow. GL textures put row 0 at the bottom, so v is not flipped.
+float fetchSpotShadow(int light, vec3 P, vec3 N, vec2 fragCoord) {
+    vec3 position = lightData(light, 2).xyz;
+    vec4 shadow = lightData(light, 3);
+    vec4 data = lightData(light, 4);
+    vec3 surfaceToLight = position - P;
+    // The view's z axis is the reverse of the spot direction.
+    vec3 fwd = -spotDirection(light);
+    float distanceToLight = dot(fwd, surfaceToLight);
+    vec3 offsetPosition = -surfaceToLight
+        + (shadow.x * normalize(surfaceToLight))
+        + (N * shadow.y) * distanceToLight;
+    // A rotation: multiplying from the left by the vector applies its transpose (inverse).
+    vec3 projectedPosition = offsetPosition * orthonormalize(fwd);
+    float fDivMinusZ = 1.0 / (data.x * -projectedPosition.z);
+    vec2 shadowUv = projectedPosition.xy * fDivMinusZ * vec2(0.5, 0.5) + vec2(0.5, 0.5);
+    float depth = shadow.z / -projectedPosition.z;
+
+    int layer = int(data.y + 0.5);
+#ifdef LIT_SOFT_SHADOWS
+    if (shadow.w > 0.0) {
+        float lightSize = shadow.w;
+        float zBlocker = searchBlockers(shadowUv, depth, layer, SPOT_SHADOW_TEXEL_SIZE, lightSize);
+        float blurSize = max((zBlocker - depth) * lightSize / depth, 0.5);
+        return sampleJimenez(shadowUv, depth, layer, fragCoord, SPOT_SHADOW_TEXEL_SIZE, blurSize);
+    }
+#endif
+    if (gaussianFilter > 0.5) {
+        return sampleGaussian(shadowUv, depth, layer);
+    }
+    return sampleHardware(shadowUv, depth, layer);
+}
+#endif
+
 vec3 litRadiance(vec3 worldNormal, vec3 N) {
     vec3 base = baseColor.rgb;
     float roughness = perceptualRoughnessToRoughness(perceptualRoughness);
@@ -279,7 +692,35 @@ vec3 litRadiance(vec3 worldNormal, vec3 N) {
     vec3 F0 = mix(f0Dielectric, base, metallic);
     vec2 fab = F_AB(perceptualRoughness, NdotV);
 
+    // Bevy's order: point lights, spot lights, then the sun.
     vec3 direct = vec3(0.0);
+#if LIT_LOCAL_LIGHTS > 0
+    vec3 R = reflect(-V, N);
+    vec2 fragCoord = vec2(gl_FragCoord.x, viewportHeight - gl_FragCoord.y);
+#endif
+#if LIT_POINT_LIGHTS > 0
+    for (int i = 0; i < LIT_POINT_LIGHTS; i++) {
+        float shadow = 1.0;
+#if LIT_POINT_SHADOWS > 0
+        if (lightData(i, 4).z > 0.5) {
+            shadow = fetchPointShadow(i, vWorld, worldNormal, fragCoord);
+        }
+#endif
+        direct += pointLight(i, vWorld, N, V, R, NdotV, roughness, diffuseColor, F0, fab) * shadow;
+    }
+#endif
+#if LIT_SPOT_LIGHTS > 0
+    for (int i = LIT_POINT_LIGHTS; i < LIT_LOCAL_LIGHTS; i++) {
+        float shadow = 1.0;
+#if LIT_SPOT_SHADOWS > 0
+        if (lightData(i, 4).z > 0.5) {
+            shadow = fetchSpotShadow(i, vWorld, worldNormal, fragCoord);
+        }
+#endif
+        direct += pointLight(i, vWorld, N, V, R, NdotV, roughness, diffuseColor, F0, fab)
+            * spotAttenuation(i, vWorld) * shadow;
+    }
+#endif
     if (hasSun > 0.5) {
         float shadow = 1.0;
         if (sunShadows > 0.5) {
@@ -386,6 +827,32 @@ void main() {
     gl_FragDepth = min(vDepth, 1.0);
 #endif
     fragColor = vec4(0.0);
+}
+`;
+
+// Spot and point-light shadow passes: perspective, reverse Z, depth clipped (not clamped) like
+// Bevy's. Cube faces are rendered upside down (flipY = -1, with the winding flipped by the
+// caller): GL stores a face's NDC y = −1 in row 0, where wgpu stores y = +1, and both look cube
+// maps up the same way. The colour target (R32F) keeps the depth for the soft-shadow blocker
+// search.
+export const localShadowVertex = /* glsl */ `
+uniform mat4 lightClip;
+uniform float flipY;
+void main() {
+    vec4 clip = lightClip * (modelMatrix * vec4(position, 1.0));
+    clip.y *= flipY;
+#ifdef NATIVE_DEPTH
+    gl_Position = clip;
+#else
+    gl_Position = vec4(clip.xy, 2.0 * clip.z - clip.w, clip.w);
+#endif
+}
+`;
+
+export const localShadowFragment = /* glsl */ `
+layout(location = 0) out highp vec4 fragColor;
+void main() {
+    fragColor = vec4(gl_FragCoord.z, 0.0, 0.0, 1.0);
 }
 `;
 

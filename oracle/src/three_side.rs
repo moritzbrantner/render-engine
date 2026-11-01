@@ -13,7 +13,7 @@
 use crate::content::Geometry;
 use crate::scenarios::Scenario;
 use render_engine::mesh::MeshData;
-use render_engine::scene::{FogFalloff, ShadowFilter, Tonemapping};
+use render_engine::scene::{FogFalloff, LightShadows, ShadowFilter, Tonemapping};
 use serde_json::{Value, json};
 use std::{collections::HashMap, path::Path};
 
@@ -23,7 +23,6 @@ pub const GAPS: &[(&str, u32)] = &[("many_instances", 42)];
 
 /// Follow-up issue per capability the port does not cover yet.
 const UNPORTED_ISSUE: &[(&str, u32)] = &[
-    ("point/spot lights", 38),
     ("sky and moon", 39),
     ("textured materials", 40),
     ("double-sided, unlit or transparent materials", 40),
@@ -37,9 +36,6 @@ pub fn gap_issue(name: &str) -> Option<u32> {
 /// Why `s` cannot be exported yet, if anything is missing on the three.js side.
 pub fn unsupported(s: &Scenario) -> Option<&'static str> {
     let scene = &s.scene;
-    if !scene.point_lights.is_empty() || !scene.spot_lights.is_empty() {
-        return Some("point/spot lights");
-    }
     if scene.sky.is_some() || scene.moon.is_some() {
         return Some("sky and moon");
     }
@@ -159,6 +155,47 @@ pub fn export(s: &Scenario, dir: &Path) -> Result<(), String> {
             })),
         })
     });
+    let shadows = |s: Option<LightShadows>| {
+        s.map(|s| {
+            json!({
+                "depthBias": s.depth_bias,
+                "normalBias": s.normal_bias,
+                "nearZ": s.near_z,
+                "soft": s.soft,
+            })
+        })
+    };
+    let point_lights: Vec<Value> = scene
+        .point_lights
+        .iter()
+        .map(|l| {
+            json!({
+                "position": v3(l.position),
+                "color": v3(l.color),
+                "intensity": l.intensity,
+                "range": l.range,
+                "radius": l.radius,
+                "shadows": shadows(l.shadows),
+            })
+        })
+        .collect();
+    let spot_lights: Vec<Value> = scene
+        .spot_lights
+        .iter()
+        .map(|l| {
+            json!({
+                "position": v3(l.position),
+                "direction": v3(l.direction),
+                "color": v3(l.color),
+                "intensity": l.intensity,
+                "range": l.range,
+                "radius": l.radius,
+                "innerAngle": l.inner_angle,
+                "outerAngle": l.outer_angle,
+                "shadows": shadows(l.shadows),
+            })
+        })
+        .collect();
     // Tiergarten is the only committed environment map (assets/ibl).
     let environment = scene.environment.as_ref().map(|e| {
         json!({
@@ -218,6 +255,9 @@ pub fn export(s: &Scenario, dir: &Path) -> Result<(), String> {
         "sun": sun,
         "ambient": { "color": v3(scene.ambient.color), "brightness": scene.ambient.brightness },
         "shadowMapSize": scene.shadow_maps.directional,
+        "pointShadowMapSize": scene.shadow_maps.point,
+        "pointLights": point_lights,
+        "spotLights": spot_lights,
         "environment": environment,
         "fog": fog,
         "meshes": meshes,

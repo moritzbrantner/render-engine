@@ -8,8 +8,10 @@
 // the sRGB output.
 
 import {
+  BackSide,
   ClampToEdgeWrapping,
   Color,
+  CubeDepthTexture,
   CubeTexture,
   Data3DTexture,
   DataTexture,
@@ -27,13 +29,17 @@ import {
   NearestFilter,
   NoBlending,
   OrthographicCamera,
+  PerspectiveCamera,
   RGBAFormat,
+  RedFormat,
   RGBFormat,
   SRGBColorSpace,
   ShaderMaterial,
   UnsignedInt5999Type,
+  UnsignedIntType,
   Vector3,
   Vector4,
+  WebGLCubeRenderTarget,
   WebGLRenderTarget,
 } from 'three';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
@@ -44,7 +50,11 @@ import {
   fullscreenVertex,
   litFragment,
   litVertex,
+  localShadowFragment,
+  localShadowVertex,
   MAX_CASCADES,
+  MAX_POINT_SHADOWS,
+  MAX_SPOT_SHADOWS,
   outputFragment,
   shadowFragment,
   shadowVertex,
@@ -233,8 +243,140 @@ function frameUniforms() {
     fogDirectionalLightColor: { value: new Vector4() },
     fogBe: { value: new Vector4() },
     fogBi: { value: new Vector4() },
+    viewportHeight: { value: 1 },
+    localLights: { value: [] },
+    ...Object.fromEntries(
+      ['pointShadowMap', 'pointShadowDepth', 'spotShadowMap', 'spotShadowDepth'].flatMap((name) =>
+        Array.from({ length: 4 }, (_, i) => [`${name}${i}`, { value: null }]),
+      ),
+    ),
   };
 }
+
+/** Bevy's `PointLight` shadow defaults. */
+export const POINT_LIGHT_SHADOWS = Object.freeze({ depthBias: 0.08, normalBias: 0.6, nearZ: 0.1, soft: false });
+/** Bevy's `SpotLight` shadow defaults. */
+export const SPOT_LIGHT_SHADOWS = Object.freeze({ depthBias: 0.02, normalBias: 1.8, nearZ: 0.1, soft: false });
+
+/** Bevy's point-light cube faces (`CUBE_MAP_FACES`): look direction and up per cube face. */
+const CUBE_FACES = [
+  [[1, 0, 0], [0, 1, 0]],
+  [[-1, 0, 0], [0, 1, 0]],
+  [[0, 1, 0], [0, 0, 1]],
+  [[0, -1, 0], [0, 0, -1]],
+  [[0, 0, -1], [0, 1, 0]],
+  [[0, 0, 1], [0, 1, 0]],
+];
+
+/** Bevy's right-handed infinite reverse-Z perspective projection (column-major). */
+function perspectiveInfiniteReverse(fovY, aspect, near) {
+  const f = 1 / Math.tan(fovY / 2);
+  return new Matrix4().set(f / aspect, 0, 0, 0, 0, f, 0, 0, 0, 0, 0, near, 0, 0, -1, 0);
+}
+
+/** Bevy `maths::orthonormalize`: a right-handed basis whose z axis is `z`. */
+function orthonormalize(z) {
+  // `1.copysign(z.z)`: −0 counts as negative.
+  const sign = z.z > 0 || Object.is(z.z, 0) ? 1 : -1;
+  const a = -1 / (sign + z.z);
+  const b = z.x * z.y * a;
+  return [new Vector3(1 + sign * z.x * z.x * a, sign * b, -sign * z.x), new Vector3(b, sign + z.y * z.y * a, -z.y), z];
+}
+
+/** The rotation of Bevy `Transform::looking_to(direction, up)` as [right, up, back]. */
+function lookingTo(direction, up) {
+  const back = new Vector3(...direction).normalize().negate();
+  const right = new Vector3(...up).cross(back).normalize();
+  return [right, back.clone().cross(right), back];
+}
+
+/** World-from-view for a light at `position` with basis columns `[x, y, z]`. */
+function worldFromView(position, [x, y, z]) {
+  return new Matrix4().makeBasis(x, y, z).setPosition(...position);
+}
+
+/**
+ * Bevy's `extract_lights` and `prepare_lights` for point and spot lights (render-engine
+ * `LocalLights`): the packed uniform data, point lights then spot lights with the shadow casters
+ * first, and one shadow view per spot map and point-light cube face.
+ */
+function packLocalLights(pointLights, spotLights, directionalSize, pointSize) {
+  const data = [];
+  const pointViews = [];
+  const spotViews = [];
+  const softShadows = [...pointLights, ...spotLights].some((l) => l.shadows?.soft);
+  const base = (l) => {
+    const k = l.intensity / (4 * Math.PI);
+    return [
+      new Vector4(),
+      new Vector4(l.color[0] * k, l.color[1] * k, l.color[2] * k, 1 / (l.range * l.range)),
+      new Vector4(...l.position, l.radius ?? 0),
+      new Vector4(),
+      new Vector4(),
+    ];
+  };
+  const shadowed = (light, s, texelSize, radius, index) => {
+    // √2 for the worst-case diagonal texel offset, as in Bevy.
+    light[3].set(s.depthBias, s.normalBias * texelSize * Math.SQRT2, s.nearZ, s.soft ? radius : 0);
+    light[4].y = index;
+    light[4].z = 1;
+  };
+  const casterFirst = (lights) => [...lights.filter((l) => l.shadows), ...lights.filter((l) => !l.shadows)];
+
+  for (const l of casterFirst(pointLights)) {
+    const light = base(l);
+    const nearZ = l.shadows?.nearZ ?? POINT_LIGHT_SHADOWS.nearZ;
+    const projection = perspectiveInfiniteReverse(Math.PI / 2, 1, nearZ);
+    const p = projection.elements;
+    light[0].set(p[10], p[11], p[14], p[15]);
+    if (l.shadows) {
+      const cube = pointViews.length / 6;
+      if (cube >= MAX_POINT_SHADOWS) throw new Error(`at most ${MAX_POINT_SHADOWS} shadowed point lights`);
+      shadowed(light, l.shadows, 2 / pointSize, l.radius ?? 0, cube);
+      for (const [direction, up] of CUBE_FACES) {
+        const world = worldFromView(l.position, lookingTo(direction, up));
+        pointViews.push({ world, clipFromWorld: projection.clone().multiply(world.clone().invert()), fovY: Math.PI / 2, near: nearZ, range: l.range });
+      }
+    }
+    data.push(...light);
+  }
+  for (const l of casterFirst(spotLights)) {
+    const light = base(l);
+    const outer = Math.min(l.outerAngle, Math.PI / 2 - 1e-4);
+    const inner = Math.min(l.innerAngle, outer);
+    const direction = new Vector3(...l.direction).normalize();
+    const cosOuter = Math.cos(outer);
+    const spotScale = 1 / Math.max(Math.cos(inner) - cosOuter, 1e-4);
+    light[0].set(direction.x, direction.z, spotScale, -cosOuter * spotScale);
+    light[4].x = Math.tan(outer);
+    light[4].w = direction.y < 0 || Object.is(direction.y, -0) ? 1 : 0;
+    if (l.shadows) {
+      const k = spotViews.length;
+      if (k >= MAX_SPOT_SHADOWS) throw new Error(`at most ${MAX_SPOT_SHADOWS} shadowed spot lights`);
+      // Spot maps follow the cascades (shader layers 4 and up), at the cascades' size.
+      shadowed(light, l.shadows, (2 * Math.tan(outer)) / directionalSize, l.radius ?? 0, MAX_CASCADES + k);
+      // Bevy spot_light_world_from_view / spot_light_clip_from_view.
+      const world = worldFromView(l.position, orthonormalize(direction.clone().negate()));
+      const projection = perspectiveInfiniteReverse(2 * outer, 1, l.shadows.nearZ);
+      spotViews.push({ world, clipFromWorld: projection.clone().multiply(world.clone().invert()), fovY: 2 * outer, near: l.shadows.nearZ, range: l.range });
+    }
+    data.push(...light);
+  }
+  return {
+    data,
+    pointViews,
+    spotViews,
+    defines: {
+      LIT_POINT_LIGHTS: pointLights.length,
+      LIT_SPOT_LIGHTS: spotLights.length,
+      LIT_POINT_SHADOWS: pointViews.length / 6,
+      LIT_SPOT_SHADOWS: spotViews.length,
+      ...(softShadows ? { LIT_SOFT_SHADOWS: '' } : {}),
+    },
+  };
+}
+
+const NO_LOCAL_LIGHTS = { LIT_POINT_LIGHTS: 0, LIT_SPOT_LIGHTS: 0, LIT_POINT_SHADOWS: 0, LIT_SPOT_SHADOWS: 0 };
 
 /**
  * Bevy `StandardMaterial` (untextured subset): linear base colour, metallic, perceptual
@@ -261,6 +403,7 @@ export class LitMaterial extends ShaderMaterial {
         reflectance: { value: reflectance },
         ...frameUniforms(),
       },
+      defines: { ...NO_LOCAL_LIGHTS },
       side: FrontSide,
     });
     this.isLitMaterial = true;
@@ -268,12 +411,40 @@ export class LitMaterial extends ShaderMaterial {
   }
 }
 
-function shadowTarget(size) {
-  const depthTexture = new DepthTexture(size, size, FloatType);
+/** A reverse-Z comparison depth texture with Bevy's linear shadow sampler. */
+function comparisonDepth(depthTexture) {
   depthTexture.compareFunction = GreaterEqualCompare;
   depthTexture.minFilter = LinearFilter;
   depthTexture.magFilter = LinearFilter;
+  return depthTexture;
+}
+
+function shadowTarget(size) {
+  const depthTexture = comparisonDepth(new DepthTexture(size, size, FloatType));
   return new WebGLRenderTarget(size, size, { depthBuffer: true, depthTexture, type: HalfFloatType });
+}
+
+// A spot or point-light map: a comparison depth texture plus the depth in an R32F colour target
+// (linear, for the soft-shadow blocker search).
+const LOCAL_COLOR = {
+  type: FloatType,
+  format: RedFormat,
+  minFilter: LinearFilter,
+  magFilter: LinearFilter,
+  generateMipmaps: false,
+  colorSpace: LinearSRGBColorSpace,
+};
+
+function spotShadowTarget(size) {
+  const depthTexture = comparisonDepth(new DepthTexture(size, size, FloatType));
+  return new WebGLRenderTarget(size, size, { ...LOCAL_COLOR, depthBuffer: true, depthTexture });
+}
+
+function pointShadowTarget(size) {
+  const target = new WebGLCubeRenderTarget(size, { ...LOCAL_COLOR, depthBuffer: true });
+  // three.js allocates cube depth as DEPTH_COMPONENT24 (Bevy: Depth32Float).
+  target.depthTexture = comparisonDepth(new CubeDepthTexture(size, UnsignedIntType));
+  return target;
 }
 
 /**
@@ -284,7 +455,7 @@ export class Lighting {
   /**
    * @param {{ tonyMcMapface: Data3DTexture, agx: Data3DTexture }} luts from loadToneMappingLuts()
    */
-  constructor(luts, { shadowMapSize = 2048 } = {}) {
+  constructor(luts, { shadowMapSize = 2048, pointShadowMapSize = 1024 } = {}) {
     this.luts = luts;
     /** Linear RGB written where nothing is drawn; tone mapped, not exposed (Bevy ClearColor). */
     this.clearColor = [0, 0, 0];
@@ -304,9 +475,32 @@ export class Lighting {
     this.environment = null;
     /** `{ color: rgba, directionalLightColor: rgba, directionalLightExponent, falloff }`. */
     this.fog = null;
+    /**
+     * `{ position, color, intensity, range, radius, shadows }`: lumens, metres, and
+     * `POINT_LIGHT_SHADOWS`-shaped cube-map shadows or null.
+     */
+    this.pointLights = [];
+    /**
+     * `{ position, direction, color, intensity, range, radius, innerAngle, outerAngle, shadows }`:
+     * the direction the light points, lumens over the full sphere like a point light's, radians
+     * off the axis, and `SPOT_LIGHT_SHADOWS`-shaped shadows or null.
+     */
+    this.spotLights = [];
 
     this.uniforms = frameUniforms();
     this.shadowMapSize = shadowMapSize;
+    this.pointShadowMapSize = pointShadowMapSize;
+    this.spotShadowTargets = [];
+    this.pointShadowTargets = [];
+    this.localShadowCamera = new PerspectiveCamera();
+    this.localShadowMaterial = new ShaderMaterial({
+      glslVersion: GLSL3,
+      vertexShader: localShadowVertex,
+      fragmentShader: localShadowFragment,
+      uniforms: { lightClip: { value: new Matrix4() }, flipY: { value: 1 } },
+      depthFunc: GreaterEqualDepth,
+      side: FrontSide,
+    });
     this.shadowTargets = Array.from({ length: MAX_CASCADES }, () => shadowTarget(shadowMapSize));
     this.shadowCamera = new OrthographicCamera();
     this.shadowMaterial = new ShaderMaterial({
@@ -376,8 +570,20 @@ export class Lighting {
     }));
   }
 
-  #updateUniforms(camera, cascades) {
+  #updateUniforms(camera, cascades, local, height) {
     const u = this.uniforms;
+    u.viewportHeight.value = height;
+    u.localLights.value = local.data;
+    for (let i = 0; i < MAX_POINT_SHADOWS; i++) {
+      const t = this.pointShadowTargets[i];
+      u[`pointShadowMap${i}`].value = t?.depthTexture ?? null;
+      u[`pointShadowDepth${i}`].value = t?.texture ?? null;
+    }
+    for (let i = 0; i < MAX_SPOT_SHADOWS; i++) {
+      const t = this.spotShadowTargets[i];
+      u[`spotShadowMap${i}`].value = t?.depthTexture ?? null;
+      u[`spotShadowDepth${i}`].value = t?.texture ?? null;
+    }
     u.exposure.value = exposureFromEv100(this.ev100);
     const sun = this.sun;
     u.hasSun.value = sun ? 1 : 0;
@@ -429,7 +635,7 @@ export class Lighting {
     }
   }
 
-  #renderShadows(renderer, scene, cascades) {
+  #renderShadows(renderer, scene, cascades, local) {
     const cam = this.shadowCamera;
     const state = renderer.state;
     if (!this.shadowTargetsReady) {
@@ -453,11 +659,16 @@ export class Lighting {
       else delete this.shadowMaterial.defines.NATIVE_DEPTH;
       this.shadowMaterial.needsUpdate = true;
     }
-    const gl = renderer.getContext();
-    if (native) {
-      clipControl.clipControlEXT(clipControl.LOWER_LEFT_EXT, clipControl.ZERO_TO_ONE_EXT);
-      gl.enable(depthClamp.DEPTH_CLAMP_EXT);
+    // Spot and point views clip depth like Bevy's, so they need only the zero-to-one clip space.
+    const localNative = Boolean(clipControl);
+    if (localNative !== Boolean(this.localShadowMaterial.defines.NATIVE_DEPTH)) {
+      if (localNative) this.localShadowMaterial.defines.NATIVE_DEPTH = '';
+      else delete this.localShadowMaterial.defines.NATIVE_DEPTH;
+      this.localShadowMaterial.needsUpdate = true;
     }
+    const gl = renderer.getContext();
+    if (clipControl) clipControl.clipControlEXT(clipControl.LOWER_LEFT_EXT, clipControl.ZERO_TO_ONE_EXT);
+    if (native) gl.enable(depthClamp.DEPTH_CLAMP_EXT);
     scene.overrideMaterial = this.shadowMaterial;
     cascades.forEach((c, i) => {
       // Culling camera: the cascade's x/y extent, unbounded towards the sun (pancaked casters).
@@ -474,16 +685,52 @@ export class Lighting {
       renderer.clear(false, true, false);
       renderer.render(scene, cam);
     });
-    if (native) {
+    if (native) gl.disable(depthClamp.DEPTH_CLAMP_EXT);
+    this.#renderLocalShadows(renderer, scene, local);
+    if (clipControl) {
       const reversed = state.buffers.depth.getReversed();
       clipControl.clipControlEXT(
         clipControl.LOWER_LEFT_EXT,
         reversed ? clipControl.ZERO_TO_ONE_EXT : clipControl.NEGATIVE_ONE_TO_ONE_EXT,
       );
-      gl.disable(depthClamp.DEPTH_CLAMP_EXT);
     }
     state.buffers.depth.setClear(1);
     scene.overrideMaterial = null;
+  }
+
+  /** Spot maps, then point-light cube faces (render-engine's pass order). */
+  #renderLocalShadows(renderer, scene, local) {
+    if (!local.spotViews.length && !local.pointViews.length) return;
+    const state = renderer.state;
+    const material = this.localShadowMaterial;
+    const cam = this.localShadowCamera;
+    cam.matrixAutoUpdate = false;
+    cam.matrixWorldAutoUpdate = false;
+    scene.overrideMaterial = material;
+    renderer.setClearColor(new Color(0, 0, 0), 0);
+    state.buffers.color.setMask(true);
+    const pass = (view, target, face) => {
+      // Culling camera: the light's frustum out to its range (Bevy also culls casters beyond it).
+      cam.fov = (view.fovY * 180) / Math.PI;
+      cam.aspect = 1;
+      cam.near = view.near;
+      cam.far = view.range;
+      cam.updateProjectionMatrix();
+      cam.matrixWorld.copy(view.world);
+      cam.matrixWorldInverse.copy(view.world).invert();
+      material.uniforms.lightClip.value.copy(view.clipFromWorld);
+      renderer.setRenderTarget(target, face);
+      state.buffers.depth.setClear(0);
+      renderer.clear(true, true, false);
+      renderer.render(scene, cam);
+    };
+    material.uniforms.flipY.value = 1;
+    material.side = FrontSide;
+    local.spotViews.forEach((view, i) => pass(view, this.spotShadowTargets[i]));
+    // Cube faces render upside down (see localShadowVertex), which flips the winding.
+    material.uniforms.flipY.value = -1;
+    material.side = BackSide;
+    local.pointViews.forEach((view, i) => pass(view, this.pointShadowTargets[Math.floor(i / 6)], i % 6));
   }
 
   /**
@@ -503,13 +750,31 @@ export class Lighting {
     scene.updateMatrixWorld();
     camera.updateMatrixWorld();
     const cascades = this.cascades(camera, width / height);
-    this.#updateUniforms(camera, cascades);
+    const local = packLocalLights(this.pointLights, this.spotLights, this.shadowMapSize, this.pointShadowMapSize);
+    while (this.spotShadowTargets.length < local.spotViews.length) {
+      this.spotShadowTargets.push(spotShadowTarget(this.shadowMapSize));
+    }
+    while (this.pointShadowTargets.length < local.pointViews.length / 6) {
+      this.pointShadowTargets.push(pointShadowTarget(this.pointShadowMapSize));
+    }
+    this.#updateUniforms(camera, cascades, local, height);
+    const definesKey = JSON.stringify(local.defines);
     scene.traverse((o) => {
       const materials = Array.isArray(o.material) ? o.material : [o.material];
-      for (const m of materials) if (m?.isLitMaterial) Object.assign(m.uniforms, this.uniforms);
+      for (const m of materials) {
+        if (!m?.isLitMaterial) continue;
+        Object.assign(m.uniforms, this.uniforms);
+        // Light counts size the shader's loops and samplers: a change recompiles, as in three.
+        if (m.userData.localLights !== definesKey) {
+          delete m.defines.LIT_SOFT_SHADOWS;
+          Object.assign(m.defines, local.defines);
+          m.userData.localLights = definesKey;
+          m.needsUpdate = true;
+        }
+      }
     });
 
-    this.#renderShadows(renderer, scene, cascades);
+    this.#renderShadows(renderer, scene, cascades, local);
 
     renderer.setRenderTarget(this.hdrTarget);
     renderer.setClearColor(new Color(...this.clearColor), 1);
@@ -537,10 +802,11 @@ export class Lighting {
   }
 
   dispose() {
-    for (const t of this.shadowTargets) t.dispose();
+    for (const t of [...this.shadowTargets, ...this.spotShadowTargets, ...this.pointShadowTargets]) t.dispose();
     this.hdrTarget?.dispose();
     this.postTarget?.dispose();
     this.shadowMaterial.dispose();
+    this.localShadowMaterial.dispose();
     this.tonemapQuad.material.dispose();
     this.outputQuad.material.dispose();
   }
