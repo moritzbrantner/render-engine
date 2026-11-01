@@ -284,6 +284,13 @@ export interface LitMaterialParameters {
  * skins on the GPU like the engine (four influences, linear blend), shadows included. On an
  * `InstancedMesh` each instance takes its `instanceMatrix` and its linear `instanceColor`
  * (`setColorAt`) times the base colour, shadows included. Parameters are fixed at construction.
+ *
+ * Shadow culling: in each sun cascade and light view an `InstancedMesh` draws nothing when no
+ * instance's bounding sphere (`geometry.boundingSphere` through the instance) meets the view's
+ * frustum, whatever its `frustumCulled`, and one with at least 64 instances draws only those
+ * that meet it. The spheres are recomputed when the world matrix, the geometry,
+ * `instanceMatrix` (its version) or `count` change; recompute the geometry's sphere after editing
+ * its positions.
  */
 export class LitMaterial extends ShaderMaterial {
   constructor(parameters?: LitMaterialParameters);

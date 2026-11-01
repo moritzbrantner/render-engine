@@ -360,7 +360,14 @@ which the engine does not cover either.
 `LitMaterial` draws three's `InstancedMesh` like the engine's instances: each instance takes its
 `instanceMatrix`, and its `setColorAt` colour (linear) multiplies the base colour, in the main
 pass and every shadow pass. three draws plain meshes one draw call each, so keep repeated props
-instanced. Only `LitMaterial` objects cast shadows; anything else in the scene (sprites,
+instanced. Each shadow view (sun cascade, spot map, point-light cube face) culls instances like
+the engine: three culls a plain mesh by its bounding sphere, and an `InstancedMesh` draws there
+nothing when no instance's bounding sphere meets the view, or, with at least 64 instances
+straddling it, only the instances that do (through a stand-in with a compacted copy of
+`instanceMatrix`). The spheres are cached and recomputed when the world matrix, the geometry,
+the instance matrices (`instanceMatrix.version`) or `count` change. Draw calls, not triangles,
+bound a busy browser frame (each costs CPU in three and in the browser's GPU process, in every
+view), so fewer, larger `InstancedMesh`es pay off. Only `LitMaterial` objects cast shadows; anything else in the scene (sprites,
 overlays) is drawn into the HDR pass as three draws it, tone mapped but not exposed. A page that
 paints its own backdrop behind a transparent canvas (`new WebGLRenderer({ alpha: true })`) sets
 `lighting.clearAlpha = 0`: the output is premultiplied where nothing is drawn.
