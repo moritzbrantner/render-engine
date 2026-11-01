@@ -283,7 +283,9 @@ export interface LitMaterialParameters {
  * mesh's `color` attribute (glTF `COLOR_0`) multiplies the base colour. On a `SkinnedMesh` it
  * skins on the GPU like the engine (four influences, linear blend), shadows included. On an
  * `InstancedMesh` each instance takes its `instanceMatrix` and its linear `instanceColor`
- * (`setColorAt`) times the base colour, shadows included. Parameters are fixed at construction.
+ * (`setColorAt`) times the base colour, shadows included; on a `BatchedMesh` likewise each
+ * instance its matrix and linear colour, culled per view by three. Parameters are fixed at
+ * construction.
  *
  * Shadow culling: in each sun cascade and light view an `InstancedMesh` draws nothing when no
  * instance's bounding sphere (`geometry.boundingSphere` through the instance) meets the view's

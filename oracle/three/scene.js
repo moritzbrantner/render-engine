@@ -2,9 +2,11 @@
 // image (and, where the browser exposes GPU timer queries, an advisory GPU time) to render.mjs.
 
 import {
+  BatchedMesh,
   Bone,
   BufferAttribute,
   BufferGeometry,
+  Color,
   DetachedBindMode,
   InstancedMesh,
   Matrix4,
@@ -110,17 +112,40 @@ async function main() {
     scene.add(mesh);
   }
   const instance = new Matrix4();
+  // Single objects sharing a material and an attribute layout draw as one BatchedMesh (white
+  // instance colours), as a web consumer batches static scenery; a lone one as a Mesh.
+  const singles = new Map();
   for (const { geometry, material, matrices } of batches.values()) {
     if (matrices.length === 1) {
-      const mesh = new Mesh(geometry, material);
-      mesh.matrixAutoUpdate = false;
-      mesh.matrix.fromArray(matrices[0]);
-      scene.add(mesh);
+      const layout = `${material.uuid}:${Object.keys(geometry.attributes).sort().join(',')}`;
+      if (!singles.has(layout)) singles.set(layout, { material, draws: [] });
+      singles.get(layout).draws.push({ geometry, matrix: matrices[0] });
       continue;
     }
     const mesh = new InstancedMesh(geometry, material, matrices.length);
     matrices.forEach((m, i) => mesh.setMatrixAt(i, instance.fromArray(m)));
     mesh.computeBoundingSphere();
+    scene.add(mesh);
+  }
+  const white = new Color(1, 1, 1);
+  for (const { material, draws } of singles.values()) {
+    if (draws.length === 1) {
+      const mesh = new Mesh(draws[0].geometry, material);
+      mesh.matrixAutoUpdate = false;
+      mesh.matrix.fromArray(draws[0].matrix);
+      scene.add(mesh);
+      continue;
+    }
+    const unique = [...new Set(draws.map((d) => d.geometry))];
+    const vertices = unique.reduce((n, g) => n + g.attributes.position.count, 0);
+    const indices = unique.reduce((n, g) => n + g.index.count, 0);
+    const mesh = new BatchedMesh(draws.length, vertices, indices, material);
+    const ids = new Map(unique.map((g) => [g, mesh.addGeometry(g)]));
+    for (const { geometry, matrix } of draws) {
+      const id = mesh.addInstance(ids.get(geometry));
+      mesh.setMatrixAt(id, instance.fromArray(matrix));
+      mesh.setColorAt(id, white);
+    }
     scene.add(mesh);
   }
 
