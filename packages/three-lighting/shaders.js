@@ -16,11 +16,15 @@ export const MAX_SPOT_SHADOWS = 4;
 // palette replaces the model matrix like render-engine's; three's bind matrices bracket it (the
 // identity for a skin detached at the mesh's own space, as render-engine's palettes are).
 // An InstancedMesh (USE_INSTANCING) places each instance by its instanceMatrix after the
-// object's model matrix, like render-engine's per-instance world_from_local.
+// object's model matrix, like render-engine's per-instance world_from_local; a BatchedMesh
+// (USE_BATCHING) places each of its draws by that draw's instance matrix.
 const skinnedModel = /* glsl */ `
 #include <skinning_pars_vertex>
+#include <batching_pars_vertex>
 mat4 litObjectMatrix() {
-#ifdef USE_INSTANCING
+#if defined(USE_BATCHING)
+    return modelMatrix * getBatchingMatrix(getIndirectIndex(gl_DrawID));
+#elif defined(USE_INSTANCING)
     return modelMatrix * instanceMatrix;
 #else
     return modelMatrix;
@@ -88,6 +92,10 @@ void main() {
 #ifdef USE_INSTANCING_COLOR
     // InstancedMesh.setColorAt: a linear per-instance colour times the vertex colour.
     vColor.rgb *= instanceColor;
+#endif
+#ifdef USE_BATCHING_COLOR
+    // BatchedMesh.setColorAt: likewise, per instance.
+    vColor.rgb *= getBatchingColor(getIndirectIndex(gl_DrawID)).rgb;
 #endif
     gl_Position = projectionMatrix * viewMatrix * world;
 }

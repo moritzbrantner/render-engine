@@ -367,7 +367,14 @@ straddling it, only the instances that do (through a stand-in with a compacted c
 `instanceMatrix`). The spheres are cached and recomputed when the world matrix, the geometry,
 the instance matrices (`instanceMatrix.version`) or `count` change. Draw calls, not triangles,
 bound a busy browser frame (each costs CPU in three and in the browser's GPU process, in every
-view), so fewer, larger `InstancedMesh`es pay off. Only `LitMaterial` objects cast shadows; anything else in the scene (sprites,
+view), so fewer, larger `InstancedMesh`es pay off.
+
+Different static meshes that share a `LitMaterial` (and an attribute layout) can go into one
+three `BatchedMesh`: each instance takes its matrix and its `setColorAt` colour (linear, times the
+base colour) like an `InstancedMesh` instance, and the whole batch is one multi-draw call per
+view. three culls its instances by their bounding spheres in every view itself (shadow views
+included, through `onBeforeRender` with the view's camera), so `culling.js` leaves it alone.
+Only `LitMaterial` objects cast shadows; anything else in the scene (sprites,
 overlays) is drawn into the HDR pass as three draws it, tone mapped but not exposed. A page that
 paints its own backdrop behind a transparent canvas (`new WebGLRenderer({ alpha: true })`) sets
 `lighting.clearAlpha = 0`: the output is premultiplied where nothing is drawn.
