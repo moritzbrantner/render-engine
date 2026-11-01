@@ -625,6 +625,11 @@ export class Lighting {
     this.luts = luts;
     /** Linear RGB written where nothing is drawn; tone mapped, not exposed (Bevy ClearColor). */
     this.clearColor = [0, 0, 0];
+    /**
+     * Alpha written where nothing is drawn: 1 is opaque; below 1 the page shows through a canvas
+     * created with `alpha: true` (premultiplied, three's default).
+     */
+    this.clearAlpha = 1;
     this.ev100 = 9.7;
     /** 'tonyMcMapface' (Bevy's default), 'agx' or 'acesFitted'. */
     this.tonemapping = 'tonyMcMapface';
@@ -669,6 +674,8 @@ export class Lighting {
     });
     // Per LitMaterial that cuts its shadow out or draws both faces: { cascade, local }.
     this.shadowVariants = new WeakMap();
+    // Objects without a LitMaterial skip the shadow passes.
+    this.noShadow = new ShaderMaterial({ visible: false });
     this.shadowTargets = Array.from({ length: MAX_CASCADES }, () => shadowTarget(shadowMapSize));
     this.shadowCamera = new OrthographicCamera();
     this.shadowMaterial = new ShaderMaterial({
@@ -882,8 +889,10 @@ export class Lighting {
    * masked, blended or double-sided (sharing its uniforms), otherwise the shared one.
    */
   #shadowMaterial(material, local, native, localNative) {
+    // Objects drawn with any other material (sprites, overlays, a backdrop) cast no shadow.
+    if (!material.isLitMaterial) return this.noShadow;
     const shared = local ? this.localShadowMaterial : this.shadowMaterial;
-    if (!material.isLitMaterial || (material.alphaMode === 'opaque' && !material.doubleSided)) return shared;
+    if (material.alphaMode === 'opaque' && !material.doubleSided) return shared;
     let variants = this.shadowVariants.get(material);
     if (!variants) {
       const discard = material.alphaMode !== 'opaque';
@@ -997,7 +1006,9 @@ export class Lighting {
     this.#renderShadows(renderer, scene, cascades, local);
 
     renderer.setRenderTarget(this.hdrTarget);
-    renderer.setClearColor(new Color(...this.clearColor), 1);
+    // Premultiplied, so a transparent clear leaves nothing behind for the page.
+    const alpha = Math.min(1, Math.max(0, this.clearAlpha));
+    renderer.setClearColor(new Color(...this.clearColor).multiplyScalar(alpha), alpha);
     // The shadow material left colour writes off.
     renderer.state.buffers.color.setMask(true);
     renderer.clear(true, true, false);
@@ -1047,6 +1058,7 @@ export class Lighting {
     this.postTarget?.dispose();
     this.shadowMaterial.dispose();
     this.localShadowMaterial.dispose();
+    this.noShadow.dispose();
     this.tonemapQuad.material.dispose();
     this.outputQuad.material.dispose();
   }

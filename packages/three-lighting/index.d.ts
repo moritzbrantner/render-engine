@@ -223,8 +223,9 @@ export interface LitMaterialParameters {
 /**
  * Bevy `StandardMaterial` (the glTF core subset render-engine covers), shaded by `Lighting`. The
  * mesh's `color` attribute (glTF `COLOR_0`) multiplies the base colour. On a `SkinnedMesh` it
- * skins on the GPU like the engine (four influences, linear blend), shadows included. Parameters
- * are fixed at construction.
+ * skins on the GPU like the engine (four influences, linear blend), shadows included. On an
+ * `InstancedMesh` each instance takes its `instanceMatrix` and its linear `instanceColor`
+ * (`setColorAt`) times the base colour, shadows included. Parameters are fixed at construction.
  */
 export class LitMaterial extends ShaderMaterial {
   constructor(parameters?: LitMaterialParameters);
@@ -245,6 +246,11 @@ export class Lighting {
   constructor(luts: ToneMappingLuts, options?: { shadowMapSize?: number; pointShadowMapSize?: number });
   /** Linear RGB where nothing is drawn: tone mapped, not exposed. */
   clearColor: Vec3;
+  /**
+   * Alpha where nothing is drawn (default 1). Below 1 the page shows through a canvas created
+   * with `alpha: true`; the output is premultiplied, like three's default canvas.
+   */
+  clearAlpha: number;
   ev100: number;
   tonemapping: ToneMapping;
   /** Filter of the sun's shadows and of point and spot shadows that are not soft. */
@@ -264,7 +270,9 @@ export class Lighting {
    * blended back to front), replacing any custom opaque or transparent sort while it draws. It
    * renders upside down, as wgpu stores a frame (projection y negated, winding inverted), and
    * the output pass flips it back: a custom shader in the scene that reads `gl_FragCoord.y`
-   * sees it mirrored (counting down from the top row).
+   * sees it mirrored (counting down from the top row). Only objects drawn with a `LitMaterial`
+   * cast shadows; others (sprites, overlays) are drawn into the HDR pass as three draws them,
+   * tone mapped but not exposed.
    */
   render(
     renderer: WebGLRenderer,
