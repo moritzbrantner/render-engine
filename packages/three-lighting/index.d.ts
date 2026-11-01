@@ -222,8 +222,9 @@ export interface LitMaterialParameters {
 
 /**
  * Bevy `StandardMaterial` (the glTF core subset render-engine covers), shaded by `Lighting`. The
- * mesh's `color` attribute (glTF `COLOR_0`) multiplies the base colour. Parameters are fixed at
- * construction.
+ * mesh's `color` attribute (glTF `COLOR_0`) multiplies the base colour. On a `SkinnedMesh` it
+ * skins on the GPU like the engine (four influences, linear blend), shadows included. Parameters
+ * are fixed at construction.
  */
 export class LitMaterial extends ShaderMaterial {
   constructor(parameters?: LitMaterialParameters);

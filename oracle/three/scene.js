@@ -2,13 +2,18 @@
 // image (and, where the browser exposes GPU timer queries, an advisory GPU time) to render.mjs.
 
 import {
+  Bone,
   BufferAttribute,
   BufferGeometry,
+  DetachedBindMode,
+  Matrix4,
   Mesh,
   PerspectiveCamera,
   RGBAFormat,
   SRGBColorSpace,
   Scene,
+  Skeleton,
+  SkinnedMesh,
   UnsignedByteType,
   WebGLRenderTarget,
   WebGLRenderer,
@@ -48,6 +53,10 @@ async function main() {
     if (m.uvs) g.setAttribute('uv', new BufferAttribute(f32(m.uvs), 2));
     if (m.tangents) g.setAttribute('tangent', new BufferAttribute(f32(m.tangents), 4));
     if (m.colors) g.setAttribute('color', new BufferAttribute(f32(m.colors), 4));
+    if (m.joints) {
+      g.setAttribute('skinIndex', new BufferAttribute(new Uint16Array(bin, m.joints.offset, m.joints.count), 4));
+      g.setAttribute('skinWeight', new BufferAttribute(f32(m.weights), 4));
+    }
     g.setIndex(new BufferAttribute(new Uint32Array(bin, m.indices.offset, m.indices.count), 1));
     return g;
   });
@@ -56,6 +65,22 @@ async function main() {
     textureFromData({ ...t, levels: t.levels.map((l) => new Uint8Array(bin, l.offset, l.length)) }),
   );
   const TEXTURES = ['baseColorTexture', 'emissiveTexture', 'metallicRoughnessTexture', 'normalMapTexture', 'occlusionTexture'];
+  // Each skin as a three Skeleton whose bones sit at the joints' mesh-local transforms (outside
+  // the scene graph, so nothing recomputes them): its palette is render-engine's.
+  const matrices = (r) => {
+    const data = f32(r);
+    return Array.from({ length: r.count / 16 }, (_, i) => new Matrix4().fromArray(data, i * 16));
+  };
+  const skeletons = doc.skins.map((s) => {
+    const bones = matrices(s.modelFromJoint).map((m) => {
+      const bone = new Bone();
+      bone.matrixAutoUpdate = false;
+      bone.matrixWorldAutoUpdate = false;
+      bone.matrixWorld.copy(m);
+      return bone;
+    });
+    return new Skeleton(bones, matrices(s.inverseBindposes));
+  });
   const scene = new Scene();
   const materials = new Map();
   for (const o of doc.objects) {
@@ -63,9 +88,14 @@ async function main() {
     const params = { ...o.material };
     for (const name of TEXTURES) params[name] = params[name] == null ? null : textures[params[name]];
     if (!materials.has(key)) materials.set(key, new LitMaterial(params));
-    const mesh = new Mesh(geometries[o.mesh], materials.get(key));
+    const skinned = o.skin != null;
+    const mesh = new (skinned ? SkinnedMesh : Mesh)(geometries[o.mesh], materials.get(key));
     mesh.matrixAutoUpdate = false;
     mesh.matrix.fromArray(o.matrix);
+    if (skinned) {
+      mesh.bindMode = DetachedBindMode;
+      mesh.bind(skeletons[o.skin], new Matrix4());
+    }
     scene.add(mesh);
   }
 
