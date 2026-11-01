@@ -165,7 +165,7 @@ export function renderIndex({ ci, gpu, build }) {
     <div class="gates">
       <div class="gate"><h2>Image gate, CI on lavapipe</h2><p>Mean FLIP ≤ ${g(ci.flip_mean_max)}, 99th percentile ≤ ${g(ci.flip_p99_max)}</p><p>Worst: <span class="num">${fmt(worstMean)}</span> mean, <span class="num">${fmt(worstP99)}</span> p99</p></div>
       <div class="gate"><h2>GPU-time gate, local RTX 3060 Ti</h2><p>render-engine ≤ ${(gpu?.gpu_margin ?? ci.gpu_margin).toFixed(2)}× Bevy's median frame time</p>${gpu ? `<p>Slowest: <span class="num">${worstRatio.toFixed(2)}×</span>, ${gpuPassed} of ${gpu.scenarios.length} pass</p>` : '<p>No local run committed.</p>'}</div>
-      <div class="gate"><h2>Web gate, three.js on CI</h2><p>The same FLIP gate against Bevy, rendered in headless Chromium on the same software Vulkan (lavapipe)</p>${web.length ? `<p><span class="num">${webPassed}</span> of ${web.length} pass, ${webGaps} known gaps, ${webUnported} not ported. <a href="#web">Table</a></p>` : '<p>Not run.</p>'}</div>
+      <div class="gate"><h2>Web gate, three.js on CI</h2><p>The same FLIP gate against Bevy, rendered in headless Chromium on the same software Vulkan (lavapipe)</p>${web.length ? `<p><span class="num">${webPassed}</span> of ${web.length} lighting scenarios pass${webGaps || webUnported ? `, ${webGaps} known gaps, ${webUnported} not ported` : ', every one ported'}. <a href="#web">Table</a></p>` : '<p>Not run.</p>'}</div>
     </div>
   </div></section>
   <div class="wrap">
