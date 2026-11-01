@@ -325,6 +325,30 @@ mapping and the sRGB output. Environment maps are the same prefiltered KTX2 cube
 native client loads (`assets/ibl`); the tone-mapping LUTs ship with the package. The port
 covers what the oracle's three.js side passes; the report lists the rest with its issues.
 
+### Textured glTF materials (web)
+
+`LitMaterial` takes the same textured `StandardMaterial` as the engine: base-colour, emissive,
+metallic-roughness, occlusion and normal-map textures (three `Texture`s sampling the mesh's `uv`),
+the mesh's `color` attribute times the base colour, `alphaMode` `'opaque'`, `'mask'` (with
+`alphaCutoff`) or `'blend'`, `doubleSided` and `unlit`. `Lighting.render` draws opaque, then
+masked, then blended meshes (back to front by object origin, like Bevy), and masked and blended
+materials cut their shadows out. For meshes from three's `GLTFLoader`, convert each material:
+
+```js
+gltf.scene.traverse((o) => {
+  if (o.isMesh) o.material = LitMaterial.fromGltf(o.material);
+});
+```
+
+`fromGltf` maps `MeshStandardMaterial` (glTF metallic-roughness) and `MeshBasicMaterial`
+(`KHR_materials_unlit`) the way Bevy's glTF loader does; the loader's textures keep their glTF
+samplers, and KTX2 textures keep their own mip chains. Normal maps need MikkTSpace tangents: use
+the file's `TANGENT`, or generate them as the engine does (`computeMikkTSpaceTangents` from
+`three/addons/utils/BufferGeometryUtils.js`). `textureFromData` uploads RGBA8 texels with an
+explicit mip chain and sampler, as the engine's `TextureData` does. Not mapped: `normalTexture.scale`,
+texture transforms, a second UV set (occlusion on `TEXCOORD_1`) and the physical extensions,
+which the engine does not cover either.
+
 ## Not covered yet
 
 - Stars, clouds and moon phases: the sky is Bevy's clear atmosphere; the moon is a full disc.

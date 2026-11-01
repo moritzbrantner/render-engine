@@ -12,8 +12,10 @@
 
 use crate::content::Geometry;
 use crate::scenarios::Scenario;
+use render_engine::material::AlphaMode;
 use render_engine::mesh::MeshData;
 use render_engine::scene::{FogFalloff, LightShadows, ShadowFilter, Tonemapping};
+use render_engine::wgpu;
 use serde_json::{Value, json};
 use std::{collections::HashMap, path::Path};
 
@@ -22,12 +24,7 @@ use std::{collections::HashMap, path::Path};
 pub const GAPS: &[(&str, u32)] = &[("many_instances", 42)];
 
 /// Follow-up issue per capability the port does not cover yet.
-const UNPORTED_ISSUE: &[(&str, u32)] = &[
-    ("sky and moon", 39),
-    ("textured materials", 40),
-    ("double-sided, unlit or transparent materials", 40),
-    ("skinning", 41),
-];
+const UNPORTED_ISSUE: &[(&str, u32)] = &[("sky and moon", 39), ("skinning", 41)];
 
 pub fn gap_issue(name: &str) -> Option<u32> {
     GAPS.iter().find(|(n, _)| *n == name).map(|(_, i)| *i)
@@ -41,15 +38,6 @@ pub fn unsupported(s: &Scenario) -> Option<&'static str> {
     }
     if s.objects.iter().any(|o| o.skin.is_some()) {
         return Some("skinning");
-    }
-    if !s.assets.textures.is_empty() {
-        return Some("textured materials");
-    }
-    if s.objects
-        .iter()
-        .any(|o| o.material.double_sided || o.material.unlit || o.material.alpha < 1.0)
-    {
-        return Some("double-sided, unlit or transparent materials");
     }
     None
 }
@@ -86,6 +74,10 @@ pub fn export(s: &Scenario, dir: &Path) -> Result<(), String> {
         let normals: Vec<f32> = m.normals.iter().flat_map(|p| p.to_array()).collect();
         let positions = push_f32(bin, &positions);
         let normals = push_f32(bin, &normals);
+        let mut optional = |data: Vec<f32>| (!data.is_empty()).then(|| push_f32(bin, &data));
+        let uvs = optional(m.uvs.iter().flat_map(|v| v.to_array()).collect());
+        let tangents = optional(m.tangents.iter().flat_map(|v| v.to_array()).collect());
+        let colors = optional(m.colors.iter().flat_map(|v| v.to_array()).collect());
         let offset = bin.len();
         for i in &m.indices {
             bin.extend_from_slice(&i.to_le_bytes());
@@ -93,9 +85,56 @@ pub fn export(s: &Scenario, dir: &Path) -> Result<(), String> {
         json!({
             "positions": positions,
             "normals": normals,
+            "uvs": uvs,
+            "tangents": tangents,
+            "colors": colors,
             "indices": { "offset": offset, "count": m.indices.len() },
         })
     };
+    // Texels as uploaded (RGBA8, every mip level); 4-byte multiples, so the f32 data that
+    // follows stays aligned.
+    let textures: Vec<Value> = s
+        .assets
+        .textures
+        .iter()
+        .map(|t| {
+            let levels: Vec<Value> = t
+                .levels
+                .iter()
+                .map(|level| {
+                    let offset = bin.len();
+                    bin.extend_from_slice(level);
+                    json!({ "offset": offset, "length": level.len() })
+                })
+                .collect();
+            let address = |a: wgpu::AddressMode| match a {
+                wgpu::AddressMode::Repeat => "repeat",
+                wgpu::AddressMode::MirrorRepeat => "mirrorRepeat",
+                _ => "clampToEdge",
+            };
+            let filter = |f: wgpu::FilterMode| match f {
+                wgpu::FilterMode::Nearest => "nearest",
+                wgpu::FilterMode::Linear => "linear",
+            };
+            let s = t.sampler;
+            json!({
+                "width": t.width,
+                "height": t.height,
+                "srgb": t.format == wgpu::TextureFormat::Rgba8UnormSrgb,
+                "levels": levels,
+                "sampler": {
+                    "addressModeU": address(s.address_mode_u),
+                    "addressModeV": address(s.address_mode_v),
+                    "magFilter": filter(s.mag_filter),
+                    "minFilter": filter(s.min_filter),
+                    "mipmapFilter": match s.mipmap_filter {
+                        wgpu::MipmapFilterMode::Nearest => "nearest",
+                        wgpu::MipmapFilterMode::Linear => "linear",
+                    },
+                },
+            })
+        })
+        .collect();
     let mut objects = Vec::new();
     for o in &s.objects {
         let mesh = match o.geometry {
@@ -133,6 +172,22 @@ pub fn export(s: &Scenario, dir: &Path) -> Result<(), String> {
                 "perceptualRoughness": m.perceptual_roughness,
                 "reflectance": m.reflectance,
                 "emissive": v3(m.emissive),
+                "baseColorTexture": m.base_color_texture,
+                "emissiveTexture": m.emissive_texture,
+                "metallicRoughnessTexture": m.metallic_roughness_texture,
+                "normalMapTexture": m.normal_map_texture,
+                "occlusionTexture": m.occlusion_texture,
+                "alphaMode": match m.alpha_mode {
+                    AlphaMode::Opaque => "opaque",
+                    AlphaMode::Mask(_) => "mask",
+                    AlphaMode::Blend => "blend",
+                },
+                "alphaCutoff": match m.alpha_mode {
+                    AlphaMode::Mask(cutoff) => cutoff,
+                    _ => 0.5,
+                },
+                "doubleSided": m.double_sided,
+                "unlit": m.unlit,
             },
         }));
     }
@@ -261,6 +316,7 @@ pub fn export(s: &Scenario, dir: &Path) -> Result<(), String> {
         "environment": environment,
         "fog": fog,
         "meshes": meshes,
+        "textures": textures,
         "objects": objects,
     });
     std::fs::write(dir.join(format!("{}.three.json", s.name)), doc.to_string())

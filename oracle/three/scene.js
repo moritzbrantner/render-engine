@@ -13,7 +13,13 @@ import {
   WebGLRenderTarget,
   WebGLRenderer,
 } from 'three';
-import { Lighting, LitMaterial, loadCubemap, loadToneMappingLuts } from '../../packages/three-lighting/index.js';
+import {
+  Lighting,
+  LitMaterial,
+  loadCubemap,
+  loadToneMappingLuts,
+  textureFromData,
+} from '../../packages/three-lighting/index.js';
 
 // Frames timed for the advisory GPU time (render.mjs passes the oracle's count; 0 skips timing).
 const TIMED_FRAMES = Number(new URLSearchParams(location.search).get('frames') ?? 0);
@@ -39,14 +45,24 @@ async function main() {
     const g = new BufferGeometry();
     g.setAttribute('position', new BufferAttribute(f32(m.positions), 3));
     g.setAttribute('normal', new BufferAttribute(f32(m.normals), 3));
+    if (m.uvs) g.setAttribute('uv', new BufferAttribute(f32(m.uvs), 2));
+    if (m.tangents) g.setAttribute('tangent', new BufferAttribute(f32(m.tangents), 4));
+    if (m.colors) g.setAttribute('color', new BufferAttribute(f32(m.colors), 4));
     g.setIndex(new BufferAttribute(new Uint32Array(bin, m.indices.offset, m.indices.count), 1));
     return g;
   });
+  // Every texture once, with the engine's mip chain and sampler.
+  const textures = doc.textures.map((t) =>
+    textureFromData({ ...t, levels: t.levels.map((l) => new Uint8Array(bin, l.offset, l.length)) }),
+  );
+  const TEXTURES = ['baseColorTexture', 'emissiveTexture', 'metallicRoughnessTexture', 'normalMapTexture', 'occlusionTexture'];
   const scene = new Scene();
   const materials = new Map();
   for (const o of doc.objects) {
     const key = JSON.stringify(o.material);
-    if (!materials.has(key)) materials.set(key, new LitMaterial(o.material));
+    const params = { ...o.material };
+    for (const name of TEXTURES) params[name] = params[name] == null ? null : textures[params[name]];
+    if (!materials.has(key)) materials.set(key, new LitMaterial(params));
     const mesh = new Mesh(geometries[o.mesh], materials.get(key));
     mesh.matrixAutoUpdate = false;
     mesh.matrix.fromArray(o.matrix);
