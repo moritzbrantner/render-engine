@@ -21,7 +21,7 @@ bevy = { version = "0.20.1", default-features = false, features = [
 ] }
 # Particle oracle (technical decisions D9). The latest release (0.19) is on Bevy 0.19; Bevy 0.20
 # support (djeedai/bevy_hanabi#576) is on main, so the oracle pins a main commit until 0.20 ships.
-bevy_hanabi = { git = "https://github.com/djeedai/bevy_hanabi", rev = "d277555d4a", default-features = false, features = ["3d"] }
+bevy_hanabi = { git = "https://github.com/djeedai/bevy_hanabi", rev = "738b353d9e1120c817099244c7b35091c1af635c", default-features = false, features = ["3d"] }
 nv-flip = "0.1.2"
 image = { version = "0.25.10", default-features = false, features = ["hdr", "png"] }
 pollster = "1.0.1"
