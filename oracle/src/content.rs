@@ -80,6 +80,7 @@ impl Material {
             alpha_mode: self.alpha_mode,
             double_sided: self.double_sided,
             unlit: self.unlit,
+            ..StandardMaterial::default()
         }
     }
 }
