@@ -12,6 +12,7 @@ use bevy::time::TimeUpdateStrategy;
 use bevy::{
     app::{AppExit, ScheduleRunnerPlugin},
     camera::{Exposure, Hdr, RenderTarget},
+    core_pipeline::prepass::DepthPrepass,
     diagnostic::DiagnosticsStore,
     light::{
         Atmosphere, AtmosphereEnvironmentMapLight, CascadeShadowConfigBuilder,
@@ -21,8 +22,11 @@ use bevy::{
     pbr::AtmosphereSettings,
     prelude::*,
     render::{
+        RenderApp, RenderStartup,
         RenderPlugin,
+        batching::gpu_preprocessing::GpuPreprocessingSupport,
         diagnostic::RenderDiagnosticsPlugin,
+        occlusion_culling::OcclusionCulling,
         render_resource::{
             Extent3d, TextureDataOrder, TextureFormat, TextureViewDescriptor, TextureViewDimension,
         },
@@ -58,7 +62,7 @@ use render_engine::{
 use std::{
     path::PathBuf,
     sync::{Arc, Mutex},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 /// Frames rendered before the screenshot so pipelines and shadow maps are settled.
@@ -72,6 +76,113 @@ pub struct BevyRun {
     pub gpu_ms: Vec<f64>,
     /// Top-level span paths that made up the sum (for the report).
     pub spans: Vec<String>,
+    /// Captures from the experimental timeline; absent in normal oracle runs.
+    pub captures: Vec<(u32, Vec<u8>)>,
+    /// Main-thread frame intervals (not isolated render submission time).
+    pub cpu_frame_ms: Vec<f64>,
+    /// Per-pass GPU samples, with the same timestamp interpretation as gpu_ms.
+    pub pass_gpu_ms: std::collections::BTreeMap<String, Vec<f64>>,
+    /// Render-thread CPU diagnostic spans, if emitted by Bevy.
+    pub cpu_render_span_ms: Vec<f64>,
+    /// GPU pipeline statistics (actual shader/clipper work), when supported.
+    pub pipeline_counts: std::collections::BTreeMap<String, Vec<f64>>,
+    /// Whether this adapter can run Bevy's GPU occlusion path at all.
+    pub occlusion_supported: Option<bool>,
+}
+
+/// Three *equivalent* Bevy configurations; the production renderer is not affected.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OcclusionMode {
+    Baseline,
+    Depth,
+    Hiz,
+}
+
+impl OcclusionMode {
+    pub const ALL: [Self; 3] = [Self::Baseline, Self::Depth, Self::Hiz];
+
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Baseline => "baseline",
+            Self::Depth => "depth",
+            Self::Hiz => "hiz",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OcclusionView {
+    Stationary,
+    Moving,
+    Cut,
+}
+
+impl OcclusionView {
+    pub const ALL: [Self; 3] = [Self::Stationary, Self::Moving, Self::Cut];
+
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Stationary => "stationary",
+            Self::Moving => "moving",
+            Self::Cut => "cut",
+        }
+    }
+}
+
+const BENCH_CAPTURE_FRAMES: [u32; 7] = [30, 31, 32, 33, 34, 36, 44];
+
+#[derive(Resource)]
+struct OcclusionBench {
+    view: OcclusionView,
+    eye: Vec3,
+    target: Vec3,
+}
+
+/// Pure, deterministic camera schedule, shared by every Bevy mode. Capturing
+/// immediately after frame 30 exposes previous-frame visibility lag on cuts.
+fn bench_camera_pose(view: OcclusionView, frame: u32, eye: Vec3, target: Vec3) -> (Vec3, Vec3) {
+    match view {
+        OcclusionView::Stationary => (eye, target),
+        OcclusionView::Moving => {
+            let dx = 7.0 * ((frame.saturating_sub(30) as f32) * 0.035).sin();
+            (eye + Vec3::X * dx, target + Vec3::X * (dx * 0.3))
+        }
+        OcclusionView::Cut if frame > 30 => (
+            eye + Vec3::new(-14.0, -1.0, -28.0),
+            target + Vec3::new(4.0, 0.0, -20.0),
+        ),
+        OcclusionView::Cut => (eye, target),
+    }
+}
+
+#[cfg(test)]
+mod occlusion_tests {
+    use super::*;
+
+    #[test]
+    fn camera_cut_is_exactly_after_frame_thirty() {
+        let eye = Vec3::new(0.0, 4.0, 14.0);
+        let target = Vec3::new(-6.0, 0.5, -20.0);
+        assert_eq!(bench_camera_pose(OcclusionView::Cut, 30, eye, target), (eye, target));
+        assert_ne!(bench_camera_pose(OcclusionView::Cut, 31, eye, target), (eye, target));
+        assert_eq!(bench_camera_pose(OcclusionView::Moving, 30, eye, target), (eye, target));
+        assert_eq!(bench_camera_pose(OcclusionView::Stationary, 90, eye, target), (eye, target));
+    }
+}
+
+fn update_bench_camera(
+    plan: Res<Plan>,
+    bench: Res<OcclusionBench>,
+    mut cameras: Query<&mut Transform, With<Camera3d>>,
+) {
+    let (eye, target) = bench_camera_pose(bench.view, plan.frame + 1, bench.eye, bench.target);
+    for mut transform in &mut cameras {
+        *transform = Transform::from_translation(eye).looking_at(target, Vec3::Y);
+    }
+}
+
+fn record_occlusion_support(support: Res<GpuPreprocessingSupport>, shared: Res<Shared>) {
+    shared.0.lock().unwrap().occlusion_supported = Some(support.is_culling_supported());
 }
 
 #[derive(Resource, Clone)]
@@ -216,16 +327,21 @@ fn headless_app() -> App {
 
 /// Sum of the frame's top-level GPU spans (`render/<span>/elapsed_gpu`) and their paths, or
 /// `None` before the first spans arrive.
-fn frame_gpu_ms(store: &DiagnosticsStore) -> Option<(f64, Vec<String>)> {
-    let mut total = 0.0;
+fn frame_diagnostic_samples(
+    store: &DiagnosticsStore,
+    field: &str,
+    top_level_only: bool,
+) -> Vec<(String, f64)> {
     let mut spans = Vec::new();
     for d in store.iter() {
         let path = d.path().as_str();
         let parts: Vec<&str> = path.split('/').collect();
-        // Only top-level spans (`render/<span>/elapsed_gpu`); nested spans are inside them.
-        if parts.len() == 3
+        // Timing spans nest; only top-level timings can be summed without
+        // double-counting. Pipeline statistics belong to individual passes.
+        if parts.len() >= 3
             && parts[0] == "render"
-            && parts[2] == "elapsed_gpu"
+            && parts.last() == Some(&field)
+            && (!top_level_only || parts.len() == 3)
             && let Some(latest) = d.measurement()
         {
             // Spans that share a name in one frame (the early and the late
@@ -236,11 +352,22 @@ fn frame_gpu_ms(store: &DiagnosticsStore) -> Option<(f64, Vec<String>)> {
                 .filter(|m| m.time == latest.time)
                 .map(|m| m.value)
                 .sum();
-            total += ms;
-            spans.push(path.to_string());
+            spans.push((path.to_string(), ms));
         }
     }
-    (!spans.is_empty()).then_some((total, spans))
+    spans
+}
+
+fn frame_gpu_samples(store: &DiagnosticsStore) -> Vec<(String, f64)> {
+    frame_diagnostic_samples(store, "elapsed_gpu", true)
+}
+
+fn frame_gpu_ms(store: &DiagnosticsStore) -> Option<(f64, Vec<String>)> {
+    let spans = frame_gpu_samples(store);
+    (!spans.is_empty()).then(|| {
+        let total = spans.iter().map(|(_, ms)| ms).sum();
+        (total, spans.into_iter().map(|(name, _)| name).collect())
+    })
 }
 
 pub fn run(scenario: Scenario, timed_frames: u32) -> BevyRun {
@@ -260,10 +387,50 @@ pub fn run(scenario: Scenario, timed_frames: u32) -> BevyRun {
     });
     insert_scene_resources(&mut app, &scene);
     app.add_systems(Startup, move |mut set: SceneSet| {
-        set.spawn((width, height), &scene, &objects, &assets);
+        set.spawn((width, height), &scene, &objects, &assets, None);
     })
     .add_systems(Update, drive);
 
+    app.run();
+    let mut run = shared.0.lock().unwrap();
+    std::mem::take(&mut *run)
+}
+
+/// An isolated Bevy process per configuration. These runs are diagnostic only:
+/// neither their images nor their times enter the regular oracle ratchets.
+pub fn run_occlusion_bench(
+    scenario: Scenario,
+    timed_frames: u32,
+    mode: OcclusionMode,
+    view: OcclusionView,
+) -> BevyRun {
+    let shared = Shared(Arc::new(Mutex::new(BevyRun::default())));
+    let (width, height) = (scenario.width, scenario.height);
+    let Scenario {
+        scene,
+        objects,
+        assets,
+        ..
+    } = scenario;
+    let mut app = headless_app();
+    app.sub_app_mut(RenderApp)
+        .insert_resource(shared.clone())
+        .add_systems(RenderStartup, record_occlusion_support);
+    app.insert_resource(shared.clone())
+        .insert_resource(Plan {
+            frame: 0,
+            timed_frames,
+        })
+        .insert_resource(OcclusionBench {
+            view,
+            eye: v3(scene.camera.eye),
+            target: v3(scene.camera.target),
+        });
+    insert_scene_resources(&mut app, &scene);
+    app.add_systems(Startup, move |mut set: SceneSet| {
+        set.spawn((width, height), &scene, &objects, &assets, Some(mode));
+    })
+    .add_systems(Update, (update_bench_camera, drive).chain());
     app.run();
     let mut run = shared.0.lock().unwrap();
     std::mem::take(&mut *run)
@@ -306,6 +473,7 @@ impl SceneSet<'_, '_> {
         scene: &render_engine::scene::Scene,
         objects: &[crate::content::MeshInstance],
         assets: &crate::content::Assets,
+        mode: Option<OcclusionMode>,
     ) -> Vec<Handle<Image>> {
         let SceneSet {
             commands,
@@ -350,6 +518,11 @@ impl SceneSet<'_, '_> {
             },
             Transform::from_translation(v3(cam.eye)).looking_at(v3(cam.target), Vec3::Y),
         ));
+        match mode {
+            Some(OcclusionMode::Depth) => { camera.insert(DepthPrepass); }
+            Some(OcclusionMode::Hiz) => { camera.insert((DepthPrepass, OcclusionCulling)); }
+            _ => {}
+        }
         if let Some(env) = &scene.environment {
             camera.insert(EnvironmentMapLight {
                 diffuse_map: images.add(cube_image(&env.diffuse)),
@@ -595,10 +768,74 @@ fn drive(
     target: Option<Res<TargetImage>>,
     shared: Res<Shared>,
     store: Res<DiagnosticsStore>,
+    bench: Option<Res<OcclusionBench>>,
+    mut last_frame: Local<Option<Instant>>,
     mut exit: MessageWriter<AppExit>,
 ) {
     plan.frame += 1;
     let Some(target) = target else { return };
+    if bench.is_some() {
+        let now = Instant::now();
+        let elapsed = last_frame.replace(now).map(|then| now.duration_since(then));
+        if BENCH_CAPTURE_FRAMES.contains(&plan.frame) {
+            let frame = plan.frame;
+            let shared = shared.clone();
+            commands.spawn(Screenshot::image(target.0.clone())).observe(
+                move |captured: On<ScreenshotCaptured>| {
+                    let rgba = captured
+                        .image
+                        .clone()
+                        .try_into_dynamic()
+                        .expect("benchmark screenshot is RGBA")
+                        .to_rgba8()
+                        .into_raw();
+                    shared.0.lock().unwrap().captures.push((frame, rgba));
+                },
+            );
+        }
+        let mut run = shared.0.lock().unwrap();
+        // Exclude screenshots, first-frame pipeline work and camera-cut settling
+        // from steady-state timing. Moving views continue moving throughout.
+        if plan.frame > WARMUP_FRAMES + 20 {
+            if let Some((total, spans)) = frame_gpu_ms(&store) {
+                run.gpu_ms.push(total);
+                run.spans = spans;
+                for (name, ms) in frame_gpu_samples(&store) {
+                    run.pass_gpu_ms.entry(name).or_default().push(ms);
+                }
+            }
+            let cpu = frame_diagnostic_samples(&store, "elapsed_cpu", true);
+            if !cpu.is_empty() {
+                run.cpu_render_span_ms.push(cpu.iter().map(|(_, ms)| ms).sum());
+            }
+            for metric in [
+                "vertex_shader_invocations",
+                "clipper_invocations",
+                "clipper_primitives_out",
+                "fragment_shader_invocations",
+                "compute_shader_invocations",
+            ] {
+                let samples = frame_diagnostic_samples(&store, metric, false);
+                if !samples.is_empty() {
+                    run.pipeline_counts
+                        .entry(metric.to_owned())
+                        .or_default()
+                        .push(samples.iter().map(|(_, count)| count).sum());
+                }
+            }
+            if let Some(elapsed) = elapsed {
+                run.cpu_frame_ms.push(elapsed.as_secs_f64() * 1000.0);
+            }
+        }
+        let done = (run.gpu_ms.len() as u32 >= plan.timed_frames
+            || plan.frame > WARMUP_FRAMES + 20 + plan.timed_frames * 2)
+            && run.captures.len() == BENCH_CAPTURE_FRAMES.len();
+        let timed_out = plan.frame > WARMUP_FRAMES + 80 + plan.timed_frames * 3;
+        if done || timed_out {
+            exit.write(AppExit::Success);
+        }
+        return;
+    }
     if plan.frame == WARMUP_FRAMES {
         let shared = shared.clone();
         commands.spawn(Screenshot::image(target.0.clone())).observe(
@@ -1024,6 +1261,7 @@ pub fn run_particles(
                 &scenario.scene,
                 &scenario.objects,
                 &scenario.assets,
+                None,
             );
             for (i, e) in scenario.emitters.iter().enumerate() {
                 let asset = effect_asset(e, seed.wrapping_add(i as u32), variant.gravity_scale);
