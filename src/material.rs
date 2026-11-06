@@ -63,8 +63,8 @@ pub enum AlphaMode {
     /// out the same way (glTF `MASK` with `alphaCutoff`).
     Mask(f32),
     /// Blended over what is behind (straight alpha), drawn after the opaque geometry from back to
-    /// front by instance origin, without depth writes. Casts shadows where alpha ≥ 0.05, like
-    /// Bevy.
+    /// front by instance origin, without depth writes. Casts shadows at the material's
+    /// `blend_shadow_alpha_cutoff` (default 0.05, like Bevy).
     Blend,
 }
 
@@ -91,6 +91,10 @@ pub struct StandardMaterial {
     /// Red channel darkens ambient and environment diffuse light.
     pub occlusion_texture: Option<TextureId>,
     pub alpha_mode: AlphaMode,
+    /// Shadow-only discard threshold for [`AlphaMode::Blend`]. Defaults to Bevy's 0.05.
+    /// Set to 1.0 for translucent water that receives light/shadows without casting an
+    /// opaque silhouette. Does not change main-pass blending or opaque/masked shadows.
+    pub blend_shadow_alpha_cutoff: f32,
     /// Draws back faces too, with the normal flipped (glTF `doubleSided`; Bevy `double_sided`
     /// with `cull_mode: None`).
     pub double_sided: bool,
@@ -112,6 +116,7 @@ impl Default for StandardMaterial {
             normal_map_texture: None,
             occlusion_texture: None,
             alpha_mode: AlphaMode::Opaque,
+            blend_shadow_alpha_cutoff: 0.05,
             double_sided: false,
             unlit: false,
         }

@@ -533,7 +533,7 @@ impl World {
             }
             AlphaMode::Blend => {
                 f |= flags::ALPHA_BLEND;
-                0.05
+                m.blend_shadow_alpha_cutoff
             }
         };
         let uniform = MaterialUniform {

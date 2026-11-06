@@ -431,3 +431,78 @@ fn gpu_particles_spawn_age_die_and_draw() {
     // Ages DT, 2 DT, then reaped at 3 DT; the burst is capped at 8 and dies after two steps.
     assert_eq!(alive, [(1, 8), (2, 0), (2, 0), (2, 0), (2, 0)]);
 }
+
+/// Water can receive light without painting an opaque silhouette below it. The
+/// shadow threshold must not discard the visible blended surface in the main pass.
+#[test]
+fn blended_shadow_cutoff_preserves_visible_water() {
+    let gpu = Headless::new().expect("a wgpu adapter");
+    let mut world = World::new(gpu.renderer());
+    let ground = world.add_mesh(&MeshData::shape(Shape::Plane(Vec2::splat(20.))));
+    let slab = world.add_mesh(&MeshData::shape(Shape::Cuboid(Vec3::new(2., 0.2, 2.))));
+    let white = world.add_material(&StandardMaterial::default());
+    let mut water = StandardMaterial {
+        base_color: Vec4::new(0.04, 0.15, 0.6, 0.65),
+        alpha_mode: AlphaMode::Blend,
+        perceptual_roughness: 0.3,
+        ..StandardMaterial::default()
+    };
+    assert_eq!(water.blend_shadow_alpha_cutoff, 0.05);
+    let opaque_shadow = world.add_material(&water);
+    water.blend_shadow_alpha_cutoff = 1.;
+    let clear_shadow = world.add_material(&water);
+    let ground = at(ground, white, Vec3::ZERO);
+    let position = Vec3::new(0., 2., 0.);
+    let mut scene = scene(true, Tonemapping::AcesFitted);
+    scene.sun.as_mut().unwrap().direction = Vec3::new(0.4, -1., 0.25).normalize();
+    let (w, h) = (160, 90);
+    let mut viewport = Viewport::new(gpu.renderer(), w, h);
+    let shadowed = gpu
+        .render(
+            &mut viewport,
+            &world,
+            &scene,
+            &[ground, at(slab, opaque_shadow, position)],
+        )
+        .unwrap();
+    let clear = gpu
+        .render(
+            &mut viewport,
+            &world,
+            &scene,
+            &[ground, at(slab, clear_shadow, position)],
+        )
+        .unwrap();
+    let plate = gpu
+        .render(&mut viewport, &world, &scene, &[ground])
+        .unwrap();
+    let cleared = (0..h)
+        .flat_map(|y| (0..w).map(move |x| (x, y)))
+        .filter(|&(x, y)| {
+            let plate = pixel(&plate, x, y);
+            let clear = pixel(&clear, x, y);
+            let dark = pixel(&shadowed, x, y);
+            plate[0] > 100
+                && (i16::from(clear[0]) - i16::from(plate[0])).abs() < 4
+                && i16::from(dark[0]) + 40 < i16::from(clear[0])
+        })
+        .count();
+    assert!(
+        cleared > 20,
+        "the visible ground must lose the water shadow: {cleared} pixels"
+    );
+    let visible = (0..h)
+        .flat_map(|y| (0..w).map(move |x| (x, y)))
+        .filter(|&(x, y)| {
+            let p = pixel(&plate, x, y);
+            let c = pixel(&clear, x, y);
+            p[0] > 100
+                && i16::from(c[0]) + 20 < i16::from(p[0])
+                && i16::from(c[2]) > i16::from(c[0]) + 10
+        })
+        .count();
+    assert!(
+        visible > 20,
+        "the blue blended water must remain visible: {visible} pixels"
+    );
+}

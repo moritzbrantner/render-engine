@@ -431,3 +431,13 @@ leaves at the far plane.
 - Clustered lights. Every point and spot light is evaluated for every fragment.
 - glTF features outside the core metallic-roughness model: texture transforms, a second UV set,
   clearcoat, transmission.
+
+
+### Translucent water shadows
+
+For a blended water or foam material, set `StandardMaterial::blend_shadow_alpha_cutoff`
+to `1.0` to suppress its opaque shadow silhouette while retaining main-pass alpha
+blending and received shadows. The default remains `0.05`; opaque and masked
+materials keep their existing shadow rules. This uses the existing material uniform
+and shader paths, with no extra render pass. The browser's equivalent is the
+blended `LitMaterial` shadow variant's `alphaCutoff` uniform.
