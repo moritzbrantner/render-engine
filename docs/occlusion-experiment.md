@@ -80,3 +80,60 @@ Neither this nor any Bevy experiment changes the production renderer.
 No production Hi-Z implementation should be authorized from a positive
 synthetic benchmark alone. If promising, open a separate opt-in implementation
 issue with a no-occlusion fallback and native gameplay acceptance.
+
+## Results (2026-11-07)
+
+NVIDIA GeForce RTX 3060 Ti, driver 595.99.02, Vulkan, Bevy 0.20.1, 1280×720,
+300 timed frames × 2 rounds, fastest round's median. Bevy reported GPU
+occlusion culling as supported. Every depth/Hi-Z capture (frames 30–44, all
+views, including the frames right after the cut) is byte-identical to the
+baseline capture (FLIP mean 0, p99 0): no wrongly culled props, no popping.
+render-engine's own frustum-culled control matches Bevy's baseline
+(FLIP mean ≤ 0.00005, p99 ≤ 0.0010).
+
+GPU frame time (ms, sum of Bevy's top-level spans):
+
+| Scene (objects) | View | baseline | depth | hiz | hiz/depth | hiz/baseline | render-engine |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `many_instances` (22,401) | stationary | 0.858 | 1.050 | 1.239 | 1.18 | 1.44 | 0.816 |
+| | moving | 0.857 | 1.053 | 1.232 | 1.17 | 1.44 | |
+| | cut | 0.827 | 0.997 | 1.169 | 1.17 | 1.41 | |
+| `occluded_instances` (22,409) | stationary | 0.870 | 1.058 | 0.899 | 0.85 | 1.03 | 0.879 |
+| | moving | 0.902 | 1.055 | 0.912 | 0.87 | 1.01 | |
+| | cut | 0.903 | 0.998 | 0.921 | 0.92 | 1.02 | |
+| `occluded_instances_50` (11,209) | stationary | 0.615 | 0.688 | 0.733 | 1.07 | 1.19 | 0.545 |
+| `occluded_instances_25` (5,609) | stationary | 0.506 | 0.538 | 0.657 | 1.22 | 1.30 | 0.400 |
+
+Pass costs, `occluded_instances` stationary (ms), and the camera-view work
+from Bevy's pipeline statistics:
+
+| Mode | early prepass | depth pyramid | late preprocess + prepass | main opaque | shadows | vertex invocations |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| baseline | – | – | – | 0.303 | 0.364 | 1.48 M |
+| depth | 0.189 | – | – | 0.278 | 0.366 | 2.95 M |
+| hiz | 0.033 | 0.160 | 0.037 | 0.110 | 0.365 | 0.21 M |
+
+- **Crossover: none observed.** Hi-Z beats `DepthPrepass` alone by 8–15 % on
+  the occlusion-heavy scene, but it never beats the plain no-prepass path: it
+  is 1–3 % slower at full density, 19 % at half and 30 % at quarter density,
+  and 41–44 % slower on the open-field control.
+- The cost is mostly fixed: the depth-pyramid downsample is ~0.16 ms at
+  1280×720 regardless of scene, plus the prepass and late preprocessing. Hi-Z
+  removes 93 % of the camera's vertex work and ~0.19 ms of main-pass time, which
+  only just pays for that overhead in the densest case.
+- Shadow passes (~0.36 ms, 40 % of the frame) are not occlusion-culled by
+  Bevy; frustum culling per cascade is all they get.
+- CPU: Hi-Z raises the main-thread frame interval (1.65 → 2.28 ms stationary)
+  and Bevy's render CPU spans (0.047 → 0.075 ms); neither isolates draw
+  submission.
+- render-engine's current path (no prepass, frustum culling only) is already
+  at or below Bevy's baseline in every case.
+
+**Conclusion: documented negative result.** Bevy's two-phase Hi-Z does not
+pay for itself on this native workload on an RTX 3060 Ti; render-engine keeps
+frustum culling without occlusion, and no implementation issue is opened. It
+would be worth revisiting only for a consumer that already needs a depth
+prepass (Hi-Z then wins ~15 %), for far heavier per-object vertex/fragment
+cost than these cuboids and spheres, or for occlusion-culled shadow views.
+Alpha-masked and skinned geometry, TAA and Masked Software Occlusion Culling
+or meshlets were not tested.
