@@ -3,6 +3,7 @@ import type {
   Data3DTexture,
   DataTexture,
   Material,
+  Object3D,
   PerspectiveCamera,
   Scene,
   ShaderMaterial,
@@ -204,6 +205,11 @@ export interface ToneMappingLuts {
 }
 
 export function exposureFromEv100(ev100: number): number;
+/**
+ * Whether `object` casts no shadow in any view (Bevy's `NotShadowCaster`): set
+ * `object.userData.notShadowCaster = true`. Per object, not inherited by its children.
+ */
+export function notShadowCaster(object: Object3D): boolean;
 export function decodeKtx2(bytes: Uint8Array): Promise<{
   vkFormat: number;
   faceCount: number;
@@ -350,7 +356,7 @@ export class Lighting {
    * renders upside down, as wgpu stores a frame (projection y negated, winding inverted), and
    * the output pass flips it back: a custom shader in the scene that reads `gl_FragCoord.y`
    * sees it mirrored (counting down from the top row). Only objects drawn with a `LitMaterial`
-   * cast shadows; others (sprites, overlays) are drawn into the HDR pass as three draws them,
+   * and not marked `userData.notShadowCaster` cast shadows; others (sprites, overlays) are drawn into the HDR pass as three draws them,
    * tone mapped but not exposed.
    */
   render(

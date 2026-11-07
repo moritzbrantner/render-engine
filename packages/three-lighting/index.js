@@ -619,6 +619,15 @@ export class LitMaterial extends ShaderMaterial {
   }
 }
 
+/**
+ * Whether `object` opts out of every shadow view, like Bevy's `NotShadowCaster` component: its own
+ * `userData.notShadowCaster`, not inherited by its children. three's `castShadow` defaults to
+ * false, so it cannot be the opt-out without turning every unmarked mesh off.
+ */
+export function notShadowCaster(object) {
+  return object.userData.notShadowCaster === true;
+}
+
 /** Opaque, then alpha-masked draws (Bevy's Opaque3d and AlphaMask3d), each three's way. */
 function opaqueSort(a, b) {
   const phase = (item) => (item.material.alphaMode === 'mask' ? 1 : 0);
@@ -970,21 +979,25 @@ export class Lighting {
     if (native) gl.enable(depthClamp.DEPTH_CLAMP_EXT);
     // Every caster draws with a shadow material: the shared one, or its LitMaterial's variant
     // when that cuts out by alpha or draws both faces. three culls a plain mesh per view by its
-    // sphere; culling.js culls the instances of each visible InstancedMesh.
+    // sphere; culling.js culls the instances of each visible InstancedMesh. An object marked
+    // `userData.notShadowCaster` (Bevy's `NotShadowCaster`) draws with no material in these views.
     const casters = [];
     scene.traverse((o) => {
       if (o.material) casters.push([o, o.material]);
     });
-    // Only drawn meshes: a stand-in would draw a mesh whose parent is hidden.
+    // Only drawn casting meshes: a stand-in would draw a mesh whose parent is hidden.
     const instanced = [];
     scene.traverseVisible((o) => {
-      if (o.isInstancedMesh && o.count > 0) instanced.push(o);
+      if (o.isInstancedMesh && o.count > 0 && !notShadowCaster(o)) instanced.push(o);
     });
     const culling = this.shadowCulling;
     culling.begin(scene, instanced);
     const assign = (local) => {
       const pick = (m) => this.#shadowMaterial(m, local, native, localNative);
-      for (const [o, m] of casters) o.material = Array.isArray(m) ? m.map(pick) : pick(m);
+      for (const [o, m] of casters) {
+        if (notShadowCaster(o)) o.material = Array.isArray(m) ? m.map(() => this.noShadow) : this.noShadow;
+        else o.material = Array.isArray(m) ? m.map(pick) : pick(m);
+      }
     };
     assign(false);
     cascades.forEach((c, i) => {
