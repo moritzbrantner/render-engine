@@ -27,6 +27,7 @@
 
 mod bevy_side;
 mod content;
+mod occlusion_bench;
 mod particles;
 mod scenarios;
 mod three_side;
@@ -60,6 +61,12 @@ struct Options {
     variant: bevy_side::ParticleVariant,
     /// Also render each lighting scenario through the three.js port (D8).
     three: bool,
+    /// Separate, non-gating Bevy Hi-Z experiment (#59).
+    occlusion_bench: bool,
+    /// Internal child process: scene, mode, view, round.
+    occlusion_child: Option<(String, String, String, u32)>,
+    occlusion_rounds: u32,
+    occlusion_sweep: bool,
 }
 
 fn options() -> Result<Options, String> {
@@ -73,6 +80,10 @@ fn options() -> Result<Options, String> {
         calibrate: false,
         variant: bevy_side::ParticleVariant::default(),
         three: true,
+        occlusion_bench: false,
+        occlusion_child: None,
+        occlusion_rounds: 2,
+        occlusion_sweep: false,
     };
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -92,6 +103,25 @@ fn options() -> Result<Options, String> {
             }
             "--calibrate" => o.calibrate = true,
             "--no-three" => o.three = false,
+            "--occlusion-bench" => o.occlusion_bench = true,
+            "--occlusion-sweep" => o.occlusion_sweep = true,
+            "--occlusion-child" => {
+                let name = args.next().ok_or("--occlusion-child needs a scene")?;
+                let mode = args.next().ok_or("--occlusion-child needs a mode")?;
+                let view = args.next().ok_or("--occlusion-child needs a view")?;
+                let round = args
+                    .next()
+                    .and_then(|s| s.parse().ok())
+                    .ok_or("--occlusion-child needs a round number")?;
+                o.occlusion_child = Some((name, mode, view, round));
+            }
+            "--occlusion-rounds" => {
+                o.occlusion_rounds = args
+                    .next()
+                    .and_then(|s| s.parse().ok())
+                    .filter(|n| *n > 0 && *n <= 10)
+                    .ok_or("--occlusion-rounds needs a number between 1 and 10")?;
+            }
             "--seed" => {
                 o.variant.seed = Some(
                     args.next()
@@ -761,6 +791,18 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    if let Some((name, mode, view, round)) = &o.occlusion_child {
+        return match occlusion_bench::child(name, mode, view, *round, &o) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("occlusion child: {e}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+    if o.occlusion_bench {
+        return occlusion_bench::run(&o);
+    }
     if let Some(name) = &o.bevy_side {
         return match bevy_child(name, &o) {
             Ok(()) => ExitCode::SUCCESS,
