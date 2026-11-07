@@ -46,7 +46,7 @@ bun test packages                                     # three-lighting unit test
 (cd oracle && cargo test --release --locked)
 cargo run --release --locked --manifest-path oracle/Cargo.toml                    # GPU: image + GPU-time gates
 cargo run --release --locked --manifest-path oracle/Cargo.toml -- --only sun_shadows --no-timing   # debugging; --list
-WGPU_FORCE_FALLBACK_ADAPTER=1 cargo run --release --locked --manifest-path oracle/Cargo.toml       # as CI: lavapipe
+WGPU_FORCE_FALLBACK_ADAPTER=1 cargo run --release --locked --manifest-path oracle/Cargo.toml -- --no-timing   # as CI: lavapipe
 cargo run --release --locked --manifest-path oracle/Cargo.toml -- --calibrate   # particle gates: Bevy vs itself (D9)
 bash scripts/build-pages.sh
 ```

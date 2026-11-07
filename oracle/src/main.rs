@@ -9,7 +9,8 @@
 //! being its fastest round's median frame.
 //!
 //! CI runs it on a software adapter (`WGPU_FORCE_FALLBACK_ADAPTER=1`, lavapipe): the image gate is
-//! enforced there, GPU times are printed as advisory. Locally on a GPU both gates apply.
+//! enforced there with `--no-timing` (software GPU times gate nothing). Locally on a GPU both
+//! gates apply.
 //!
 //! ```text
 //! oracle                         every scenario, both gates
