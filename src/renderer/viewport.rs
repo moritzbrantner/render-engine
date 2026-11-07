@@ -1,6 +1,9 @@
 //! Per-size targets and per-frame GPU state, reused and grown from frame to frame.
 
-use super::{DEPTH_FORMAT, HDR_FORMAT, Renderer, SAMPLE_COUNT, gpu::FrameUniform};
+use super::{
+    DEPTH_FORMAT, HDR_FORMAT, Renderer, SAMPLE_COUNT,
+    gpu::{FrameUniform, InstanceData},
+};
 use crate::{
     cull::Frustum,
     particle_pass::ParticleFrame,
@@ -55,6 +58,10 @@ pub struct Viewport {
     /// Every view's draws: the main pass's (`main_draws`), then each shadow pass's.
     pub(super) draws: Vec<Draw>,
     pub(super) main_draws: Range<usize>,
+    /// Scratch for sorting the frame's instances, kept between frames with its allocation.
+    pub(super) draw_keys: Vec<DrawKey>,
+    /// Scratch for the instance buffer's contents, kept likewise.
+    pub(super) instance_data: Vec<InstanceData>,
     pub(super) clear_color: wgpu::Color,
     pub(super) tonemapping: Tonemapping,
     pub(super) particles: ParticleFrame,
@@ -189,6 +196,21 @@ pub(super) struct ShadowPass {
     pub(super) draws: Range<usize>,
 }
 
+/// What places an instance in the frame's draw order, with what its draw and instance data
+/// need from the first pass over the instances.
+pub(super) struct DrawKey {
+    pub(super) phase: Phase,
+    pub(super) face: usize,
+    pub(super) material: MaterialId,
+    pub(super) mesh: MeshId,
+    pub(super) view_z: f32,
+    pub(super) skinned: bool,
+    /// The skin's first joint in the joint buffer.
+    pub(super) joint_offset: u32,
+    /// Index in the consumer's instance list.
+    pub(super) index: u32,
+}
+
 /// Consecutive instances sharing a pipeline, material and mesh: in the sorted instance list
 /// while grouping, then in the visible-index buffer once culled for a view.
 #[derive(Clone)]
@@ -231,6 +253,8 @@ impl Viewport {
             shadow_passes: Vec::new(),
             draws: Vec::new(),
             main_draws: 0..0,
+            draw_keys: Vec::new(),
+            instance_data: Vec::new(),
             clear_color: wgpu::Color::BLACK,
             tonemapping: Tonemapping::default(),
             particles: ParticleFrame::new(device),

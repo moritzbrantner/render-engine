@@ -8,7 +8,8 @@ use super::{
     projection::{Cascade, look_at, looking_to, perspective_infinite_reverse},
     textures::upload_cube,
     viewport::{
-        Draw, Phase, SHADOW_VIEW_STRIDE, ShadowArray, ShadowPass, UploadedEnvironment, Viewport,
+        Draw, DrawKey, Phase, SHADOW_VIEW_STRIDE, ShadowArray, ShadowPass, UploadedEnvironment,
+        Viewport,
     },
 };
 use crate::{
@@ -16,7 +17,7 @@ use crate::{
     material::AlphaMode,
     scene::{FogFalloff, MAX_CASCADES, Scene, ShadowFilter, Tonemapping},
     sky::SkyTargets,
-    world::{Instance, MaterialId, MeshId, SkinId, World},
+    world::{Instance, SkinId, World},
 };
 use bytemuck::Zeroable;
 use glam::{Mat3, Mat4, UVec4, Vec3, Vec4};
@@ -426,116 +427,118 @@ fn write_instances(
     instances: &[Instance],
 ) -> Grouped {
     // Instances, grouped into draws: opaque, then alpha-masked (each by pipeline, material
-    // and mesh), then blended from back to front by origin (Bevy's transparent sort).
-    struct Sorted {
-        phase: Phase,
-        face: usize,
-        material: MaterialId,
-        mesh: MeshId,
-        view_z: f32,
-        obb: Obb,
-        data: InstanceData,
-        skinned: bool,
-    }
+    // and mesh), then blended from back to front by origin (Bevy's transparent sort). Ties keep
+    // the consumer's order.
     // Each skin's palette once, in order of first use (Bevy `prepare_skins`).
     let mut joints: Vec<Mat4> = Vec::new();
     let mut skin_offsets: HashMap<SkinId, u32> = HashMap::new();
-    let mut sorted: Vec<Sorted> = instances
-        .iter()
-        .map(|inst| {
-            let material = &world.material(inst.material).material;
-            let mesh = world.mesh(inst.mesh);
-            let m = inst.world_from_local;
-            let linear = Mat3::from_mat4(m);
-            let mirrored = linear.determinant() < 0.0;
-            let normal = linear.inverse().transpose();
-            let skinned = mesh.skin.is_some();
-            let (joint_offset, local_aabb) = match (skinned, inst.skin) {
-                (false, None) => (0, mesh.aabb),
-                (true, Some(skin)) => {
-                    let palette = world.skin(skin);
-                    let offset = *skin_offsets.entry(skin).or_insert_with(|| {
-                        joints.extend_from_slice(palette);
-                        (joints.len() - palette.len()) as u32
-                    });
-                    let aabb = mesh
-                        .joint_bounds
-                        .iter()
-                        .filter_map(|(j, b)| Some(b.transformed(*palette.get(*j as usize)?)))
-                        .reduce(|a, b| a.union(&b))
-                        .unwrap_or(mesh.aabb);
-                    (offset, aabb)
+    // Each instance's box, in the consumer's order.
+    let mut input_obbs: Vec<Obb> = Vec::with_capacity(instances.len());
+    let keys = &mut viewport.draw_keys;
+    keys.clear();
+    keys.extend(instances.iter().enumerate().map(|(index, inst)| {
+        let material = &world.material(inst.material).material;
+        let mesh = world.mesh(inst.mesh);
+        let m = inst.world_from_local;
+        let skinned = mesh.skin.is_some();
+        let (joint_offset, local_aabb) = match (skinned, inst.skin) {
+            (false, None) => (0, mesh.aabb),
+            (true, Some(skin)) => {
+                let palette = world.skin(skin);
+                let offset = *skin_offsets.entry(skin).or_insert_with(|| {
+                    joints.extend_from_slice(palette);
+                    (joints.len() - palette.len()) as u32
+                });
+                let aabb = mesh
+                    .joint_bounds
+                    .iter()
+                    .filter_map(|(j, b)| Some(b.transformed(*palette.get(*j as usize)?)))
+                    .reduce(|a, b| a.union(&b))
+                    .unwrap_or(mesh.aabb);
+                (offset, aabb)
+            }
+            (true, None) => panic!("an instance of a skinned mesh needs a skin"),
+            (false, Some(_)) => panic!("a skin on an instance of an unskinned mesh"),
+        };
+        input_obbs.push(Obb::new(local_aabb, m));
+        DrawKey {
+            phase: match material.alpha_mode {
+                AlphaMode::Opaque => Phase::Opaque,
+                AlphaMode::Mask(_) => Phase::Mask,
+                AlphaMode::Blend => Phase::Blend,
+            },
+            face: face_variant(
+                Mat3::from_mat4(m).determinant() < 0.0,
+                material.double_sided,
+            ),
+            material: inst.material,
+            mesh: inst.mesh,
+            view_z: (view_from_world * m.w_axis).z,
+            skinned,
+            joint_offset,
+            index: index as u32,
+        }
+    }));
+    keys.sort_unstable_by(|a, b| {
+        a.phase
+            .cmp(&b.phase)
+            .then_with(|| {
+                if a.phase == Phase::Blend {
+                    a.view_z.total_cmp(&b.view_z)
+                } else {
+                    (a.face, a.material, a.mesh).cmp(&(b.face, b.material, b.mesh))
                 }
-                (true, None) => panic!("an instance of a skinned mesh needs a skin"),
-                (false, Some(_)) => panic!("a skin on an instance of an unskinned mesh"),
-            };
-            Sorted {
-                skinned,
-                phase: match material.alpha_mode {
-                    AlphaMode::Opaque => Phase::Opaque,
-                    AlphaMode::Mask(_) => Phase::Mask,
-                    AlphaMode::Blend => Phase::Blend,
-                },
-                face: face_variant(mirrored, material.double_sided),
-                material: inst.material,
-                mesh: inst.mesh,
-                view_z: (view_from_world * m.w_axis).z,
-                obb: Obb::new(local_aabb, m),
-                data: InstanceData {
-                    world_from_local: m,
-                    normal_from_local: [
-                        normal.x_axis.extend(0.0),
-                        normal.y_axis.extend(0.0),
-                        normal.z_axis.extend(0.0),
-                    ],
-                    flags: UVec4::new(
-                        u32::from(mesh.has_tangents),
-                        u32::from(mirrored),
-                        joint_offset,
-                        0,
-                    ),
-                },
-            }
-        })
-        .collect();
-    sorted.sort_by(|a, b| {
-        a.phase.cmp(&b.phase).then_with(|| {
-            if a.phase == Phase::Blend {
-                a.view_z.total_cmp(&b.view_z)
-            } else {
-                (a.face, a.material, a.mesh).cmp(&(b.face, b.material, b.mesh))
-            }
-        })
+            })
+            .then(a.index.cmp(&b.index))
     });
-    // The boxes on their own, compact for the per-view culling loops.
-    let obbs: Vec<Obb> = sorted.iter().map(|s| s.obb).collect();
+
+    // The boxes on their own in draw order, compact for the per-view culling loops.
+    let mut obbs: Vec<Obb> = Vec::with_capacity(keys.len());
     let mut groups: Vec<Draw> = Vec::new();
-    for (i, s) in sorted.iter().enumerate() {
+    viewport.instance_data.clear();
+    for (i, key) in keys.iter().enumerate() {
         let i = i as u32;
         match groups.last_mut() {
             Some(d)
                 if (d.phase, d.face, d.material, d.mesh)
-                    == (s.phase, s.face, s.material, s.mesh) =>
+                    == (key.phase, key.face, key.material, key.mesh) =>
             {
                 d.instances.end = i + 1;
             }
             _ => groups.push(Draw {
-                face: s.face,
-                phase: s.phase,
-                skinned: s.skinned,
-                mesh: s.mesh,
-                material: s.material,
+                face: key.face,
+                phase: key.phase,
+                skinned: key.skinned,
+                mesh: key.mesh,
+                material: key.material,
                 instances: i..i + 1,
             }),
         }
+        obbs.push(input_obbs[key.index as usize]);
+        let m = instances[key.index as usize].world_from_local;
+        let normal = Mat3::from_mat4(m).inverse().transpose();
+        let has_tangents = world.mesh(key.mesh).has_tangents;
+        viewport.instance_data.push(InstanceData {
+            world_from_local: m,
+            normal_from_local: [
+                normal.x_axis.extend(0.0),
+                normal.y_axis.extend(0.0),
+                normal.z_axis.extend(0.0),
+            ],
+            flags: UVec4::new(
+                u32::from(has_tangents),
+                (key.face & 1) as u32,
+                key.joint_offset,
+                0,
+            ),
+        });
     }
-    let mut instance_data: Vec<InstanceData> = sorted.iter().map(|s| s.data).collect();
-    if instance_data.is_empty() {
-        instance_data.push(InstanceData::zeroed());
+    if viewport.instance_data.is_empty() {
+        viewport.instance_data.push(InstanceData::zeroed());
     }
     if viewport
         .instance_buffer
-        .write(device, queue, bytemuck::cast_slice(&instance_data))
+        .write(device, queue, bytemuck::cast_slice(&viewport.instance_data))
     {
         viewport.frame_group = None;
     }
