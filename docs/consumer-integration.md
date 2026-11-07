@@ -374,8 +374,11 @@ three `BatchedMesh`: each instance takes its matrix and its `setColorAt` colour 
 base colour) like an `InstancedMesh` instance, and the whole batch is one multi-draw call per
 view. three culls its instances by their bounding spheres in every view itself (shadow views
 included, through `onBeforeRender` with the view's camera), so `culling.js` leaves it alone.
-Only `LitMaterial` objects cast shadows; anything else in the scene (sprites,
-overlays) is drawn into the HDR pass as three draws it, tone mapped but not exposed. A page that
+Only `LitMaterial` objects cast shadows. An object that should not (a part hidden inside another
+caster, a health bar) sets `object.userData.notShadowCaster = true`, Bevy's `NotShadowCaster`: it
+is left out of every sun cascade and spot or point view, per object and not inherited by its
+children (three's `castShadow` defaults to false, so it is not the switch). Anything else in the
+scene (sprites, overlays) is drawn into the HDR pass as three draws it, tone mapped but not exposed. A page that
 paints its own backdrop behind a transparent canvas (`new WebGLRenderer({ alpha: true })`) sets
 `lighting.clearAlpha = 0`: the output is premultiplied where nothing is drawn.
 
