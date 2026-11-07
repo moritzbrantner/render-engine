@@ -22,8 +22,7 @@ use bevy::{
     pbr::AtmosphereSettings,
     prelude::*,
     render::{
-        RenderApp, RenderStartup,
-        RenderPlugin,
+        RenderApp, RenderPlugin, RenderStartup,
         batching::gpu_preprocessing::GpuPreprocessingSupport,
         diagnostic::RenderDiagnosticsPlugin,
         occlusion_culling::OcclusionCulling,
@@ -163,10 +162,22 @@ mod occlusion_tests {
     fn camera_cut_is_exactly_after_frame_thirty() {
         let eye = Vec3::new(0.0, 4.0, 14.0);
         let target = Vec3::new(-6.0, 0.5, -20.0);
-        assert_eq!(bench_camera_pose(OcclusionView::Cut, 30, eye, target), (eye, target));
-        assert_ne!(bench_camera_pose(OcclusionView::Cut, 31, eye, target), (eye, target));
-        assert_eq!(bench_camera_pose(OcclusionView::Moving, 30, eye, target), (eye, target));
-        assert_eq!(bench_camera_pose(OcclusionView::Stationary, 90, eye, target), (eye, target));
+        assert_eq!(
+            bench_camera_pose(OcclusionView::Cut, 30, eye, target),
+            (eye, target)
+        );
+        assert_ne!(
+            bench_camera_pose(OcclusionView::Cut, 31, eye, target),
+            (eye, target)
+        );
+        assert_eq!(
+            bench_camera_pose(OcclusionView::Moving, 30, eye, target),
+            (eye, target)
+        );
+        assert_eq!(
+            bench_camera_pose(OcclusionView::Stationary, 90, eye, target),
+            (eye, target)
+        );
     }
 }
 
@@ -430,7 +441,7 @@ pub fn run_occlusion_bench(
     app.add_systems(Startup, move |mut set: SceneSet| {
         set.spawn((width, height), &scene, &objects, &assets, Some(mode));
     })
-    .add_systems(Update, (update_bench_camera, drive).chain());
+    .add_systems(Update, (update_bench_camera, drive_bench).chain());
     app.run();
     let mut run = shared.0.lock().unwrap();
     std::mem::take(&mut *run)
@@ -519,8 +530,12 @@ impl SceneSet<'_, '_> {
             Transform::from_translation(v3(cam.eye)).looking_at(v3(cam.target), Vec3::Y),
         ));
         match mode {
-            Some(OcclusionMode::Depth) => { camera.insert(DepthPrepass); }
-            Some(OcclusionMode::Hiz) => { camera.insert((DepthPrepass, OcclusionCulling)); }
+            Some(OcclusionMode::Depth) => {
+                camera.insert(DepthPrepass);
+            }
+            Some(OcclusionMode::Hiz) => {
+                camera.insert((DepthPrepass, OcclusionCulling));
+            }
             _ => {}
         }
         if let Some(env) = &scene.environment {
@@ -762,80 +777,92 @@ impl SceneSet<'_, '_> {
 #[derive(Resource)]
 struct TargetImage(Handle<Image>);
 
+/// The occlusion experiment's frame driver (#59): captures the transition frames and records
+/// steady-state GPU spans, CPU spans and pipeline counters. Kept apart from `drive` so the
+/// regular oracle path is unchanged.
+fn drive_bench(
+    mut commands: Commands,
+    mut plan: ResMut<Plan>,
+    target: Option<Res<TargetImage>>,
+    shared: Res<Shared>,
+    store: Res<DiagnosticsStore>,
+    mut last_frame: Local<Option<Instant>>,
+    mut exit: MessageWriter<AppExit>,
+) {
+    plan.frame += 1;
+    let Some(target) = target else { return };
+    let now = Instant::now();
+    let elapsed = last_frame.replace(now).map(|then| now.duration_since(then));
+    if BENCH_CAPTURE_FRAMES.contains(&plan.frame) {
+        let frame = plan.frame;
+        let shared = shared.clone();
+        commands.spawn(Screenshot::image(target.0.clone())).observe(
+            move |captured: On<ScreenshotCaptured>| {
+                let rgba = captured
+                    .image
+                    .clone()
+                    .try_into_dynamic()
+                    .expect("benchmark screenshot is RGBA")
+                    .to_rgba8()
+                    .into_raw();
+                shared.0.lock().unwrap().captures.push((frame, rgba));
+            },
+        );
+    }
+    let mut run = shared.0.lock().unwrap();
+    // Exclude screenshots, first-frame pipeline work and camera-cut settling
+    // from steady-state timing. Moving views continue moving throughout.
+    if plan.frame > WARMUP_FRAMES + 20 {
+        if let Some((total, spans)) = frame_gpu_ms(&store) {
+            run.gpu_ms.push(total);
+            run.spans = spans;
+            for (name, ms) in frame_gpu_samples(&store) {
+                run.pass_gpu_ms.entry(name).or_default().push(ms);
+            }
+        }
+        let cpu = frame_diagnostic_samples(&store, "elapsed_cpu", true);
+        if !cpu.is_empty() {
+            run.cpu_render_span_ms
+                .push(cpu.iter().map(|(_, ms)| ms).sum());
+        }
+        for metric in [
+            "vertex_shader_invocations",
+            "clipper_invocations",
+            "clipper_primitives_out",
+            "fragment_shader_invocations",
+            "compute_shader_invocations",
+        ] {
+            let samples = frame_diagnostic_samples(&store, metric, false);
+            if !samples.is_empty() {
+                run.pipeline_counts
+                    .entry(metric.to_owned())
+                    .or_default()
+                    .push(samples.iter().map(|(_, count)| count).sum());
+            }
+        }
+        if let Some(elapsed) = elapsed {
+            run.cpu_frame_ms.push(elapsed.as_secs_f64() * 1000.0);
+        }
+    }
+    let done = (run.gpu_ms.len() as u32 >= plan.timed_frames
+        || plan.frame > WARMUP_FRAMES + 20 + plan.timed_frames * 2)
+        && run.captures.len() == BENCH_CAPTURE_FRAMES.len();
+    let timed_out = plan.frame > WARMUP_FRAMES + 80 + plan.timed_frames * 3;
+    if done || timed_out {
+        exit.write(AppExit::Success);
+    }
+}
+
 fn drive(
     mut commands: Commands,
     mut plan: ResMut<Plan>,
     target: Option<Res<TargetImage>>,
     shared: Res<Shared>,
     store: Res<DiagnosticsStore>,
-    bench: Option<Res<OcclusionBench>>,
-    mut last_frame: Local<Option<Instant>>,
     mut exit: MessageWriter<AppExit>,
 ) {
     plan.frame += 1;
     let Some(target) = target else { return };
-    if bench.is_some() {
-        let now = Instant::now();
-        let elapsed = last_frame.replace(now).map(|then| now.duration_since(then));
-        if BENCH_CAPTURE_FRAMES.contains(&plan.frame) {
-            let frame = plan.frame;
-            let shared = shared.clone();
-            commands.spawn(Screenshot::image(target.0.clone())).observe(
-                move |captured: On<ScreenshotCaptured>| {
-                    let rgba = captured
-                        .image
-                        .clone()
-                        .try_into_dynamic()
-                        .expect("benchmark screenshot is RGBA")
-                        .to_rgba8()
-                        .into_raw();
-                    shared.0.lock().unwrap().captures.push((frame, rgba));
-                },
-            );
-        }
-        let mut run = shared.0.lock().unwrap();
-        // Exclude screenshots, first-frame pipeline work and camera-cut settling
-        // from steady-state timing. Moving views continue moving throughout.
-        if plan.frame > WARMUP_FRAMES + 20 {
-            if let Some((total, spans)) = frame_gpu_ms(&store) {
-                run.gpu_ms.push(total);
-                run.spans = spans;
-                for (name, ms) in frame_gpu_samples(&store) {
-                    run.pass_gpu_ms.entry(name).or_default().push(ms);
-                }
-            }
-            let cpu = frame_diagnostic_samples(&store, "elapsed_cpu", true);
-            if !cpu.is_empty() {
-                run.cpu_render_span_ms.push(cpu.iter().map(|(_, ms)| ms).sum());
-            }
-            for metric in [
-                "vertex_shader_invocations",
-                "clipper_invocations",
-                "clipper_primitives_out",
-                "fragment_shader_invocations",
-                "compute_shader_invocations",
-            ] {
-                let samples = frame_diagnostic_samples(&store, metric, false);
-                if !samples.is_empty() {
-                    run.pipeline_counts
-                        .entry(metric.to_owned())
-                        .or_default()
-                        .push(samples.iter().map(|(_, count)| count).sum());
-                }
-            }
-            if let Some(elapsed) = elapsed {
-                run.cpu_frame_ms.push(elapsed.as_secs_f64() * 1000.0);
-            }
-        }
-        let done = (run.gpu_ms.len() as u32 >= plan.timed_frames
-            || plan.frame > WARMUP_FRAMES + 20 + plan.timed_frames * 2)
-            && run.captures.len() == BENCH_CAPTURE_FRAMES.len();
-        let timed_out = plan.frame > WARMUP_FRAMES + 80 + plan.timed_frames * 3;
-        if done || timed_out {
-            exit.write(AppExit::Success);
-        }
-        return;
-    }
     if plan.frame == WARMUP_FRAMES {
         let shared = shared.clone();
         commands.spawn(Screenshot::image(target.0.clone())).observe(

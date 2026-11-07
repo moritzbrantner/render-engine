@@ -109,12 +109,16 @@ fn options() -> Result<Options, String> {
                 let name = args.next().ok_or("--occlusion-child needs a scene")?;
                 let mode = args.next().ok_or("--occlusion-child needs a mode")?;
                 let view = args.next().ok_or("--occlusion-child needs a view")?;
-                let round = args.next().and_then(|s| s.parse().ok())
+                let round = args
+                    .next()
+                    .and_then(|s| s.parse().ok())
                     .ok_or("--occlusion-child needs a round number")?;
                 o.occlusion_child = Some((name, mode, view, round));
             }
             "--occlusion-rounds" => {
-                o.occlusion_rounds = args.next().and_then(|s| s.parse().ok())
+                o.occlusion_rounds = args
+                    .next()
+                    .and_then(|s| s.parse().ok())
                     .filter(|n| *n > 0 && *n <= 10)
                     .ok_or("--occlusion-rounds needs a number between 1 and 10")?;
             }
@@ -790,7 +794,10 @@ fn main() -> ExitCode {
     if let Some((name, mode, view, round)) = &o.occlusion_child {
         return match occlusion_bench::child(name, mode, view, *round, &o) {
             Ok(()) => ExitCode::SUCCESS,
-            Err(e) => { eprintln!("occlusion child: {e}"); ExitCode::FAILURE }
+            Err(e) => {
+                eprintln!("occlusion child: {e}");
+                ExitCode::FAILURE
+            }
         };
     }
     if o.occlusion_bench {

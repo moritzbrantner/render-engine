@@ -58,16 +58,29 @@ fn pass_medians(value: &Value) -> Value {
 fn crossover(cases: &[Value]) -> Value {
     let mut observations: Vec<(u64, bool)> = cases
         .iter()
-        .filter(|case| case["scenario"].as_str().unwrap_or("").starts_with("occluded_"))
+        .filter(|case| {
+            case["scenario"]
+                .as_str()
+                .unwrap_or("")
+                .starts_with("occluded_")
+        })
         .filter_map(|case| {
-            let stationary = case["views"].as_array()?.iter()
+            let stationary = case["views"]
+                .as_array()?
+                .iter()
                 .find(|v| v["view"] == "stationary")?;
-            let valid = stationary["visibility"].as_array()
+            let valid = stationary["visibility"]
+                .as_array()
                 .is_some_and(|a| !a.is_empty() && a.iter().all(|c| c["flip"]["parity"] == true));
-            if !valid { return None; }
+            if !valid {
+                return None;
+            }
             let depth = stationary["hiz_over_depth"].as_f64()?;
             let total = stationary["hiz_over_baseline"].as_f64()?;
-            Some((case["logical_objects"].as_u64()?, depth < 1.0 && total < 1.0))
+            Some((
+                case["logical_objects"].as_u64()?,
+                depth < 1.0 && total < 1.0,
+            ))
         })
         .collect();
     observations.sort_by_key(|(objects, _)| *objects);
@@ -151,7 +164,11 @@ fn run_child(
         .status()
         .map_err(|e| e.to_string())?;
     if !status.success() {
-        return Err(format!("{name}/{} /{} round {round}: {status}", view.id(), mode.id()));
+        return Err(format!(
+            "{name}/{} /{} round {round}: {status}",
+            view.id(),
+            mode.id()
+        ));
     }
     let path = directory(out, name, view).join(format!("{}.r{round}.json", mode.id()));
     serde_json::from_slice(&std::fs::read(path).map_err(|e| e.to_string())?)
@@ -248,7 +265,11 @@ pub fn run(options: &Options) -> ExitCode {
         gpu.adapter.name,
         gpu.adapter.device_type,
         gpu.adapter.backend,
-        if software { "advisory (software rasterizer)" } else { "hardware GPU" },
+        if software {
+            "advisory (software rasterizer)"
+        } else {
+            "hardware GPU"
+        },
     );
     let mut names = vec!["many_instances", "occluded_instances"];
     if options.occlusion_sweep {
@@ -264,13 +285,15 @@ pub fn run(options: &Options) -> ExitCode {
         if !options.only.is_empty() && !options.only.iter().any(|n| n == name) {
             continue;
         }
-        let Some(scene) = scenario(name) else { continue };
+        let Some(scene) = scenario(name) else {
+            continue;
+        };
         let mut views = Vec::new();
         for view in View::ALL {
             // Stationary is sufficient for the scaling sweep; motion/cut are
             // exercised on both full-size control and occlusion-heavy cases.
-            if name.ends_with("_25") || name.ends_with("_50") {
-                if view != View::Stationary { continue; }
+            if (name.ends_with("_25") || name.ends_with("_50")) && view != View::Stationary {
+                continue;
             }
             let mut rounds = [Vec::new(), Vec::new(), Vec::new()];
             for round in 0..options.occlusion_rounds {
@@ -332,7 +355,10 @@ pub fn run(options: &Options) -> ExitCode {
             let hiz_ms = if summary[2]["occlusion_supported"] == true {
                 summary[2]["gpu_ms"].as_f64()
             } else {
-                println!("{name}/{}: Bevy GPU occlusion unsupported; no Hi-Z performance claim", view.id());
+                println!(
+                    "{name}/{}: Bevy GPU occlusion unsupported; no Hi-Z performance claim",
+                    view.id()
+                );
                 None
             };
             println!(
@@ -354,9 +380,13 @@ pub fn run(options: &Options) -> ExitCode {
         if engine["bevy_engine_flip_mean"].is_null() {
             eprintln!("{name}: independent Render Engine image comparison unavailable");
             failed = true;
-        } else if engine["bevy_engine_flip_mean"].as_f64().unwrap_or(f64::INFINITY)
+        } else if engine["bevy_engine_flip_mean"]
+            .as_f64()
+            .unwrap_or(f64::INFINITY)
             > f64::from(crate::FLIP_MEAN_MAX)
-            || engine["bevy_engine_flip_p99"].as_f64().unwrap_or(f64::INFINITY)
+            || engine["bevy_engine_flip_p99"]
+                .as_f64()
+                .unwrap_or(f64::INFINITY)
                 > f64::from(crate::FLIP_P99_MAX)
         {
             eprintln!("{name}: existing Render Engine / Bevy FLIP limits exceeded");
@@ -395,5 +425,9 @@ pub fn run(options: &Options) -> ExitCode {
         failed = true;
     }
     println!("occlusion report: {}", report_path.display());
-    if failed { ExitCode::FAILURE } else { ExitCode::SUCCESS }
+    if failed {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    }
 }

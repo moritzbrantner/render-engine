@@ -1036,7 +1036,10 @@ pub fn occluded_instances_density(stride: usize) -> Scenario {
         2 => "occluded_instances_50",
         _ => "occluded_instances_25",
     };
-    scenario.objects = scenario.objects.into_iter().enumerate()
+    scenario.objects = scenario
+        .objects
+        .into_iter()
+        .enumerate()
         .filter_map(|(i, obj)| (i == 0 || (i - 1) % stride == 0).then_some(obj))
         .collect();
     scenario.capability = "Hi-Z experiment: dense props behind opaque buildings";
@@ -1073,22 +1076,6 @@ pub fn occluded_instances_density(stride: usize) -> Scenario {
         wall,
     ));
     scenario
-}
-
-#[cfg(test)]
-mod occlusion_tests {
-    #[test]
-    fn experimental_occluders_do_not_change_the_open_field_control() {
-        let open = super::many_instances();
-        let hidden = super::occluded_instances();
-        assert_eq!(open.objects.len(), 22_401);
-        assert_eq!(hidden.objects.len(), open.objects.len() + 8);
-        assert_eq!(open.scene.camera.eye, hidden.scene.camera.eye);
-        assert_eq!(open.scene.camera.target, hidden.scene.camera.target);
-        assert_eq!(hidden.name, "occluded_instances");
-        assert_eq!(super::occluded_instances_density(2).objects.len(), 11_209);
-        assert_eq!(super::occluded_instances_density(4).objects.len(), 5_609);
-    }
 }
 
 /// Bevy's default cascades (4 cascades, 10 m first far bound, 150 m, 20% overlap) and Gaussian
@@ -1180,5 +1167,21 @@ fn sun_cascades() -> Scenario {
             moon: None,
             sky: None,
         },
+    }
+}
+
+#[cfg(test)]
+mod occlusion_tests {
+    #[test]
+    fn experimental_occluders_do_not_change_the_open_field_control() {
+        let open = super::many_instances();
+        let hidden = super::occluded_instances();
+        assert_eq!(open.objects.len(), 22_401);
+        assert_eq!(hidden.objects.len(), open.objects.len() + 8);
+        assert_eq!(open.scene.camera.eye, hidden.scene.camera.eye);
+        assert_eq!(open.scene.camera.target, hidden.scene.camera.target);
+        assert_eq!(hidden.name, "occluded_instances");
+        assert_eq!(super::occluded_instances_density(2).objects.len(), 11_209);
+        assert_eq!(super::occluded_instances_density(4).objects.len(), 5_609);
     }
 }
