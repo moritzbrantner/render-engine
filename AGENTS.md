@@ -58,8 +58,10 @@ three.js side passes; one that does not yet is a known gap (`three_side::GAPS`) 
 each with a follow-up issue.
 
 CI (`.github/workflows/validate.yml`) runs all of this on plain Ubuntu with lavapipe
-(`WGPU_FORCE_FALLBACK_ADAPTER=1`) in two parallel jobs: `tests` (engine fmt/clippy/test, never
-compiles Bevy) and `oracle` (oracle clippy/test and the FLIP gate). Markdown-only PRs skip both;
+(`WGPU_FORCE_FALLBACK_ADAPTER=1`) in parallel jobs: `tests` (engine fmt/clippy/test, never
+compiles Bevy), `oracle-checks` (oracle clippy/test, three-lighting tests) and `oracle 1/4`…`4/4`
+(the FLIP gate, `--shard K/4`); `oracle` joins the slices' reports into the Pages site and fails
+when any of them failed. Markdown-only PRs skip all of them;
 `main` requires the `merge-ready` check. The FLIP gate is enforced on CI. The GPU-time gate is a
 **local gate**: run the oracle on the GPU for any PR that changes passes or shaders and paste its
 table into the PR.
