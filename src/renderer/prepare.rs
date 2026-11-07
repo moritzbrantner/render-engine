@@ -1,15 +1,15 @@
 //! Writes one frame's camera, lights and instances into a viewport.
 
 use super::{
-    Renderer,
+    Growable, Renderer,
     gpu::{FrameUniform, InstanceData},
     lights::LocalLights,
     pipelines::face_variant,
     projection::{Cascade, look_at, looking_to, perspective_infinite_reverse},
     textures::upload_cube,
     viewport::{
-        Draw, DrawKey, Phase, SHADOW_VIEW_STRIDE, ShadowArray, ShadowPass, UploadedEnvironment,
-        Viewport,
+        Draw, DrawKey, Phase, PrepareWork, SHADOW_VIEW_STRIDE, ShadowArray, ShadowPass,
+        UploadedEnvironment, Viewport,
     },
 };
 use crate::{
@@ -34,6 +34,10 @@ impl Renderer {
         instances: &[Instance],
     ) {
         let (device, queue) = (&self.device, &self.queue);
+        viewport.work = PrepareWork {
+            instances: instances.len() as u32,
+            ..PrepareWork::default()
+        };
         let aspect = viewport.width as f32 / viewport.height as f32;
         let cam = &scene.camera;
         let view_from_world = look_at(cam.eye, cam.target);
@@ -75,14 +79,18 @@ impl Renderer {
             moon_first,
         );
         queue.write_buffer(&viewport.frame_buffer, 0, bytemuck::bytes_of(&frame));
+        viewport.work.upload_bytes += std::mem::size_of::<FrameUniform>() as u64;
 
         let grouped = write_instances(viewport, device, queue, world, view_from_world, instances);
 
         let mut lighting_dirty = viewport.lighting_group.is_none();
-        lighting_dirty |=
-            viewport
-                .light_buffer
-                .write(device, queue, bytemuck::cast_slice(&lights.gpu));
+        lighting_dirty |= write_growable(
+            &mut viewport.light_buffer,
+            &mut viewport.work,
+            device,
+            queue,
+            bytemuck::cast_slice(&lights.gpu),
+        );
 
         // Like Bevy, spot maps share the sun's array (and its size), after the cascades.
         let directional_layers = (cascades.len() + lights.spot_views.len()) as u32;
@@ -100,6 +108,7 @@ impl Renderer {
                 directional.1,
                 false,
             );
+            viewport.work.allocations += 1;
             lighting_dirty = true;
         }
         let cube_count = (lights.point_views.len() / 6) as u32;
@@ -111,6 +120,7 @@ impl Renderer {
         let point_arrays = &mut viewport.point_shadows;
         if (point_arrays.size, point_arrays.layers) != point {
             *point_arrays = ShadowArray::new(device, "point shadow maps", point.0, point.1, true);
+            viewport.work.allocations += 1;
             lighting_dirty = true;
         }
 
@@ -132,6 +142,14 @@ impl Renderer {
             _ => false,
         };
         if !cached {
+            if let Some(e) = &scene.environment {
+                viewport.work.allocations += 2;
+                viewport.work.upload_bytes += [&e.diffuse, &e.specular]
+                    .iter()
+                    .flat_map(|c| &c.levels)
+                    .map(|l| l.len() as u64)
+                    .sum::<u64>();
+            }
             viewport.environment = scene.environment.as_ref().map(|e| UploadedEnvironment {
                 diffuse: e.diffuse.clone(),
                 specular: e.specular.clone(),
@@ -144,6 +162,7 @@ impl Renderer {
         match (&scene.sky, viewport.sky.is_some()) {
             (Some(_), false) => {
                 viewport.sky = Some(SkyTargets::new(device, &self.sky));
+                viewport.work.allocations += 1;
                 lighting_dirty = true;
             }
             (None, true) => {
@@ -536,19 +555,25 @@ fn write_instances(
     if viewport.instance_data.is_empty() {
         viewport.instance_data.push(InstanceData::zeroed());
     }
-    if viewport
-        .instance_buffer
-        .write(device, queue, bytemuck::cast_slice(&viewport.instance_data))
-    {
+    if write_growable(
+        &mut viewport.instance_buffer,
+        &mut viewport.work,
+        device,
+        queue,
+        bytemuck::cast_slice(&viewport.instance_data),
+    ) {
         viewport.frame_group = None;
     }
     if joints.is_empty() {
         joints.push(Mat4::IDENTITY);
     }
-    if viewport
-        .joint_buffer
-        .write(device, queue, bytemuck::cast_slice(&joints))
-    {
+    if write_growable(
+        &mut viewport.joint_buffer,
+        &mut viewport.work,
+        device,
+        queue,
+        bytemuck::cast_slice(&joints),
+    ) {
         viewport.frame_group = None;
     }
     Grouped { groups, obbs }
@@ -606,12 +631,30 @@ fn write_shadow_views(
         let at = i * SHADOW_VIEW_STRIDE as usize;
         view_bytes[at..at + 64].copy_from_slice(bytemuck::bytes_of(m));
     }
-    if viewport
-        .shadow_view_buffer
-        .write(device, queue, &view_bytes)
-    {
+    if write_growable(
+        &mut viewport.shadow_view_buffer,
+        &mut viewport.work,
+        device,
+        queue,
+        &view_bytes,
+    ) {
         viewport.shadow_view_group = None;
     }
+}
+
+/// Writes a per-frame buffer, counting the bytes and a replacement. Returns whether the buffer
+/// was replaced.
+fn write_growable(
+    buffer: &mut Growable,
+    work: &mut PrepareWork,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    bytes: &[u8],
+) -> bool {
+    work.upload_bytes += bytes.len() as u64;
+    let grown = buffer.write(device, queue, bytes);
+    work.allocations += u32::from(grown);
+    grown
 }
 
 /// Frustum culling per view (Bevy `check_visibility` and the shadow views' culling): each view
@@ -626,9 +669,11 @@ fn cull_views(
     let Grouped { groups, obbs } = grouped;
     viewport.draws.clear();
     let mut visible: Vec<u32> = Vec::new();
+    let mut tests = 0u64;
     let mut cull = |draws: &mut Vec<Draw>, sees: &dyn Fn(usize) -> bool| {
         let start = draws.len();
         for group in groups {
+            tests += u64::from(group.instances.end - group.instances.start);
             let first = visible.len() as u32;
             visible.extend(group.instances.clone().filter(|&i| sees(i as usize)));
             let end = visible.len() as u32;
@@ -645,11 +690,13 @@ fn cull_views(
     viewport.main_draws = cull(&mut viewport.draws, &|i| camera.intersects(&obbs[i]));
     // A light's sphere test runs once for all its views (six cube faces).
     let mut in_range: Option<((Vec3, f32), Vec<bool>)> = None;
+    let mut sphere_tests = 0u64;
     for pass in &mut viewport.shadow_passes {
         let draws = match pass.sphere {
             None => cull(&mut viewport.draws, &|i| pass.frustum.intersects(&obbs[i])),
             Some(sphere) => {
                 if in_range.as_ref().is_none_or(|(s, _)| *s != sphere) {
+                    sphere_tests += obbs.len() as u64;
                     let near = obbs
                         .iter()
                         .map(|o| o.intersects_sphere(sphere.0, sphere.1))
@@ -664,13 +711,29 @@ fn cull_views(
         };
         pass.draws = draws;
     }
+    // The camera's draws come first in the visible-index buffer.
+    let main_visible = viewport
+        .draws
+        .get(viewport.main_draws.clone())
+        .and_then(<[Draw]>::last)
+        .map_or(0, |d| d.instances.end);
+    let work = &mut viewport.work;
+    work.views = 1 + viewport.shadow_passes.len() as u32;
+    work.bounds_tests = tests + sphere_tests;
+    work.visible = main_visible;
+    work.shadow_visible = visible.len() as u32 - main_visible;
+    work.draws = viewport.main_draws.len() as u32;
+    work.shadow_draws = (viewport.draws.len() - viewport.main_draws.len()) as u32;
     if visible.is_empty() {
         visible.push(0);
     }
-    if viewport
-        .visible_buffer
-        .write(device, queue, bytemuck::cast_slice(&visible))
-    {
+    if write_growable(
+        &mut viewport.visible_buffer,
+        &mut viewport.work,
+        device,
+        queue,
+        bytemuck::cast_slice(&visible),
+    ) {
         viewport.frame_group = None;
     }
 }

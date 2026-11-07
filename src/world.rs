@@ -184,6 +184,42 @@ pub struct World {
     skins: Slots<Vec<Mat4>>,
     emitters: Slots<EmitterState>,
     particles: ParticlePool,
+    work: WorldWork,
+}
+
+/// GPU work a [`World`] has done for the consumer's edits since it was created, counted where
+/// it is done. Subtract two readings for the work between them: a single edit costs the
+/// edited mesh, texture or material alone, whatever else the world holds, and
+/// [`Renderer::prepare`] never adds to it (see "Work contracts" in
+/// `docs/consumer-integration.md`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct WorldWork {
+    /// Meshes whose GPU buffers were created: `add_mesh`, and `set_mesh` when the vertex or
+    /// index count or the skinning changed.
+    pub mesh_builds: u64,
+    /// Meshes rewritten in their buffers: `set_mesh` of the same topology and
+    /// `set_mesh_positions_normals`.
+    pub mesh_rewrites: u64,
+    /// Textures uploaded (`add_texture`).
+    pub texture_uploads: u64,
+    /// Materials built (`add_material`, `set_material`).
+    pub material_builds: u64,
+    /// Bytes written to the GPU by all of the above.
+    pub upload_bytes: u64,
+}
+
+impl std::ops::Sub for WorldWork {
+    type Output = Self;
+
+    fn sub(self, earlier: Self) -> Self {
+        Self {
+            mesh_builds: self.mesh_builds - earlier.mesh_builds,
+            mesh_rewrites: self.mesh_rewrites - earlier.mesh_rewrites,
+            texture_uploads: self.texture_uploads - earlier.texture_uploads,
+            material_builds: self.material_builds - earlier.material_builds,
+            upload_bytes: self.upload_bytes - earlier.upload_bytes,
+        }
+    }
 }
 
 impl World {
@@ -213,7 +249,13 @@ impl World {
             skins: Slots::new(),
             emitters: Slots::new(),
             particles: ParticlePool::new(renderer.device(), renderer.sim_pipelines()),
+            work: WorldWork::default(),
         }
+    }
+
+    /// The work done for the consumer's edits so far.
+    pub fn work(&self) -> WorldWork {
+        self.work
     }
 
     /// Uploads a mesh. Missing uvs and tangents read as zero, missing colours as white.
@@ -251,6 +293,8 @@ impl World {
         slot.has_tangents = !mesh.tangents.is_empty();
         slot.aabb = Aabb::from_points(&mesh.positions);
         slot.joint_bounds = joint_bounds(mesh);
+        self.work.mesh_rewrites += 1;
+        self.work.upload_bytes += streams.bytes(mesh);
     }
 
     /// Rewrites only a mesh's positions and normals, one per vertex, keeping its other
@@ -274,10 +318,14 @@ impl World {
         self.queue
             .write_buffer(&slot.normals, 0, bytemuck::cast_slice(normals));
         slot.aabb = Aabb::from_points(positions);
+        self.work.mesh_rewrites += 1;
+        self.work.upload_bytes += (size_of_val(positions) + size_of_val(normals)) as u64;
     }
 
-    fn gpu_mesh(&self, mesh: &MeshData) -> GpuMesh {
+    fn gpu_mesh(&mut self, mesh: &MeshData) -> GpuMesh {
         let streams = Streams::new(mesh);
+        self.work.mesh_builds += 1;
+        self.work.upload_bytes += streams.bytes(mesh);
         let buffer = |label, contents: &[u8], usage| {
             self.device
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -349,6 +397,8 @@ impl World {
 
     /// Uploads a texture with all its mip levels.
     pub fn add_texture(&mut self, texture: &TextureData) -> TextureId {
+        self.work.texture_uploads += 1;
+        self.work.upload_bytes += texture.levels.iter().map(|l| l.len() as u64).sum::<u64>();
         TextureId(
             self.textures
                 .insert(upload_texture(&self.device, &self.queue, texture)),
@@ -361,12 +411,14 @@ impl World {
     /// Adds a material; its textures must be in this world.
     pub fn add_material(&mut self, material: &StandardMaterial) -> MaterialId {
         let gpu = self.gpu_material(material);
+        self.count_material();
         MaterialId(self.materials.insert(gpu))
     }
 
     /// Replaces a material in place; instances using it pick up the change next frame.
     pub fn set_material(&mut self, id: MaterialId, material: &StandardMaterial) {
         let gpu = self.gpu_material(material);
+        self.count_material();
         let slot = self
             .materials
             .items
@@ -500,6 +552,11 @@ impl World {
             .expect("instance uses a removed material")
     }
 
+    fn count_material(&mut self) {
+        self.work.material_builds += 1;
+        self.work.upload_bytes += size_of::<MaterialUniform>() as u64;
+    }
+
     fn gpu_material(&self, m: &StandardMaterial) -> GpuMaterial {
         let mut f = 0;
         let mut slot = |texture: Option<TextureId>, flag: u32| match texture {
@@ -630,6 +687,15 @@ struct Streams {
 }
 
 impl Streams {
+    /// Bytes a full upload of `mesh` with these streams writes.
+    fn bytes(&self, mesh: &MeshData) -> u64 {
+        (size_of_val(mesh.positions.as_slice())
+            + size_of_val(mesh.normals.as_slice())
+            + size_of_val(self.surface.as_slice())
+            + self.skin.as_deref().map_or(0, size_of_val)
+            + size_of_val(mesh.indices.as_slice())) as u64
+    }
+
     fn new(mesh: &MeshData) -> Self {
         let n = mesh.positions.len();
         assert_eq!(mesh.normals.len(), n, "mesh needs one normal per position");
