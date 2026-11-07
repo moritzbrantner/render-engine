@@ -65,6 +65,43 @@ pub struct Viewport {
     pub(super) clear_color: wgpu::Color,
     pub(super) tonemapping: Tonemapping,
     pub(super) particles: ParticleFrame,
+    /// What the last `prepare` did (see [`PrepareWork`]).
+    pub(super) work: PrepareWork,
+}
+
+/// The CPU-side work the last [`Renderer::prepare`] did for a viewport, counted where it is
+/// done. Deterministic for the same inputs, so tests hold `prepare` to the work contracts in
+/// `docs/consumer-integration.md` ("Work contracts").
+///
+/// With `N` instances, `V` views (the camera plus every shadow view) and `L` shadowed point or
+/// spot lights, `prepare` is a full pass over the frame's instance list, not an incremental
+/// one: it tests `N · V` boxes plus `N · L` light spheres and uploads `N` instances, whatever
+/// changed since the last frame. What the views keep only drives the visible-index upload and
+/// the draws.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PrepareWork {
+    /// Instances listed (`N`).
+    pub instances: u32,
+    /// Views culled: the camera plus every sun cascade, spot map and point-light cube face.
+    pub views: u32,
+    /// Instance bounds tested: one per instance and view, plus one sphere test per instance
+    /// and shadowed point or spot light.
+    pub bounds_tests: u64,
+    /// Instances the camera keeps (`k`).
+    pub visible: u32,
+    /// Instances kept, summed over the shadow views.
+    pub shadow_visible: u32,
+    /// Draw calls the main pass will submit.
+    pub draws: u32,
+    /// Draw calls the shadow passes will submit, summed.
+    pub shadow_draws: u32,
+    /// Bytes written to GPU buffers and textures: the frame uniform, instances, joint
+    /// palettes, lights, shadow views, visible indices and environment cube maps. The sky's
+    /// and the particles' fixed-size uniforms are not counted.
+    pub upload_bytes: u64,
+    /// GPU buffers and textures created: grown per-frame buffers, resized shadow-map arrays,
+    /// uploaded environment maps and the sky's targets. Zero once the frame's shape is steady.
+    pub allocations: u32,
 }
 
 pub(super) struct Targets {
@@ -258,6 +295,7 @@ impl Viewport {
             clear_color: wgpu::Color::BLACK,
             tonemapping: Tonemapping::default(),
             particles: ParticleFrame::new(device),
+            work: PrepareWork::default(),
         }
     }
 
@@ -272,6 +310,11 @@ impl Viewport {
                 sky.depth_changed();
             }
         }
+    }
+
+    /// What the last [`Renderer::prepare`] into this viewport did.
+    pub fn work(&self) -> PrepareWork {
+        self.work
     }
 
     pub fn size(&self) -> (u32, u32) {

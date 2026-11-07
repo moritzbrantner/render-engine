@@ -216,6 +216,29 @@ frame.present();
   writes a begin and an end timestamp on each pass (`viewport.timestamp_queries()` in all);
   the frame's GPU time is the sum of the spans.
 
+## Work contracts
+
+The engine's CPU-side frame work and edit costs are counted where they happen and held to
+these growth bounds by `tests/work.rs`, with exact counts over 64, 1 024 and 22 400 instances
+(the size of the oracle's `many_instances`), sparse (8 visible) and dense (all visible). GPU
+time stays the oracle's local gate (D3). `viewport.work()` reports the last `prepare`,
+`world.work()` the edits so far; subtract two readings of the latter.
+
+With `N` instances, `k` of them visible to the camera, `V` views (the camera plus every sun
+cascade, spot map and point-light cube face) and `L` shadowed point or spot lights:
+
+| Operation | Contract |
+| --- | --- |
+| `prepare` | A full pass over the instance list, not incremental: `N · V + N · L` bounds tests and `N` instances uploaded, whether or not anything changed. Hidden instances cost their test and instance data and nothing else. The camera's visible indices (4 bytes each) and draws follow `k`; one draw per mesh/material/face run with a visible instance. |
+| Unchanged frame | The same work as the previous frame, no GPU allocation, no `World` upload. |
+| Moved instance | The same `prepare` work as an unchanged frame (no extra cost, no saving). |
+| `set_mesh`, `set_mesh_positions_normals`, `set_material` | That mesh's or material's bytes alone, independent of what else the world holds. `prepare` never re-uploads content. |
+| Mutation, removal, mesh bounds, camera cut | Nothing culled is kept between frames, so each shows in the next `prepare`. |
+
+Culling has no spatial hierarchy: `O(N · V)` is the adopted class, and the Hi-Z experiment
+(`docs/occlusion-experiment.md`) did not pay off. A change that makes `prepare` incremental, or
+adds work that grows with hidden instances, has to update these contracts and their tests.
+
 ## Particles
 
 Emitters live in the `World` next to the meshes, under `EmitterId` handles; their particles live

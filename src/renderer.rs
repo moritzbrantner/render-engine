@@ -23,7 +23,7 @@ pub(crate) use encode::Stamps;
 pub(crate) use projection::perspective_infinite_reverse;
 pub use projection::{Cascade, look_at};
 pub(crate) use viewport::Growable;
-pub use viewport::Viewport;
+pub use viewport::{PrepareWork, Viewport};
 
 use crate::{particle_pass::ParticlePipelines, particle_sim::SimPipelines, sky::SkyPipelines};
 
