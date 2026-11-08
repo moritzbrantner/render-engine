@@ -949,6 +949,7 @@ fn lit_radiance(in: VertexOut, world_normal: vec3<f32>, N: vec3<f32>, m: Materia
     surface.diffuse_color = diffuse_color;
     surface.F0 = F0;
     surface.f_ab = f_ab;
+    // local-light-loop-begin (`LightAssignment::Clustered` swaps this block, `renderer/clustered.rs`)
     let point_count = frame.light_counts.x;
     for (var i = 0u; i < point_count; i++) {
         let light = lights[i];
@@ -966,6 +967,7 @@ fn lit_radiance(in: VertexOut, world_normal: vec3<f32>, N: vec3<f32>, m: Materia
         }
         direct += spot_light(light, surface) * shadow;
     }
+    // local-light-loop-end
     // Directional lights in Bevy's order: unshadowed first, then by spawn order (sun, moon).
     let has_moon = frame.moon_direction_to_light.w > 0.5;
     let moon_first = frame.atmosphere.w > 0.5;

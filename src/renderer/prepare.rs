@@ -246,6 +246,17 @@ impl Renderer {
         if viewport.gpu_culling.is_some() {
             GpuCulling::rebuild_bind_group(viewport, device);
         }
+        if let Some(clustered) = &mut viewport.clustered {
+            clustered.prepare(
+                device,
+                queue,
+                &lights,
+                view_from_world,
+                (viewport.width, viewport.height),
+                cam.fov_y,
+                &mut viewport.work,
+            );
+        }
         viewport.particles.prepare(
             device,
             queue,

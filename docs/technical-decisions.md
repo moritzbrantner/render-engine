@@ -134,8 +134,10 @@ upgrade that changes a default shows up as a deliberate scenario change:
   feature so `point_spot_soft` can switch on soft shadows. Bevy assigns lights to clusters;
   render-engine loops over the whole list in Bevy's order (point lights, then spot lights, each
   with the shadow casters first, then the sun). Outside its range a light contributes exactly
-  zero in both, so the sums agree. Clustering is the preferred direction but is not implemented;
-  [#72](https://github.com/moritzbrantner/render-engine/issues/72) evaluates it (D10). The
+  zero in both, so the sums agree. Clustering is the preferred direction: an opt-in
+  `LightAssignment::Clustered` path exists ([experiment](forward-plus-experiment.md),
+  [#72](https://github.com/moritzbrantner/render-engine/issues/72)) and reproduces the
+  per-fragment path byte for byte, but the default stays the loop over the whole list (D10). The
   temporal shadow filter (it needs TAA) and light textures are out of scope;
 - consumer meshes and textured materials: `textured_props` reads CC0 glTF props
   (`assets/props/`) once in the oracle (`content.rs`, following Bevy's glTF loader: base
@@ -499,7 +501,7 @@ stays rendering-only (D7), and D1–D9 stand as updated here: Bevy remains the o
 | Compute simulation and indirect draws for particles | **Implemented**, for particles only |
 | three.js port for the web client | **Implemented** (D8) |
 | Two-phase Hi-Z occlusion culling | **Not adopted**: a negative result ([#59](https://github.com/moritzbrantner/render-engine/issues/59), [experiment](occlusion-experiment.md)) |
-| Forward+ clustered lighting | **Agreed preference, not implemented**; experiment [#72](https://github.com/moritzbrantner/render-engine/issues/72) |
+| Forward+ clustered lighting | **Agreed preference; opt-in experiment, not the default** ([experiment](forward-plus-experiment.md), [#72](https://github.com/moritzbrantner/render-engine/issues/72)): `LightAssignment::Clustered` is byte-identical to the reference on every tested scene and at 256 lights takes the GPU pass sum from 11.97 to 1.08 ms for 0.91 ms more `prepare` on an RTX 3060 Ti. Stage 1 result on synthetic scenes; needs consumer evidence to go further. |
 | GPU-driven visibility and indirect draws for meshes | **Not adopted as default** ([experiment](gpu-driven-experiment.md), [#71](https://github.com/moritzbrantner/render-engine/issues/71)): an opt-in, experimental `Culling::GpuIndirect` path reproduces the reference path's images on the tested scenes (byte-identical) and saves `prepare` CPU (0.44–0.64 ms at 22.4k instances) but makes draw-bound scenes slower. Stage 1 result; needs consumer evidence to go further. |
 | render-engine in the browser (WASM/WebGPU) | **Direction only**: no `wasm32` build exists or is tested |
 | Deferred or hybrid rendering | **Not planned**; kept possible, needs its own evidence and issue |

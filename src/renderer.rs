@@ -8,6 +8,7 @@
 //! [`Renderer::prepare`] writes the frame's camera, lights and instances into the viewport, then
 //! [`Renderer::encode`] records the passes into the consumer's encoder, ending in its target.
 
+mod clustered;
 mod encode;
 mod gpu;
 mod gpu_culling;
@@ -18,6 +19,7 @@ mod projection;
 mod textures;
 mod viewport;
 
+pub use clustered::{ClusterConfig, ClusteredLightingUnsupported, LightAssignment};
 pub use encode::FrameTimestamps;
 pub(crate) use encode::Stamps;
 #[cfg(test)]
