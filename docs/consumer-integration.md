@@ -4,7 +4,8 @@ render-engine draws into a frame the consumer owns. The consumer keeps its windo
 queue, surface, game loop, asset loading and UI. The engine keeps its own render targets: a 4×
 MSAA HDR colour target, its depth buffer, shadow maps and the tone-mapping targets. It writes
 the finished, tone-mapped frame into the consumer's colour view. The example below is written for
-the mmorpg native client (`crates/mmorpg-client`), the first consumer.
+the mmorpg native client (`crates/mmorpg-client`), the first consumer. Adoption is opt-in: this
+is how to integrate if a game chooses to, not a required migration (technical decisions D10).
 
 ## Objects
 
@@ -15,6 +16,50 @@ the mmorpg native client (`crates/mmorpg-client`), the first consumer.
 | `renderer::Viewport` | one per output surface | the engine's targets for one size, plus per-frame buffers (instances, lights, shadow maps) that it reuses and grows |
 | `scene::Scene` | rebuilt every frame (plain values) | camera, sun, moon, sky, point and spot lights, ambient light, environment map, fog |
 | `world::Instance` | a list rebuilt every frame | `{ mesh, material, world_from_local, skin }`, one per drawn copy |
+
+## What the game provides
+
+The authority boundary is [technical decisions D7](technical-decisions.md#d7--ownership-boundary):
+the game decides what exists and where the camera goes, and the engine decides how to draw it.
+Each frame the game turns its own state into plain values. The engine keeps nothing of the game's
+entities, and `World` and `Scene` are not a game scene. Physics stays in physics-engine and asset
+processing in asset-tooling; the game passes the engine their results as transforms and uploaded
+content.
+
+```rust
+// Game-owned: the engine never sees these types.
+struct Prop { resource_key: ResourceKey, material: MaterialId, transform: Mat4 }
+struct Torch { position: Vec3, lumens: f32 }
+
+// Draw and instance data: one entry per copy. The engine sorts and culls per view.
+let instances: Vec<Instance> = props.iter().map(|p| Instance {
+    mesh: mesh_ids[&p.resource_key],
+    material: p.material,
+    world_from_local: p.transform,
+    skin: None,
+}).collect();
+
+// Light data, in Bevy's units.
+let point_lights: Vec<PointLight> = torches.iter().map(|t| PointLight {
+    position: t.position,
+    color: TORCH_COLOR,      // linear RGB
+    intensity: t.lumens,
+    range: 12.0,             // metres
+    radius: 0.05,
+    shadows: None,
+}).collect();
+
+// The camera the game wants, over the zone's lighting (a `Scene` the game keeps).
+let scene = Scene {
+    camera: Camera { eye, target, fov_y, near: 0.2, ev100, shadow_filter, tonemapping },
+    point_lights,
+    ..zone_lighting.clone()
+};
+renderer.prepare(&mut viewport, &world, &scene, &instances);
+```
+
+[Every frame](#every-frame) has the whole frame. Forward+ and GPU-driven paths are not implemented
+(D10); if one lands, it is meant to work from this same data.
 
 ## Setup
 
@@ -237,7 +282,8 @@ cascade, spot map and point-light cube face) and `L` shadowed point or spot ligh
 
 Culling has no spatial hierarchy: `O(N · V)` is the adopted class, and the Hi-Z experiment
 (`docs/occlusion-experiment.md`) did not pay off. A change that makes `prepare` incremental, or
-adds work that grows with hidden instances, has to update these contracts and their tests.
+adds work that grows with hidden instances, has to update these contracts and their tests. Any
+cache it adds stays renderer-internal (D7).
 
 ## Particles
 
@@ -306,6 +352,29 @@ world.step_particles(&mut encoder, dt, None);
   emitter's colours yourself for the time of day.
 - **Cost.** `particles_100k` (about 100k alive in one fountain plus 50 small effects) runs on
   the GPU; see the oracle report for its timings against hanabi.
+
+## Native and browser targets
+
+The crate runs natively today. Browser WebGPU is a direction (D10): there is no `wasm32` build,
+so the WebGPU column says what wgpu 30 and WebGPU offer, not anything run in a browser. The web
+client runs on the three.js port below, on WebGL 2.
+
+| Capability | Use in the engine today | Native (wgpu 30) | WebGPU | three.js `WebGLRenderer` |
+| --- | --- | --- | --- | --- |
+| `DEPTH_CLIP_CONTROL` | Unclipped sun-shadow depth; a fragment-shader fallback without it | adapter-dependent | optional `depth-clip-control` | not applicable |
+| `DUAL_SOURCE_BLENDING` | The sky's per-channel transmittance; its mean without it | adapter-dependent | optional `dual-source-blending` | not applicable |
+| `FLOAT32_FILTERABLE` | Required by `Scene::sky`; `prepare` panics without it | adapter-dependent | optional `float32-filterable` | the sky port needs `OES_texture_float_linear` |
+| `TIMESTAMP_QUERY` | GPU timing only, at pass begin and end | adapter-dependent | optional `timestamp-query` | advisory timing through `EXT_disjoint_timer_query_webgl2` |
+| Compute and write-only storage textures | The sky's environment filter, particle simulation | available | core | none in WebGL 2 |
+| `draw_indirect` | Particle draws | available | core | none in WebGL 2 |
+| Indirect draws with a non-zero `first_instance` | Not used; relevant to #71 | `INDIRECT_FIRST_INSTANCE` | optional `indirect-first-instance` | none in WebGL 2 |
+| `multi_draw_*_indirect_count` | Not used; relevant to #71 | `MULTI_DRAW_INDIRECT_COUNT`, Vulkan 1.2+ and DX12 | none: native-only in wgpu | none in WebGL 2 |
+
+Without `MULTI_DRAW_INDIRECT_COUNT`, wgpu may emulate multi-draw as a series of `draw_indirect`
+calls, so do not assume it batches submission on every backend. Any new path states the features
+and limits it needs and its fallback, and passes the [evidence](technical-decisions.md#evidence)
+on each target it claims. The three.js port has no compute or indirect draws, so Forward+ or
+GPU-driven work in the crate does not by itself reach today's web client.
 
 ## Web client (three.js)
 
@@ -457,7 +526,12 @@ leaves at the far plane.
 
 - Stars, clouds and moon phases: the sky is Bevy's clear atmosphere; the moon is a full disc.
 - Morph targets, and more than four joint influences per vertex (`JOINTS_1`).
-- Clustered lights. Every point and spot light is evaluated for every fragment.
+- Clustered lights (Forward+). Every point and spot light is evaluated for every fragment. The
+  preferred direction, not implemented; evaluated in
+  [#72](https://github.com/moritzbrantner/render-engine/issues/72) (D10).
+- GPU-driven visibility and indirect mesh draws: not implemented; evaluated in
+  [#71](https://github.com/moritzbrantner/render-engine/issues/71) (D10).
+- A browser build of the crate (see [Native and browser targets](#native-and-browser-targets)).
 - glTF features outside the core metallic-roughness model: texture transforms, a second UV set,
   clearcoat, transmission.
 
