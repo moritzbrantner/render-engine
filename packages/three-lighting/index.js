@@ -628,6 +628,16 @@ export function notShadowCaster(object) {
   return object.userData.notShadowCaster === true;
 }
 
+/**
+ * How many sun cascades, nearest first, `object` casts into: its own `userData.shadowCascades`
+ * (a whole number from 0), not inherited by its children, or all of them. Small detail can stay
+ * out of the far cascades, where it covers less than a texel. Spot and point views ignore it.
+ */
+export function shadowCascades(object) {
+  const n = object.userData.shadowCascades;
+  return Number.isInteger(n) && n >= 0 ? n : Infinity;
+}
+
 /** Opaque, then alpha-masked draws (Bevy's Opaque3d and AlphaMask3d), each three's way. */
 function opaqueSort(a, b) {
   const phase = (item) => (item.material.alphaMode === 'mask' ? 1 : 0);
@@ -1000,7 +1010,16 @@ export class Lighting {
       }
     };
     assign(false);
+    // Casters kept out of the far cascades (`userData.shadowCascades`): [object, its shadow material].
+    const nearOnly = [];
+    for (const [o] of casters) {
+      if (!notShadowCaster(o) && shadowCascades(o) < cascades.length) nearOnly.push([o, o.material]);
+    }
     cascades.forEach((c, i) => {
+      // Before culling, so a stand-in takes the material too.
+      for (const [o, m] of nearOnly) {
+        if (shadowCascades(o) <= i) o.material = Array.isArray(m) ? m.map(() => this.noShadow) : this.noShadow;
+      }
       // Culling camera: the cascade's x/y extent, unbounded towards the sun (pancaked casters).
       const half = c.diameter / 2;
       cam.matrixWorldInverse.fromArray(c.cascadeFromWorld);
@@ -1015,8 +1034,10 @@ export class Lighting {
       state.buffers.depth.setClear(0);
       renderer.clear(false, true, false);
       renderer.render(scene, cam);
+      // Culling gives hidden meshes back the material they had before theirs is restored.
+      culling.reset();
+      for (const [o, m] of nearOnly) o.material = m;
     });
-    culling.reset();
     if (native) gl.disable(depthClamp.DEPTH_CLAMP_EXT);
     if (local.spotViews.length || local.pointViews.length) {
       this.#renderLocalShadows(renderer, scene, local, () => assign(true));

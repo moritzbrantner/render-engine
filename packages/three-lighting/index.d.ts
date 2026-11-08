@@ -210,6 +210,12 @@ export function exposureFromEv100(ev100: number): number;
  * `object.userData.notShadowCaster = true`. Per object, not inherited by its children.
  */
 export function notShadowCaster(object: Object3D): boolean;
+/**
+ * How many sun cascades, nearest first, `object` casts into: `object.userData.shadowCascades` (a
+ * whole number from 0), or `Infinity` (all) when unset. Per object, not inherited by its children;
+ * spot and point views ignore it.
+ */
+export function shadowCascades(object: Object3D): number;
 export function decodeKtx2(bytes: Uint8Array): Promise<{
   vkFormat: number;
   faceCount: number;

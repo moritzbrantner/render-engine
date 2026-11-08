@@ -400,7 +400,10 @@ included, through `onBeforeRender` with the view's camera), so `culling.js` leav
 Only `LitMaterial` objects cast shadows. An object that should not (a part hidden inside another
 caster, a health bar) sets `object.userData.notShadowCaster = true`, Bevy's `NotShadowCaster`: it
 is left out of every sun cascade and spot or point view, per object and not inherited by its
-children (three's `castShadow` defaults to false, so it is not the switch). Anything else in the
+children (three's `castShadow` defaults to false, so it is not the switch). Small detail that
+covers less than a texel of the far cascades sets `object.userData.shadowCascades = n` to cast
+into only the nearest `n` sun cascades (per object, not inherited; spot and point views still draw
+it). Anything else in the
 scene (sprites, overlays) is drawn into the HDR pass as three draws it, tone mapped but not exposed. A page that
 paints its own backdrop behind a transparent canvas (`new WebGLRenderer({ alpha: true })`) sets
 `lighting.clearAlpha = 0`: the output is premultiplied where nothing is drawn.
