@@ -3,6 +3,7 @@
 use super::{
     Growable, Renderer,
     gpu::{FrameUniform, InstanceData},
+    gpu_culling::{GpuCulling, GroupRow},
     lights::LocalLights,
     pipelines::face_variant,
     projection::{Cascade, look_at, looking_to, perspective_infinite_reverse},
@@ -132,6 +133,12 @@ impl Renderer {
             clip_from_view * view_from_world,
             &grouped,
         );
+        // A replaced instance or visible buffer clears `frame_group`; the GPU pass binds both.
+        if viewport.frame_group.is_none()
+            && let Some(gpu) = &mut viewport.gpu_culling
+        {
+            gpu.invalidate_bind_group();
+        }
 
         // Environment maps are uploaded once per distinct pair of cube maps.
         let cached = match (&scene.environment, &viewport.environment) {
@@ -236,6 +243,9 @@ impl Renderer {
             ));
         }
         viewport.tonemapping = cam.tonemapping;
+        if viewport.gpu_culling.is_some() {
+            GpuCulling::rebuild_bind_group(viewport, device);
+        }
         viewport.particles.prepare(
             device,
             queue,
@@ -434,6 +444,9 @@ struct Grouped {
     groups: Vec<Draw>,
     /// Each sorted instance's box, compact for the per-view culling loops.
     obbs: Vec<Obb>,
+    /// With `Culling::GpuIndirect`, the groups the compute pass culls; each group's `gpu` is
+    /// its row here.
+    gpu_rows: Vec<GroupRow>,
 }
 
 /// Writes the instance and joint buffers and groups the instances into draws.
@@ -514,6 +527,10 @@ fn write_instances(
     // The boxes on their own in draw order, compact for the per-view culling loops.
     let mut obbs: Vec<Obb> = Vec::with_capacity(keys.len());
     let mut groups: Vec<Draw> = Vec::new();
+    // Rows of the compute pass's group table (empty on the CPU path); the instance data
+    // carries `row + 1`, zero for instances the pass skips.
+    let gpu_on = viewport.gpu_culling.is_some();
+    let mut gpu_rows: Vec<GroupRow> = Vec::new();
     viewport.instance_data.clear();
     for (i, key) in keys.iter().enumerate() {
         let i = i as u32;
@@ -524,14 +541,26 @@ fn write_instances(
             {
                 d.instances.end = i + 1;
             }
-            _ => groups.push(Draw {
-                face: key.face,
-                phase: key.phase,
-                skinned: key.skinned,
-                mesh: key.mesh,
-                material: key.material,
-                instances: i..i + 1,
-            }),
+            _ => {
+                let gpu = (gpu_on && key.phase != Phase::Blend && !key.skinned).then(|| {
+                    let mesh = world.mesh(key.mesh);
+                    gpu_rows.push(GroupRow::new(mesh.aabb, mesh.index_count));
+                    gpu_rows.len() as u32 - 1
+                });
+                groups.push(Draw {
+                    face: key.face,
+                    phase: key.phase,
+                    skinned: key.skinned,
+                    mesh: key.mesh,
+                    material: key.material,
+                    instances: i..i + 1,
+                    gpu,
+                });
+            }
+        }
+        let gpu_row = groups.last().and_then(|d| d.gpu);
+        if let Some(row) = gpu_row {
+            gpu_rows[row as usize].count += 1;
         }
         obbs.push(input_obbs[key.index as usize]);
         let m = instances[key.index as usize].world_from_local;
@@ -548,7 +577,7 @@ fn write_instances(
                 u32::from(has_tangents),
                 (key.face & 1) as u32,
                 key.joint_offset,
-                0,
+                gpu_row.map_or(0, |row| row + 1),
             ),
         });
     }
@@ -576,7 +605,11 @@ fn write_instances(
     ) {
         viewport.frame_group = None;
     }
-    Grouped { groups, obbs }
+    Grouped {
+        groups,
+        obbs,
+        gpu_rows,
+    }
 }
 
 /// Writes the shadow-view buffer and the list of shadow passes.
@@ -659,6 +692,10 @@ fn write_growable(
 
 /// Frustum culling per view (Bevy `check_visibility` and the shadow views' culling): each view
 /// keeps its own draws over a run of visible instance indices. Writes the visible-index buffer.
+///
+/// With `Culling::GpuIndirect`, a group with a GPU row is not tested here: each view gets one
+/// indirect draw per row, over a run the compute pass fills. The runs take the start of the
+/// visible-index buffer; the indices of the groups still culled here follow them.
 fn cull_views(
     viewport: &mut Viewport,
     device: &wgpu::Device,
@@ -666,20 +703,37 @@ fn cull_views(
     clip_from_world: Mat4,
     grouped: &Grouped,
 ) {
-    let Grouped { groups, obbs } = grouped;
+    let Grouped {
+        groups,
+        obbs,
+        gpu_rows,
+    } = grouped;
+    let views = 1 + viewport.shadow_passes.len() as u32;
+    let gpu_instances: u32 = gpu_rows.iter().map(|r| r.count).sum();
+    let gpu_region = views * gpu_instances;
+    let gpu_row_count = gpu_rows.len() as u32;
     viewport.draws.clear();
     let mut visible: Vec<u32> = Vec::new();
     let mut tests = 0u64;
-    let mut cull = |draws: &mut Vec<Draw>, sees: &dyn Fn(usize) -> bool| {
+    let mut cull = |draws: &mut Vec<Draw>, view: u32, sees: &dyn Fn(usize) -> bool| {
         let start = draws.len();
         for group in groups {
+            if let Some(row) = group.gpu {
+                draws.push(Draw {
+                    instances: 0..0,
+                    gpu: Some(view * gpu_row_count + row),
+                    ..group.clone()
+                });
+                continue;
+            }
             tests += u64::from(group.instances.end - group.instances.start);
             let first = visible.len() as u32;
             visible.extend(group.instances.clone().filter(|&i| sees(i as usize)));
             let end = visible.len() as u32;
             if end > first {
                 draws.push(Draw {
-                    instances: first..end,
+                    instances: first + gpu_region..end + gpu_region,
+                    gpu: None,
                     ..group.clone()
                 });
             }
@@ -687,53 +741,66 @@ fn cull_views(
         start..draws.len()
     };
     let camera = Frustum::camera(clip_from_world);
-    viewport.main_draws = cull(&mut viewport.draws, &|i| camera.intersects(&obbs[i]));
-    // A light's sphere test runs once for all its views (six cube faces).
+    viewport.main_draws = cull(&mut viewport.draws, 0, &|i| camera.intersects(&obbs[i]));
+    // A light's sphere test runs once for all its views (six cube faces), and only over the
+    // groups this loop culls.
     let mut in_range: Option<((Vec3, f32), Vec<bool>)> = None;
     let mut sphere_tests = 0u64;
-    for pass in &mut viewport.shadow_passes {
+    for (i, pass) in viewport.shadow_passes.iter_mut().enumerate() {
+        let view = 1 + i as u32;
         let draws = match pass.sphere {
-            None => cull(&mut viewport.draws, &|i| pass.frustum.intersects(&obbs[i])),
+            None => cull(&mut viewport.draws, view, &|i| {
+                pass.frustum.intersects(&obbs[i])
+            }),
             Some(sphere) => {
                 if in_range.as_ref().is_none_or(|(s, _)| *s != sphere) {
-                    sphere_tests += obbs.len() as u64;
-                    let near = obbs
-                        .iter()
-                        .map(|o| o.intersects_sphere(sphere.0, sphere.1))
-                        .collect();
+                    let mut near = vec![false; obbs.len()];
+                    for group in groups.iter().filter(|g| g.gpu.is_none()) {
+                        sphere_tests += u64::from(group.instances.end - group.instances.start);
+                        for i in group.instances.clone() {
+                            near[i as usize] =
+                                obbs[i as usize].intersects_sphere(sphere.0, sphere.1);
+                        }
+                    }
                     in_range = Some((sphere, near));
                 }
                 let near = &in_range.as_ref().expect("filled above").1;
-                cull(&mut viewport.draws, &|i| {
+                cull(&mut viewport.draws, view, &|i| {
                     near[i] && pass.frustum.intersects(&obbs[i])
                 })
             }
         };
         pass.draws = draws;
     }
-    // The camera's draws come first in the visible-index buffer.
-    let main_visible = viewport
-        .draws
-        .get(viewport.main_draws.clone())
-        .and_then(<[Draw]>::last)
-        .map_or(0, |d| d.instances.end);
+    // The camera's kept indices come first among those culled here.
+    let main_visible: u32 = viewport.draws[viewport.main_draws.clone()]
+        .iter()
+        .filter(|d| d.gpu.is_none())
+        .map(|d| d.instances.end - d.instances.start)
+        .sum();
     let work = &mut viewport.work;
-    work.views = 1 + viewport.shadow_passes.len() as u32;
+    work.views = views;
     work.bounds_tests = tests + sphere_tests;
+    work.gpu_bounds_tests = u64::from(gpu_region);
     work.visible = main_visible;
     work.shadow_visible = visible.len() as u32 - main_visible;
     work.draws = viewport.main_draws.len() as u32;
     work.shadow_draws = (viewport.draws.len() - viewport.main_draws.len()) as u32;
-    if visible.is_empty() {
+    if visible.is_empty() && gpu_region == 0 {
         visible.push(0);
     }
-    if write_growable(
-        &mut viewport.visible_buffer,
-        &mut viewport.work,
-        device,
-        queue,
-        bytemuck::cast_slice(&visible),
-    ) {
+    let bytes: &[u8] = bytemuck::cast_slice(&visible);
+    work.upload_bytes += bytes.len() as u64;
+    let offset = u64::from(gpu_region) * 4;
+    let size = offset + bytes.len() as u64;
+    let grown = viewport
+        .visible_buffer
+        .write_at(device, queue, offset, bytes, size);
+    work.allocations += u32::from(grown);
+    if grown {
         viewport.frame_group = None;
+    }
+    if viewport.gpu_culling.is_some() {
+        GpuCulling::write_tables(viewport, device, queue, gpu_rows, clip_from_world);
     }
 }

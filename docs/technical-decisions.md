@@ -500,7 +500,7 @@ stays rendering-only (D7), and D1–D9 stand as updated here: Bevy remains the o
 | three.js port for the web client | **Implemented** (D8) |
 | Two-phase Hi-Z occlusion culling | **Not adopted**: a negative result ([#59](https://github.com/moritzbrantner/render-engine/issues/59), [experiment](occlusion-experiment.md)) |
 | Forward+ clustered lighting | **Agreed preference, not implemented**; experiment [#72](https://github.com/moritzbrantner/render-engine/issues/72) |
-| GPU-driven visibility and indirect draws for meshes | **Agreed to evaluate, not implemented**; experiment [#71](https://github.com/moritzbrantner/render-engine/issues/71) |
+| GPU-driven visibility and indirect draws for meshes | **Not adopted as default** ([experiment](gpu-driven-experiment.md), [#71](https://github.com/moritzbrantner/render-engine/issues/71)): an opt-in, experimental `Culling::GpuIndirect` path reproduces the reference path's images on the tested scenes (byte-identical) and saves `prepare` CPU (0.44–0.64 ms at 22.4k instances) but makes draw-bound scenes slower. Stage 1 result; needs consumer evidence to go further. |
 | render-engine in the browser (WASM/WebGPU) | **Direction only**: no `wasm32` build exists or is tested |
 | Deferred or hybrid rendering | **Not planned**; kept possible, needs its own evidence and issue |
 | Independent backend for several games | **Long-term possibility**, decided at stage 4 below |

@@ -37,6 +37,7 @@ processing in asset-tooling. The engine never depends on Bevy outside `oracle/`.
 | `assets/figure/` | CC0 rigged character for `skinned_figure` (provenance in its README) |
 | `examples/mesh_upload.rs` | Microbenchmark: per-frame pose uploads (`set_mesh`, `set_mesh_positions_normals`, `set_skin`) |
 | `docs/consumer-integration.md` | How a consumer (the mmorpg native client) drives the engine |
+| `docs/gpu-driven-experiment.md`, `scripts/bench-gpu-driven.sh`, `oracle/src/gpu_driven_bench.rs`, `tests/gpu_culling.rs` | The #71 GPU culling experiment (`--gpu-driven-bench`, not a gate): the opt-in `Culling::GpuIndirect` path against the CPU reference, and its report |
 | `site/` | Report page over the last oracle run (`scripts/build-pages.sh` → `pages-dist/`) |
 | `packages/three-lighting/` | The web client's lighting on three.js (`@moritzbrantner/three-lighting`, root `package.json`): GLSL ports of `lit.wgsl`, `tonemap.wgsl` and the sky passes (`sky.js`, `sky-shaders.js`) and Bevy's cascade fitting (D8). A shading change in `lit.wgsl`, `tonemap.wgsl` or `src/shaders/sky/` makes the same change here |
 | `oracle/three/` | The oracle's three.js side: `render.mjs` renders exported scenarios in headless Chromium (Playwright, ANGLE on Vulkan); `oracle/src/three_side.rs` exports them and lists known gaps with their issues |

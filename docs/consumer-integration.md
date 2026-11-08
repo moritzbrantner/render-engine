@@ -58,8 +58,9 @@ let scene = Scene {
 renderer.prepare(&mut viewport, &world, &scene, &instances);
 ```
 
-[Every frame](#every-frame) has the whole frame. Forward+ and GPU-driven paths are not implemented
-(D10); if one lands, it is meant to work from this same data.
+[Every frame](#every-frame) has the whole frame. Forward+ is not implemented (D10) and is meant
+to work from this same data if it lands. GPU-driven culling is an opt-in experiment
+([results](gpu-driven-experiment.md)); it works from this same data and is not the default.
 
 ## Setup
 
@@ -240,6 +241,14 @@ frame.present();
   from the positions on `add_mesh`, `set_mesh` and `set_mesh_positions_normals` (skinned
   meshes: per joint, under the current palette). List the whole scene; the engine drops what a
   view cannot see.
+- **GPU culling (experimental, off by default).** `viewport.set_culling(&renderer,
+  Culling::GpuIndirect)` moves the frustum tests of opaque and alpha-masked unskinned instances
+  into a compute pass and draws them with one indirect draw per run and view; blended and skinned
+  instances stay on the CPU path in the same frame. It needs `INDIRECT_FIRST_INSTANCE` (request it
+  alongside the features above) and five storage buffers per stage; where they are missing,
+  `set_culling` returns `GpuCullingUnsupported` and the viewport stays on `Culling::Cpu`. See the
+  [experiment](gpu-driven-experiment.md) before turning it on: it saves CPU work on instance-heavy
+  scenes and costs it on draw-heavy ones.
 - **Resize.** Call `viewport.resize(&renderer, width, height)` together with
   `surface.configure`.
 - **Units.** `Scene` uses Bevy's physical units: illuminance in lux, light power in lumens,
@@ -279,6 +288,7 @@ cascade, spot map and point-light cube face) and `L` shadowed point or spot ligh
 | Moved instance | The same `prepare` work as an unchanged frame (no extra cost, no saving). |
 | `set_mesh`, `set_mesh_positions_normals`, `set_material` | That mesh's or material's bytes alone, independent of what else the world holds. `prepare` never re-uploads content. |
 | Mutation, removal, mesh bounds, camera cut | Nothing culled is kept between frames, so each shows in the next `prepare`. |
+| `prepare` with `Culling::GpuIndirect` (opt-in) | The CPU tests only blended and skinned instances; the rest cost `gpu_bounds_tests` (`N · V`) on the GPU, with no sphere tests on the CPU. `visible` and `shadow_visible` count CPU-culled instances only (`read_gpu_culled` has the rest). One indirect draw per eligible run and view, emptied by culling or not. Upload drops the visible indices and adds the group and view tables and the indirect arguments. |
 
 Culling has no spatial hierarchy: `O(N · V)` is the adopted class, and the Hi-Z experiment
 (`docs/occlusion-experiment.md`) did not pay off. A change that makes `prepare` incremental, or
@@ -367,8 +377,8 @@ client runs on the three.js port below, on WebGL 2.
 | `TIMESTAMP_QUERY` | GPU timing only, at pass begin and end | adapter-dependent | optional `timestamp-query` | advisory timing through `EXT_disjoint_timer_query_webgl2` |
 | Compute and write-only storage textures | The sky's environment filter, particle simulation | available | core | none in WebGL 2 |
 | `draw_indirect` | Particle draws | available | core | none in WebGL 2 |
-| Indirect draws with a non-zero `first_instance` | Not used; relevant to #71 | `INDIRECT_FIRST_INSTANCE` | optional `indirect-first-instance` | none in WebGL 2 |
-| `multi_draw_*_indirect_count` | Not used; relevant to #71 | `MULTI_DRAW_INDIRECT_COUNT`, Vulkan 1.2+ and DX12 | none: native-only in wgpu | none in WebGL 2 |
+| Indirect draws with a non-zero `first_instance` | Required by the opt-in `Culling::GpuIndirect`; it stays on the CPU path without it. Measured on the RTX 3060 Ti ([experiment](gpu-driven-experiment.md)) | `INDIRECT_FIRST_INSTANCE` | optional `indirect-first-instance`, not run in a browser | none in WebGL 2 |
+| `multi_draw_*_indirect_count` | Not used by the experiment: with one mesh per run it could only remove empty draws. The RTX 3060 Ti reports it; it would need a shared vertex and index buffer to batch runs | `MULTI_DRAW_INDIRECT_COUNT`, Vulkan 1.2+ and DX12 | none: native-only in wgpu | none in WebGL 2 |
 
 Without `MULTI_DRAW_INDIRECT_COUNT`, wgpu may emulate multi-draw as a series of `draw_indirect`
 calls, so do not assume it batches submission on every backend. Any new path states the features
@@ -529,8 +539,9 @@ leaves at the far plane.
 - Clustered lights (Forward+). Every point and spot light is evaluated for every fragment. The
   preferred direction, not implemented; evaluated in
   [#72](https://github.com/moritzbrantner/render-engine/issues/72) (D10).
-- GPU-driven visibility and indirect mesh draws: not implemented; evaluated in
-  [#71](https://github.com/moritzbrantner/render-engine/issues/71) (D10).
+- GPU-driven visibility and indirect mesh draws as the default: an opt-in experiment
+  ([results](gpu-driven-experiment.md), #71) reproduces the reference path but is not adopted (D10).
+  Retained GPU instances and multi-draw batching are not implemented.
 - A browser build of the crate (see [Native and browser targets](#native-and-browser-targets)).
 - glTF features outside the core metallic-roughness model: texture transforms, a second UV set,
   clearcoat, transmission.
