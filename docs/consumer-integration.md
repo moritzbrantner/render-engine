@@ -376,20 +376,23 @@ world.step_particles(&mut encoder, dt, None);
 
 ## Native and browser targets
 
-The crate runs natively today. Browser WebGPU is a direction (D10): there is no `wasm32` build,
-so the WebGPU column says what wgpu 30 and WebGPU offer, not anything run in a browser. The web
-client runs on the three.js port below, on WebGL 2.
+The crate runs natively today, and the web client runs on the three.js port below, on WebGL 2.
+Browser WebGPU is a direction (D10) with a measured
+[feasibility assessment](webgpu-browser-assessment.md) behind it: `oracle/webgpu-smoke/`, compiled to
+wasm and run by Playwright's headless Chromium on an RTX 3060 Ti, rendered the oracle's fixtures
+within D3's gates. It is not a supported build, no other browser or adapter was tested, and it does
+not change the web client. "Ran in Chromium" below means that smoke, on that adapter.
 
 | Capability | Use in the engine today | Native (wgpu 30) | WebGPU | three.js `WebGLRenderer` |
 | --- | --- | --- | --- | --- |
-| `DEPTH_CLIP_CONTROL` | Unclipped sun-shadow depth; a fragment-shader fallback without it | adapter-dependent | optional `depth-clip-control` | not applicable |
-| `DUAL_SOURCE_BLENDING` | The sky's per-channel transmittance; its mean without it | adapter-dependent | optional `dual-source-blending` | not applicable |
-| `FLOAT32_FILTERABLE` | Required by `Scene::sky`; `prepare` panics without it | adapter-dependent | optional `float32-filterable` | the sky port needs `OES_texture_float_linear` |
-| `TIMESTAMP_QUERY` | GPU timing only, at pass begin and end | adapter-dependent | optional `timestamp-query` | advisory timing through `EXT_disjoint_timer_query_webgl2` |
-| Compute and write-only storage textures | The sky's environment filter, particle simulation | available | core | none in WebGL 2 |
-| `draw_indirect` | Particle draws | available | core | none in WebGL 2 |
-| Indirect draws with a non-zero `first_instance` | Required by the opt-in `Culling::GpuIndirect`; it stays on the CPU path without it. Measured on the RTX 3060 Ti ([experiment](gpu-driven-experiment.md)) | `INDIRECT_FIRST_INSTANCE` | optional `indirect-first-instance`, not run in a browser | none in WebGL 2 |
-| A fourth bind group and 4 fragment-stage storage buffers | Required by the opt-in `LightAssignment::Clustered`; it stays per-fragment without them. Measured on the RTX 3060 Ti ([experiment](forward-plus-experiment.md)) | adapter/limits-dependent | within the WebGPU defaults, not run in a browser | none in WebGL 2 (no fragment storage buffers) |
+| `DEPTH_CLIP_CONTROL` | Unclipped sun-shadow depth; a fragment-shader fallback without it | adapter-dependent | optional `depth-clip-control`; ran in Chromium | not applicable |
+| `DUAL_SOURCE_BLENDING` | The sky's per-channel transmittance; its mean without it | adapter-dependent | optional `dual-source-blending`; ran in Chromium on NVIDIA, absent on SwiftShader (fallback used) | not applicable |
+| `FLOAT32_FILTERABLE` | Required by `Scene::sky`; `prepare` panics without it | adapter-dependent | optional `float32-filterable`; ran in Chromium on both adapters | the sky port needs `OES_texture_float_linear` |
+| `TIMESTAMP_QUERY` | GPU timing only, at pass begin and end | adapter-dependent | optional `timestamp-query`; ran in Chromium on NVIDIA, present on SwiftShader | advisory timing through `EXT_disjoint_timer_query_webgl2` |
+| Compute and write-only storage textures | The sky's environment filter, particle simulation | available | core; ran in Chromium | none in WebGL 2 |
+| `draw_indirect` | Particle draws | available | core; ran in Chromium | none in WebGL 2 |
+| Indirect draws with a non-zero `first_instance` | Required by the opt-in `Culling::GpuIndirect`; it stays on the CPU path without it. Measured on the RTX 3060 Ti ([experiment](gpu-driven-experiment.md)) | `INDIRECT_FIRST_INSTANCE` | optional `indirect-first-instance`, present in Chromium on both adapters; the path has not run in a browser | none in WebGL 2 |
+| A fourth bind group and 4 fragment-stage storage buffers | Required by the opt-in `LightAssignment::Clustered`; it stays per-fragment without them. Measured on the RTX 3060 Ti ([experiment](forward-plus-experiment.md)) | adapter/limits-dependent | within the WebGPU defaults, 16 on NVIDIA and 10 on SwiftShader in Chromium; the path has not run in a browser | none in WebGL 2 (no fragment storage buffers) |
 | `multi_draw_*_indirect_count` | Not used by the experiment: with one mesh per run it could only remove empty draws. The RTX 3060 Ti reports it; it would need a shared vertex and index buffer to batch runs | `MULTI_DRAW_INDIRECT_COUNT`, Vulkan 1.2+ and DX12 | none: native-only in wgpu | none in WebGL 2 |
 
 Without `MULTI_DRAW_INDIRECT_COUNT`, wgpu may emulate multi-draw as a series of `draw_indirect`
@@ -555,7 +558,7 @@ leaves at the far plane.
 - GPU-driven visibility and indirect mesh draws as the default: an opt-in experiment
   ([results](gpu-driven-experiment.md), #71) reproduces the reference path but is not adopted (D10).
   Retained GPU instances and multi-draw batching are not implemented.
-- A browser build of the crate (see [Native and browser targets](#native-and-browser-targets)).
+- A supported browser build of the crate: only a measurement smoke exists (see [Native and browser targets](#native-and-browser-targets)).
 - glTF features outside the core metallic-roughness model: texture transforms, a second UV set,
   clearcoat, transmission.
 
