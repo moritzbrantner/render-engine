@@ -44,6 +44,8 @@ pub struct Headless {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     pub adapter: wgpu::AdapterInfo,
+    /// Everything the adapter offers, whether or not this device enabled it.
+    pub adapter_features: wgpu::Features,
     renderer: Renderer,
     timestamps: bool,
 }
@@ -89,12 +91,14 @@ impl Headless {
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("render-engine headless"),
             // Unclipped shadow-map depth, the sky's dual-source blend and filterable float
-            // LUTs (see `Renderer::new`) where the adapter has them, as Bevy enables them.
+            // LUTs (see `Renderer::new`) where the adapter has them, as Bevy enables them, and
+            // what the opt-in `Culling::GpuIndirect` path needs.
             required_features: adapter.features()
                 & (wgpu::Features::TIMESTAMP_QUERY
                     | wgpu::Features::DEPTH_CLIP_CONTROL
                     | wgpu::Features::DUAL_SOURCE_BLENDING
-                    | wgpu::Features::FLOAT32_FILTERABLE),
+                    | wgpu::Features::FLOAT32_FILTERABLE
+                    | wgpu::Features::INDIRECT_FIRST_INSTANCE),
             ..Default::default()
         }))
         .map_err(Error::Device)?;
@@ -103,6 +107,7 @@ impl Headless {
             device,
             queue,
             adapter: adapter.get_info(),
+            adapter_features: adapter.features(),
             renderer,
             timestamps,
         })

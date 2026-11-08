@@ -111,6 +111,11 @@ impl Frustum {
         f
     }
 
+    /// The half spaces `n·p + d > 0`, as the GPU path uploads them.
+    pub fn planes(&self) -> &[Vec4] {
+        &self.planes[..self.count]
+    }
+
     fn push(&mut self, plane: Vec4) {
         self.planes[self.count] = plane / plane.truncate().length();
         self.count += 1;

@@ -1,7 +1,8 @@
 //! Records a prepared frame's passes into the consumer's encoder.
 
 use super::{
-    Renderer,
+    Renderer, gpu_culling,
+    gpu_culling::GpuCulling,
     pipelines::{lit_pipeline_index, shadow_pipeline_index, tonemap_index},
     viewport::{Draw, Phase, SHADOW_VIEW_STRIDE, Targets, Viewport},
 };
@@ -67,6 +68,10 @@ impl Renderer {
             .frame_group
             .as_ref()
             .expect("Renderer::prepare before encode");
+        let indirect = viewport
+            .gpu_culling
+            .as_ref()
+            .map(GpuCulling::indirect_buffer);
         let draw = |pass: &mut wgpu::RenderPass<'_>,
                     pipelines: &[wgpu::RenderPipeline],
                     draws: Range<usize>,
@@ -94,7 +99,13 @@ impl Renderer {
                     pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
                     mesh_bound = Some(d.mesh);
                 }
-                pass.draw_indexed(0..mesh.index_count, 0, d.instances.clone());
+                match (d.gpu, indirect) {
+                    (Some(slot), Some(buffer)) => pass.draw_indexed_indirect(
+                        buffer,
+                        u64::from(slot) * gpu_culling::INDIRECT_STRIDE,
+                    ),
+                    _ => pass.draw_indexed(0..mesh.index_count, 0, d.instances.clone()),
+                }
             }
         };
         let stamps = Stamps {
@@ -103,6 +114,9 @@ impl Renderer {
         };
         if let Some(sky) = &viewport.sky {
             sky.encode_luts(encoder, &self.sky, &stamps);
+        }
+        if let Some(gpu) = &viewport.gpu_culling {
+            gpu.encode(encoder, &stamps);
         }
 
         for shadow in &viewport.shadow_passes {

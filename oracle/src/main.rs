@@ -30,6 +30,7 @@
 
 mod bevy_side;
 mod content;
+mod gpu_driven_bench;
 mod occlusion_bench;
 mod particles;
 mod scenarios;
@@ -72,6 +73,9 @@ struct Options {
     occlusion_child: Option<(String, String, String, u32)>,
     occlusion_rounds: u32,
     occlusion_sweep: bool,
+    /// Separate, non-gating GPU-driven culling experiment (#71).
+    gpu_driven_bench: bool,
+    gpu_rounds: u32,
 }
 
 fn options() -> Result<Options, String> {
@@ -90,6 +94,8 @@ fn options() -> Result<Options, String> {
         occlusion_child: None,
         occlusion_rounds: 2,
         occlusion_sweep: false,
+        gpu_driven_bench: false,
+        gpu_rounds: 2,
     };
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -121,6 +127,14 @@ fn options() -> Result<Options, String> {
             "--calibrate" => o.calibrate = true,
             "--no-three" => o.three = false,
             "--occlusion-bench" => o.occlusion_bench = true,
+            "--gpu-driven-bench" => o.gpu_driven_bench = true,
+            "--gpu-rounds" => {
+                o.gpu_rounds = args
+                    .next()
+                    .and_then(|s| s.parse().ok())
+                    .filter(|n| *n > 0 && *n <= 10)
+                    .ok_or("--gpu-rounds needs a number between 1 and 10")?;
+            }
             "--occlusion-sweep" => o.occlusion_sweep = true,
             "--occlusion-child" => {
                 let name = args.next().ok_or("--occlusion-child needs a scene")?;
@@ -819,6 +833,9 @@ fn main() -> ExitCode {
     }
     if o.occlusion_bench {
         return occlusion_bench::run(&o);
+    }
+    if o.gpu_driven_bench {
+        return gpu_driven_bench::run(&o);
     }
     if let Some(name) = &o.bevy_side {
         return match bevy_child(name, &o) {

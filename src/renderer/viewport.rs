@@ -3,6 +3,7 @@
 use super::{
     DEPTH_FORMAT, HDR_FORMAT, Renderer, SAMPLE_COUNT,
     gpu::{FrameUniform, InstanceData},
+    gpu_culling::GpuCulling,
 };
 use crate::{
     cull::Frustum,
@@ -67,6 +68,49 @@ pub struct Viewport {
     pub(super) particles: ParticleFrame,
     /// What the last `prepare` did (see [`PrepareWork`]).
     pub(super) work: PrepareWork,
+    /// The opt-in GPU compaction path's state; `None` is the reference CPU path.
+    pub(super) gpu_culling: Option<GpuCulling>,
+}
+
+/// Where a viewport's frustum culling runs. The reference path is [`Culling::Cpu`]; see
+/// `docs/gpu-driven-experiment.md`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Culling {
+    /// Per view on the CPU, in `prepare`: the reference path and the fallback.
+    #[default]
+    Cpu,
+    /// Opaque and alpha-masked unskinned instances are tested and compacted per view by a
+    /// compute pass and drawn with one indexed indirect draw per run. Blended and skinned
+    /// instances stay on the CPU path in the same frame. Experimental.
+    GpuIndirect,
+}
+
+/// [`Viewport::set_culling`]: the device lacks what [`Culling::GpuIndirect`] needs, and the
+/// viewport stays on [`Culling::Cpu`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GpuCullingUnsupported;
+
+impl std::fmt::Display for GpuCullingUnsupported {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "GPU culling needs INDIRECT_FIRST_INSTANCE and 5 storage buffers per shader stage"
+        )
+    }
+}
+
+impl std::error::Error for GpuCullingUnsupported {}
+
+/// What a viewport's per-frame state retains, from [`Viewport::memory`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ViewportMemory {
+    /// Per-frame GPU buffers both paths have: frame, instances, joints, visible indices, lights
+    /// and shadow views (at their high-water size).
+    pub gpu_buffer_bytes: u64,
+    /// GPU buffers only [`Culling::GpuIndirect`] adds: group and view tables, indirect arguments.
+    pub gpu_culling_bytes: u64,
+    /// CPU scratch vectors kept between frames (draw keys, instance data, draws, shadow passes).
+    pub cpu_scratch_bytes: u64,
 }
 
 /// The CPU-side work the last [`Renderer::prepare`] did for a viewport, counted where it is
@@ -84,20 +128,28 @@ pub struct PrepareWork {
     pub instances: u32,
     /// Views culled: the camera plus every sun cascade, spot map and point-light cube face.
     pub views: u32,
-    /// Instance bounds tested: one per instance and view, plus one sphere test per instance
-    /// and shadowed point or spot light.
+    /// Instance bounds tested on the CPU: one per instance and view, plus one sphere test per
+    /// instance and shadowed point or spot light. With [`Culling::GpuIndirect`], only the
+    /// blended and skinned instances that stay on the CPU.
     pub bounds_tests: u64,
-    /// Instances the camera keeps (`k`).
+    /// Instance and view pairs the [`Culling::GpuIndirect`] compute pass tests (the GPU's
+    /// share of the bounds tests); zero on the CPU path.
+    pub gpu_bounds_tests: u64,
+    /// Instances the camera keeps on the CPU (`k`). With [`Culling::GpuIndirect`] the compacted
+    /// runs are only known after the GPU runs ([`Renderer::read_gpu_culled`]), so this counts
+    /// only the instances culled on the CPU.
     pub visible: u32,
-    /// Instances kept, summed over the shadow views.
+    /// Instances kept on the CPU, summed over the shadow views.
     pub shadow_visible: u32,
-    /// Draw calls the main pass will submit.
+    /// Draw calls the main pass will submit. With [`Culling::GpuIndirect`], one indirect draw
+    /// per eligible run, emptied by culling or not.
     pub draws: u32,
     /// Draw calls the shadow passes will submit, summed.
     pub shadow_draws: u32,
     /// Bytes written to GPU buffers and textures: the frame uniform, instances, joint
-    /// palettes, lights, shadow views, visible indices and environment cube maps. The sky's
-    /// and the particles' fixed-size uniforms are not counted.
+    /// palettes, lights, shadow views, visible indices, the [`Culling::GpuIndirect`] tables
+    /// and environment cube maps. The sky's and the particles' fixed-size uniforms are not
+    /// counted.
     pub upload_bytes: u64,
     /// GPU buffers and textures created: grown per-frame buffers, resized shadow-map arrays,
     /// uploaded environment maps and the sky's targets. Zero once the frame's shape is steady.
@@ -156,13 +208,31 @@ impl Growable {
         queue: &wgpu::Queue,
         bytes: &[u8],
     ) -> bool {
-        let size = bytes.len() as u64;
+        self.write_at(device, queue, 0, bytes, bytes.len() as u64)
+    }
+
+    /// Writes `bytes` at `offset`, growing the buffer to hold at least `size` bytes first.
+    /// Returns whether the buffer was replaced.
+    pub(crate) fn write_at(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        offset: u64,
+        bytes: &[u8],
+        size: u64,
+    ) -> bool {
         let grown = size > self.buffer.size();
         if grown {
             self.buffer = Self::create(device, self.label, self.usage, size.next_power_of_two());
         }
-        queue.write_buffer(&self.buffer, 0, bytes);
+        if !bytes.is_empty() {
+            queue.write_buffer(&self.buffer, offset, bytes);
+        }
         grown
+    }
+
+    pub(crate) fn size(&self) -> u64 {
+        self.buffer.size()
     }
 }
 
@@ -258,6 +328,9 @@ pub(super) struct Draw {
     pub(super) mesh: MeshId,
     pub(super) material: MaterialId,
     pub(super) instances: Range<u32>,
+    /// With [`Culling::GpuIndirect`]: on a group, its row in the GPU tables (`None` when it
+    /// stays on the CPU); on a culled draw, its slot in the indirect buffer.
+    pub(super) gpu: Option<u32>,
 }
 
 impl Viewport {
@@ -296,6 +369,34 @@ impl Viewport {
             tonemapping: Tonemapping::default(),
             particles: ParticleFrame::new(device),
             work: PrepareWork::default(),
+            gpu_culling: None,
+        }
+    }
+
+    /// Selects where frustum culling runs from the next [`Renderer::prepare`] on. Fails, and
+    /// leaves the viewport on [`Culling::Cpu`], where the device lacks what
+    /// [`Culling::GpuIndirect`] needs ([`Renderer::supports_gpu_culling`]).
+    pub fn set_culling(
+        &mut self,
+        renderer: &Renderer,
+        culling: Culling,
+    ) -> Result<(), GpuCullingUnsupported> {
+        self.gpu_culling = None;
+        if culling == Culling::GpuIndirect {
+            if !renderer.supports_gpu_culling() {
+                return Err(GpuCullingUnsupported);
+            }
+            self.gpu_culling = Some(GpuCulling::new(&renderer.device));
+        }
+        Ok(())
+    }
+
+    /// Where this viewport's culling runs.
+    pub fn culling(&self) -> Culling {
+        if self.gpu_culling.is_some() {
+            Culling::GpuIndirect
+        } else {
+            Culling::Cpu
         }
     }
 
@@ -324,10 +425,48 @@ impl Viewport {
     /// Timestamp queries [`Renderer::encode`] writes for this viewport's last prepared frame: a
     /// begin and an end per pass.
     pub fn timestamp_queries(&self) -> u32 {
-        let sky = self.sky.as_ref().map_or(0, |s| s.compute_passes());
-        // The main pass is three with a sky; then tone mapping and the blit.
-        let main = if self.sky.is_some() { 3 } else { 1 };
-        2 * (sky + self.shadow_passes.len() as u32 + main + 2)
+        2 * self.pass_labels().len() as u32
+    }
+
+    /// One label per timed pass, in the order [`Renderer::encode`] writes their timestamps: the
+    /// sky's compute passes, the GPU culling pass, the shadow passes, the main pass (three parts
+    /// with a sky), tone mapping and the blit.
+    pub fn pass_labels(&self) -> Vec<&'static str> {
+        let sky_passes = self.sky.as_ref().map_or(0, |s| s.compute_passes()) as usize;
+        let mut labels = vec!["sky"; sky_passes];
+        if self.gpu_culling.is_some() {
+            labels.push("gpu culling");
+        }
+        labels.extend(self.shadow_passes.iter().map(|_| "shadow"));
+        if self.sky.is_some() {
+            labels.extend(["lit opaque", "render sky", "lit transparent"]);
+        } else {
+            labels.push("lit");
+        }
+        labels.extend(["tonemap", "blit"]);
+        labels
+    }
+
+    /// What this viewport's per-frame state retains at the moment (high-water buffer sizes
+    /// and scratch capacities), for profiling and the D10 memory row.
+    pub fn memory(&self) -> ViewportMemory {
+        ViewportMemory {
+            gpu_buffer_bytes: self.frame_buffer.size()
+                + self.instance_buffer.size()
+                + self.joint_buffer.size()
+                + self.visible_buffer.size()
+                + self.light_buffer.size()
+                + self.shadow_view_buffer.size(),
+            gpu_culling_bytes: self
+                .gpu_culling
+                .as_ref()
+                .map_or(0, GpuCulling::buffer_bytes),
+            cpu_scratch_bytes: (self.draw_keys.capacity() * std::mem::size_of::<DrawKey>()
+                + self.instance_data.capacity() * std::mem::size_of::<InstanceData>()
+                + self.draws.capacity() * std::mem::size_of::<Draw>()
+                + self.shadow_passes.capacity() * std::mem::size_of::<ShadowPass>())
+                as u64,
+        }
     }
 }
 

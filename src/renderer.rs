@@ -10,6 +10,7 @@
 
 mod encode;
 mod gpu;
+mod gpu_culling;
 mod lights;
 mod pipelines;
 mod prepare;
@@ -23,7 +24,7 @@ pub(crate) use encode::Stamps;
 pub(crate) use projection::perspective_infinite_reverse;
 pub use projection::{Cascade, look_at};
 pub(crate) use viewport::Growable;
-pub use viewport::{PrepareWork, Viewport};
+pub use viewport::{Culling, GpuCullingUnsupported, PrepareWork, Viewport, ViewportMemory};
 
 use crate::{particle_pass::ParticlePipelines, particle_sim::SimPipelines, sky::SkyPipelines};
 
