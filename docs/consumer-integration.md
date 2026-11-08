@@ -58,9 +58,10 @@ let scene = Scene {
 renderer.prepare(&mut viewport, &world, &scene, &instances);
 ```
 
-[Every frame](#every-frame) has the whole frame. Forward+ is not implemented (D10) and is meant
-to work from this same data if it lands. GPU-driven culling is an opt-in experiment
-([results](gpu-driven-experiment.md)); it works from this same data and is not the default.
+[Every frame](#every-frame) has the whole frame. Forward+ clustered lighting
+([results](forward-plus-experiment.md)) and GPU-driven culling
+([results](gpu-driven-experiment.md)) are opt-in experiments; both work from this same data and
+neither is the default.
 
 ## Setup
 
@@ -249,6 +250,15 @@ frame.present();
   `set_culling` returns `GpuCullingUnsupported` and the viewport stays on `Culling::Cpu`. See the
   [experiment](gpu-driven-experiment.md) before turning it on: it saves CPU work on instance-heavy
   scenes and costs it on draw-heavy ones.
+- **Clustered lighting (experimental, off by default).** `viewport.set_light_assignment(&renderer,
+  LightAssignment::Clustered(ClusterConfig::default()))` has each fragment loop over its
+  view-space cluster's lights instead of every point and spot light, with the same image. The
+  lists are built on the CPU in `prepare`, with no extra pass. It needs four bind groups and four
+  storage buffers per fragment stage; where they are missing it returns
+  `ClusteredLightingUnsupported` and the viewport stays on `LightAssignment::PerFragment`. A
+  cluster over `max_lights_per_cluster` falls back to every light, with the same output. See the
+  [experiment](forward-plus-experiment.md): it costs CPU in `prepare` and saves GPU time, more as
+  lights are added.
 - **Resize.** Call `viewport.resize(&renderer, width, height)` together with
   `surface.configure`.
 - **Units.** `Scene` uses Bevy's physical units: illuminance in lux, light power in lumens,
@@ -289,6 +299,7 @@ cascade, spot map and point-light cube face) and `L` shadowed point or spot ligh
 | `set_mesh`, `set_mesh_positions_normals`, `set_material` | That mesh's or material's bytes alone, independent of what else the world holds. `prepare` never re-uploads content. |
 | Mutation, removal, mesh bounds, camera cut | Nothing culled is kept between frames, so each shows in the next `prepare`. |
 | `prepare` with `Culling::GpuIndirect` (opt-in) | The CPU tests only blended and skinned instances; the rest cost `gpu_bounds_tests` (`N · V`) on the GPU, with no sphere tests on the CPU. `visible` and `shadow_visible` count CPU-culled instances only (`read_gpu_culled` has the rest). One indirect draw per eligible run and view, emptied by culling or not. Upload drops the visible indices and adds the group and view tables and the indirect arguments. |
+| `prepare` with `LightAssignment::Clustered` (opt-in) | The instance work above, plus one assignment pass over the lights each frame, whatever changed: `light_cluster_tests` box tests over the clusters each light's bounds reach, `light_cluster_entries` list entries, `cluster_overflows` clusters past the limit. Upload adds the cluster table (12 bytes per cluster) and the index list (4 bytes per entry plus the all-lights run). The counters are zero on the default path. |
 
 Culling has no spatial hierarchy: `O(N · V)` is the adopted class, and the Hi-Z experiment
 (`docs/occlusion-experiment.md`) did not pay off. A change that makes `prepare` incremental, or
@@ -378,13 +389,14 @@ client runs on the three.js port below, on WebGL 2.
 | Compute and write-only storage textures | The sky's environment filter, particle simulation | available | core | none in WebGL 2 |
 | `draw_indirect` | Particle draws | available | core | none in WebGL 2 |
 | Indirect draws with a non-zero `first_instance` | Required by the opt-in `Culling::GpuIndirect`; it stays on the CPU path without it. Measured on the RTX 3060 Ti ([experiment](gpu-driven-experiment.md)) | `INDIRECT_FIRST_INSTANCE` | optional `indirect-first-instance`, not run in a browser | none in WebGL 2 |
+| A fourth bind group and 4 fragment-stage storage buffers | Required by the opt-in `LightAssignment::Clustered`; it stays per-fragment without them. Measured on the RTX 3060 Ti ([experiment](forward-plus-experiment.md)) | adapter/limits-dependent | within the WebGPU defaults, not run in a browser | none in WebGL 2 (no fragment storage buffers) |
 | `multi_draw_*_indirect_count` | Not used by the experiment: with one mesh per run it could only remove empty draws. The RTX 3060 Ti reports it; it would need a shared vertex and index buffer to batch runs | `MULTI_DRAW_INDIRECT_COUNT`, Vulkan 1.2+ and DX12 | none: native-only in wgpu | none in WebGL 2 |
 
 Without `MULTI_DRAW_INDIRECT_COUNT`, wgpu may emulate multi-draw as a series of `draw_indirect`
 calls, so do not assume it batches submission on every backend. Any new path states the features
 and limits it needs and its fallback, and passes the [evidence](technical-decisions.md#evidence)
-on each target it claims. The three.js port has no compute or indirect draws, so Forward+ or
-GPU-driven work in the crate does not by itself reach today's web client.
+on each target it claims. The three.js port has no compute, indirect draws or fragment storage
+buffers, so Forward+ or GPU-driven work in the crate does not by itself reach today's web client.
 
 ## Web client (three.js)
 
@@ -536,9 +548,10 @@ leaves at the far plane.
 
 - Stars, clouds and moon phases: the sky is Bevy's clear atmosphere; the moon is a full disc.
 - Morph targets, and more than four joint influences per vertex (`JOINTS_1`).
-- Clustered lights (Forward+). Every point and spot light is evaluated for every fragment. The
-  preferred direction, not implemented; evaluated in
-  [#72](https://github.com/moritzbrantner/render-engine/issues/72) (D10).
+- Clustered lights (Forward+) as the default. By default every point and spot light is
+  evaluated for every fragment; an opt-in experiment ([results](forward-plus-experiment.md), #72)
+  reproduces that path and is the preferred direction, but needs consumer evidence (D10). The
+  three.js port keeps its own per-fragment loop.
 - GPU-driven visibility and indirect mesh draws as the default: an opt-in experiment
   ([results](gpu-driven-experiment.md), #71) reproduces the reference path but is not adopted (D10).
   Retained GPU instances and multi-draw batching are not implemented.

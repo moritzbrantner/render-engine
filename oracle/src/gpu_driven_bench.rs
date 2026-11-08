@@ -150,19 +150,19 @@ fn repeated(
     out
 }
 
-struct Round {
-    prepare_ms: f64,
-    encode_ms: f64,
-    submit_ms: f64,
-    gpu_ms: f64,
+pub(crate) struct Round {
+    pub(crate) prepare_ms: f64,
+    pub(crate) encode_ms: f64,
+    pub(crate) submit_ms: f64,
+    pub(crate) gpu_ms: f64,
     gpu_interval_ms: f64,
-    passes: BTreeMap<String, f64>,
-    work: PrepareWork,
+    pub(crate) passes: BTreeMap<String, f64>,
+    pub(crate) work: PrepareWork,
     kept_per_view: Vec<u32>,
-    memory: ViewportMemory,
+    pub(crate) memory: ViewportMemory,
 }
 
-fn median(mut v: Vec<f64>) -> f64 {
+pub(crate) fn median(mut v: Vec<f64>) -> f64 {
     assert!(!v.is_empty());
     v.sort_by(f64::total_cmp);
     v[v.len() / 2]
@@ -173,7 +173,7 @@ fn median_passes(samples: BTreeMap<String, Vec<f64>>) -> BTreeMap<String, f64> {
 }
 
 /// Reads and maps `buffer`, blocking.
-fn read(gpu: &Headless, buffer: &wgpu::Buffer) -> Vec<u8> {
+pub(crate) fn read(gpu: &Headless, buffer: &wgpu::Buffer) -> Vec<u8> {
     let slice = buffer.slice(..);
     let (tx, rx) = std::sync::mpsc::channel();
     slice.map_async(wgpu::MapMode::Read, move |r| {
@@ -188,22 +188,19 @@ fn read(gpu: &Headless, buffer: &wgpu::Buffer) -> Vec<u8> {
 
 /// One timed run of one scene, view and culling mode: per-frame CPU stages and GPU timestamps.
 #[allow(clippy::too_many_arguments)]
-fn timed_run(
+pub(crate) fn timed_run(
     gpu: &Headless,
     world: &World,
     instances: &[Instance],
     scene: &Scene,
-    view: View,
-    default: (Vec3, Vec3),
-    culling: Culling,
+    update: &dyn Fn(&mut Scene, usize),
+    configure: &dyn Fn(&mut Viewport) -> Result<(), String>,
     (width, height): (u32, u32),
     frames: usize,
 ) -> Result<Round, String> {
     let renderer = gpu.renderer();
     let mut viewport = Viewport::new(renderer, width, height);
-    viewport
-        .set_culling(renderer, culling)
-        .map_err(|e| e.to_string())?;
+    configure(&mut viewport)?;
     let target = gpu.device.create_texture(&wgpu::TextureDescriptor {
         label: Some("bench target"),
         size: wgpu::Extent3d {
@@ -223,7 +220,7 @@ fn timed_run(
 
     // Warm up: prepares and submits with no timestamps.
     let prepare = |viewport: &mut Viewport, scene: &mut Scene, frame: usize| {
-        view.apply(scene, default.0, default.1, frame);
+        update(scene, frame);
         renderer.prepare(viewport, world, scene, instances);
     };
     let warm_start = Instant::now();
@@ -661,14 +658,19 @@ pub fn run(options: &Options) -> ExitCode {
                     [Culling::GpuIndirect, Culling::Cpu]
                 };
                 for culling in order {
+                    let update = |s: &mut Scene, frame| view.apply(s, default.0, default.1, frame);
+                    let configure = |viewport: &mut Viewport| {
+                        viewport
+                            .set_culling(gpu.renderer(), culling)
+                            .map_err(|e| e.to_string())
+                    };
                     match timed_run(
                         &gpu,
                         &world,
                         &instances,
                         &scenario.scene,
-                        view,
-                        default,
-                        culling,
+                        &update,
+                        &configure,
                         (scenario.width, scenario.height),
                         run_frames,
                     ) {

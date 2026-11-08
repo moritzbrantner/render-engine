@@ -53,6 +53,111 @@ fn primitive(face: usize) -> wgpu::PrimitiveState {
     }
 }
 
+fn stream(
+    stride: usize,
+    attributes: &'static [wgpu::VertexAttribute],
+) -> Option<wgpu::VertexBufferLayout<'static>> {
+    Some(wgpu::VertexBufferLayout {
+        array_stride: stride as u64,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes,
+    })
+}
+
+/// Positions, normals and the surface attributes (see `world::streams`).
+fn unskinned_streams() -> [Option<wgpu::VertexBufferLayout<'static>>; 3] {
+    [
+        stream(12, &streams::POSITIONS[..]),
+        stream(12, &streams::NORMALS[..]),
+        stream(
+            std::mem::size_of::<crate::world::SurfaceVertex>(),
+            &streams::SURFACE[..],
+        ),
+    ]
+}
+
+/// The unskinned streams plus the joints and weights.
+fn skinned_streams() -> Vec<Option<wgpu::VertexBufferLayout<'static>>> {
+    let mut streams_list = unskinned_streams().to_vec();
+    streams_list.push(stream(
+        std::mem::size_of::<crate::world::SkinVertex>(),
+        &streams::SKIN[..],
+    ));
+    streams_list
+}
+
+/// Reverse Z everywhere: nearer is larger.
+fn depth(write: bool) -> wgpu::DepthStencilState {
+    wgpu::DepthStencilState {
+        format: DEPTH_FORMAT,
+        depth_write_enabled: Some(write),
+        depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
+        stencil: wgpu::StencilState::default(),
+        bias: wgpu::DepthBiasState::default(),
+    }
+}
+
+/// The main-pass pipelines over `layout` and `shader`, indexed by [`lit_pipeline_index`]: the
+/// reference path's (three bind groups) or `LightAssignment::Clustered`'s (a fourth for its
+/// cluster tables).
+pub(super) fn lit_pipelines(
+    device: &wgpu::Device,
+    layout: &wgpu::PipelineLayout,
+    shader: &wgpu::ShaderModule,
+) -> Vec<wgpu::RenderPipeline> {
+    let (unskinned, skinned_buffers) = (unskinned_streams(), skinned_streams());
+    let mut pipelines = Vec::new();
+    for (skinned, face) in [false, true]
+        .into_iter()
+        .flat_map(|s| (0..FACE_VARIANTS).map(move |f| (s, f)))
+    {
+        for phase in [Phase::Opaque, Phase::Mask, Phase::Blend] {
+            let blend = phase == Phase::Blend;
+            let buffers: &[Option<wgpu::VertexBufferLayout<'_>>] = if skinned {
+                &skinned_buffers
+            } else {
+                &unskinned
+            };
+            pipelines.push(
+                device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some("lit"),
+                    layout: Some(layout),
+                    vertex: wgpu::VertexState {
+                        module: shader,
+                        entry_point: Some(if skinned { "lit_skinned_vs" } else { "lit_vs" }),
+                        compilation_options: Default::default(),
+                        buffers,
+                    },
+                    primitive: primitive(face),
+                    // Blended fragments test depth but do not write it (Bevy).
+                    depth_stencil: Some(depth(!blend)),
+                    multisample: wgpu::MultisampleState {
+                        count: SAMPLE_COUNT,
+                        ..Default::default()
+                    },
+                    fragment: Some(wgpu::FragmentState {
+                        module: shader,
+                        entry_point: Some(if phase == Phase::Mask {
+                            "lit_masked_fs"
+                        } else {
+                            "lit_fs"
+                        }),
+                        compilation_options: Default::default(),
+                        targets: &[Some(wgpu::ColorTargetState {
+                            format: HDR_FORMAT,
+                            blend: blend.then_some(wgpu::BlendState::ALPHA_BLENDING),
+                            write_mask: wgpu::ColorWrites::ALL,
+                        })],
+                    }),
+                    multiview_mask: None,
+                    cache: None,
+                }),
+            );
+        }
+    }
+    pipelines
+}
+
 /// The tone-mapping shader's `METHOD` constant.
 pub(super) fn tonemap_index(t: Tonemapping) -> usize {
     match t {
@@ -251,40 +356,13 @@ impl Renderer {
                     count: None,
                 }],
             });
-        // Positions, normals and the surface attributes; skinned meshes add their joints and
-        // weights (see `world::streams`).
-        let stream = |stride: usize, attributes| wgpu::VertexBufferLayout {
-            array_stride: stride as u64,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes,
-        };
-        let unskinned_streams = [
-            Some(stream(12, &streams::POSITIONS[..])),
-            Some(stream(12, &streams::NORMALS[..])),
-            Some(stream(
-                std::mem::size_of::<crate::world::SurfaceVertex>(),
-                &streams::SURFACE[..],
-            )),
-        ];
-        let mut skinned_streams = unskinned_streams.to_vec();
-        skinned_streams.push(Some(stream(
-            std::mem::size_of::<crate::world::SkinVertex>(),
-            &streams::SKIN[..],
-        )));
+        let (unskinned_streams, skinned_streams) = (unskinned_streams(), skinned_streams());
         let vertex_streams = |skinned: bool| -> &[Option<wgpu::VertexBufferLayout<'_>>] {
             if skinned {
                 &skinned_streams
             } else {
                 &unskinned_streams
             }
-        };
-        // Reverse Z everywhere: nearer is larger.
-        let depth = |write: bool| wgpu::DepthStencilState {
-            format: DEPTH_FORMAT,
-            depth_write_enabled: Some(write),
-            depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
-            stencil: wgpu::StencilState::default(),
-            bias: wgpu::DepthBiasState::default(),
         };
 
         let shadow_pipeline_layout =
@@ -357,50 +435,7 @@ impl Renderer {
             ],
             immediate_size: 0,
         });
-        let mut lit_pipelines = Vec::new();
-        for (skinned, face) in [false, true]
-            .into_iter()
-            .flat_map(|s| (0..FACE_VARIANTS).map(move |f| (s, f)))
-        {
-            for phase in [Phase::Opaque, Phase::Mask, Phase::Blend] {
-                let blend = phase == Phase::Blend;
-                lit_pipelines.push(device.create_render_pipeline(
-                    &wgpu::RenderPipelineDescriptor {
-                        label: Some("lit"),
-                        layout: Some(&lit_pipeline_layout),
-                        vertex: wgpu::VertexState {
-                            module: &shader,
-                            entry_point: Some(if skinned { "lit_skinned_vs" } else { "lit_vs" }),
-                            compilation_options: Default::default(),
-                            buffers: vertex_streams(skinned),
-                        },
-                        primitive: primitive(face),
-                        // Blended fragments test depth but do not write it (Bevy).
-                        depth_stencil: Some(depth(!blend)),
-                        multisample: wgpu::MultisampleState {
-                            count: SAMPLE_COUNT,
-                            ..Default::default()
-                        },
-                        fragment: Some(wgpu::FragmentState {
-                            module: &shader,
-                            entry_point: Some(if phase == Phase::Mask {
-                                "lit_masked_fs"
-                            } else {
-                                "lit_fs"
-                            }),
-                            compilation_options: Default::default(),
-                            targets: &[Some(wgpu::ColorTargetState {
-                                format: HDR_FORMAT,
-                                blend: blend.then_some(wgpu::BlendState::ALPHA_BLENDING),
-                                write_mask: wgpu::ColorWrites::ALL,
-                            })],
-                        }),
-                        multiview_mask: None,
-                        cache: None,
-                    },
-                ));
-            }
-        }
+        let lit_pipelines = lit_pipelines(device, &lit_pipeline_layout, &shader);
 
         let tonemap_shader =
             device.create_shader_module(wgpu::include_wgsl!("../shaders/tonemap.wgsl"));

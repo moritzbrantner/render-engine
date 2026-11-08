@@ -14,7 +14,7 @@ use glam::{Mat3, Mat4, Vec3, Vec4};
 /// `GpuLight::flags`: the light samples its shadow map.
 const LIGHT_SHADOWS: u32 = 1;
 /// `GpuLight::flags`: the spot light points downwards (Bevy `SPOT_LIGHT_Y_NEGATIVE`).
-const LIGHT_SPOT_Y_NEGATIVE: u32 = 2;
+pub(super) const LIGHT_SPOT_Y_NEGATIVE: u32 = 2;
 /// Bevy's point-light cube faces (`CUBE_MAP_FACES`): look target and up per cube layer.
 const CUBE_FACES: [(Vec3, Vec3); 6] = [
     (Vec3::X, Vec3::Y),

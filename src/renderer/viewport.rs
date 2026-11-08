@@ -2,6 +2,7 @@
 
 use super::{
     DEPTH_FORMAT, HDR_FORMAT, Renderer, SAMPLE_COUNT,
+    clustered::{ClusteredLightingUnsupported, ClusteredLights, LightAssignment},
     gpu::{FrameUniform, InstanceData},
     gpu_culling::GpuCulling,
 };
@@ -70,6 +71,12 @@ pub struct Viewport {
     pub(super) work: PrepareWork,
     /// The opt-in GPU compaction path's state; `None` is the reference CPU path.
     pub(super) gpu_culling: Option<GpuCulling>,
+    /// The opt-in clustered light assignment's state; `None` is the per-fragment loop.
+    pub(super) clustered: Option<ClusteredLights>,
+    /// A pipeline-statistics query set the main pass writes (`FRAGMENT_SHADER_INVOCATIONS`,
+    /// one query per lit pass part: the opaque part, then the transparent one with a sky). For
+    /// profiling only.
+    pub(super) fragment_statistics: Option<wgpu::QuerySet>,
 }
 
 /// Where a viewport's frustum culling runs. The reference path is [`Culling::Cpu`]; see
@@ -109,7 +116,11 @@ pub struct ViewportMemory {
     pub gpu_buffer_bytes: u64,
     /// GPU buffers only [`Culling::GpuIndirect`] adds: group and view tables, indirect arguments.
     pub gpu_culling_bytes: u64,
-    /// CPU scratch vectors kept between frames (draw keys, instance data, draws, shadow passes).
+    /// GPU buffers only [`LightAssignment::Clustered`] adds: its uniform, cluster table and
+    /// index list.
+    pub clustered_lighting_bytes: u64,
+    /// CPU scratch vectors kept between frames (draw keys, instance data, draws, shadow passes,
+    /// and the cluster assignment's).
     pub cpu_scratch_bytes: u64,
 }
 
@@ -154,6 +165,13 @@ pub struct PrepareWork {
     /// GPU buffers and textures created: grown per-frame buffers, resized shadow-map arrays,
     /// uploaded environment maps and the sky's targets. Zero once the frame's shape is steady.
     pub allocations: u32,
+    /// Light against cluster-box tests of [`LightAssignment::Clustered`]; zero without it.
+    pub light_cluster_tests: u64,
+    /// Lights placed in clusters, summed over the clusters (the list's length before overflow).
+    pub light_cluster_entries: u64,
+    /// Clusters whose list exceeded [`ClusterConfig::max_lights_per_cluster`] and fell back to
+    /// every light.
+    pub cluster_overflows: u32,
 }
 
 pub(super) struct Targets {
@@ -370,7 +388,41 @@ impl Viewport {
             particles: ParticleFrame::new(device),
             work: PrepareWork::default(),
             gpu_culling: None,
+            clustered: None,
+            fragment_statistics: None,
         }
+    }
+
+    /// Selects how fragments find their point and spot lights from the next
+    /// [`Renderer::prepare`] on. Fails, and leaves the viewport on
+    /// [`LightAssignment::PerFragment`], where the device lacks what the clustered path needs
+    /// ([`Renderer::supports_clustered_lighting`]).
+    pub fn set_light_assignment(
+        &mut self,
+        renderer: &Renderer,
+        assignment: LightAssignment,
+    ) -> Result<(), ClusteredLightingUnsupported> {
+        self.clustered = None;
+        if let LightAssignment::Clustered(config) = assignment {
+            self.clustered = Some(ClusteredLights::new(renderer, config)?);
+        }
+        Ok(())
+    }
+
+    /// How this viewport's fragments find their lights.
+    pub fn light_assignment(&self) -> LightAssignment {
+        self.clustered
+            .as_ref()
+            .map_or(LightAssignment::PerFragment, |c| {
+                LightAssignment::Clustered(c.config)
+            })
+    }
+
+    /// Has the main pass count fragment shader invocations into `query_set` (a
+    /// [`wgpu::QueryType::PipelineStatistics`] set of two): one count per lit pass part. Needs
+    /// `PIPELINE_STATISTICS_QUERY`. `None` stops. For profiling.
+    pub fn set_fragment_statistics(&mut self, query_set: Option<wgpu::QuerySet>) {
+        self.fragment_statistics = query_set;
     }
 
     /// Selects where frustum culling runs from the next [`Renderer::prepare`] on. Fails, and
@@ -461,11 +513,16 @@ impl Viewport {
                 .gpu_culling
                 .as_ref()
                 .map_or(0, GpuCulling::buffer_bytes),
+            clustered_lighting_bytes: self.clustered.as_ref().map_or(0, ClusteredLights::memory),
             cpu_scratch_bytes: (self.draw_keys.capacity() * std::mem::size_of::<DrawKey>()
                 + self.instance_data.capacity() * std::mem::size_of::<InstanceData>()
                 + self.draws.capacity() * std::mem::size_of::<Draw>()
                 + self.shadow_passes.capacity() * std::mem::size_of::<ShadowPass>())
-                as u64,
+                as u64
+                + self
+                    .clustered
+                    .as_ref()
+                    .map_or(0, ClusteredLights::cpu_memory),
         }
     }
 }

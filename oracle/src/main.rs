@@ -30,6 +30,7 @@
 
 mod bevy_side;
 mod content;
+mod forward_plus_bench;
 mod gpu_driven_bench;
 mod occlusion_bench;
 mod particles;
@@ -75,6 +76,7 @@ struct Options {
     occlusion_sweep: bool,
     /// Separate, non-gating GPU-driven culling experiment (#71).
     gpu_driven_bench: bool,
+    forward_plus_bench: bool,
     gpu_rounds: u32,
 }
 
@@ -95,6 +97,7 @@ fn options() -> Result<Options, String> {
         occlusion_rounds: 2,
         occlusion_sweep: false,
         gpu_driven_bench: false,
+        forward_plus_bench: false,
         gpu_rounds: 2,
     };
     let mut args = std::env::args().skip(1);
@@ -128,6 +131,7 @@ fn options() -> Result<Options, String> {
             "--no-three" => o.three = false,
             "--occlusion-bench" => o.occlusion_bench = true,
             "--gpu-driven-bench" => o.gpu_driven_bench = true,
+            "--forward-plus-bench" => o.forward_plus_bench = true,
             "--gpu-rounds" => {
                 o.gpu_rounds = args
                     .next()
@@ -197,6 +201,7 @@ fn bevy_child(name: &str, o: &Options) -> Result<(), String> {
     }
     let scenario = scenarios::all()
         .into_iter()
+        .chain(forward_plus_bench::bevy_scenes())
         .find(|s| s.name == name)
         .ok_or_else(|| format!("unknown scenario {name}"))?;
     let run = bevy_side::run(scenario, o.frames);
@@ -836,6 +841,9 @@ fn main() -> ExitCode {
     }
     if o.gpu_driven_bench {
         return gpu_driven_bench::run(&o);
+    }
+    if o.forward_plus_bench {
+        return forward_plus_bench::run(&o);
     }
     if let Some(name) = &o.bevy_side {
         return match bevy_child(name, &o) {

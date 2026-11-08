@@ -98,7 +98,9 @@ impl Headless {
                     | wgpu::Features::DEPTH_CLIP_CONTROL
                     | wgpu::Features::DUAL_SOURCE_BLENDING
                     | wgpu::Features::FLOAT32_FILTERABLE
-                    | wgpu::Features::INDIRECT_FIRST_INSTANCE),
+                    | wgpu::Features::INDIRECT_FIRST_INSTANCE
+                    | wgpu::Features::PIPELINE_STATISTICS_QUERY
+                    | wgpu::Features::SHADER_EARLY_DEPTH_TEST),
             ..Default::default()
         }))
         .map_err(Error::Device)?;

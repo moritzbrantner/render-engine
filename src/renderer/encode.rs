@@ -167,6 +167,20 @@ impl Renderer {
         };
         let clear_color = viewport.clear_color;
         let lit_index = |d: &Draw| lit_pipeline_index(d.skinned, d.face, d.phase);
+        let (lit_pipelines, cluster_group) = match &viewport.clustered {
+            Some(c) => (
+                c.pipelines.as_slice(),
+                Some(c.group.as_ref().expect("prepared")),
+            ),
+            None => (self.lit_pipelines.as_slice(), None),
+        };
+        let bind_lighting = |pass: &mut wgpu::RenderPass<'_>| {
+            pass.set_bind_group(1, viewport.lighting_group.as_ref(), &[]);
+            if let Some(group) = cluster_group {
+                pass.set_bind_group(3, group, &[]);
+            }
+        };
+        let stats = viewport.fragment_statistics.as_ref();
         match &viewport.sky {
             None => {
                 let mut pass = begin_main_pass(
@@ -176,15 +190,21 @@ impl Renderer {
                     part("lit", true, true, true),
                     stamps.render(),
                 );
-                pass.set_bind_group(1, viewport.lighting_group.as_ref(), &[]);
+                bind_lighting(&mut pass);
+                if let Some(q) = stats {
+                    pass.begin_pipeline_statistics_query(q, 0);
+                }
                 draw(
                     &mut pass,
-                    &self.lit_pipelines,
+                    lit_pipelines,
                     viewport.main_draws.clone(),
                     Phase::Opaque..Phase::End,
                     &lit_index,
                 );
                 viewport.particles.draw(&mut pass, &self.particles, world);
+                if stats.is_some() {
+                    pass.end_pipeline_statistics_query();
+                }
             }
             Some(sky) => {
                 let mut pass = begin_main_pass(
@@ -194,14 +214,20 @@ impl Renderer {
                     part("lit opaque", true, true, false),
                     stamps.render(),
                 );
-                pass.set_bind_group(1, viewport.lighting_group.as_ref(), &[]);
+                bind_lighting(&mut pass);
+                if let Some(q) = stats {
+                    pass.begin_pipeline_statistics_query(q, 0);
+                }
                 draw(
                     &mut pass,
-                    &self.lit_pipelines,
+                    lit_pipelines,
                     viewport.main_draws.clone(),
                     Phase::Opaque..Phase::Blend,
                     &lit_index,
                 );
+                if stats.is_some() {
+                    pass.end_pipeline_statistics_query();
+                }
                 drop(pass);
                 let mut pass = begin_main_pass(
                     encoder,
@@ -219,15 +245,21 @@ impl Renderer {
                     part("lit transparent", false, true, true),
                     stamps.render(),
                 );
-                pass.set_bind_group(1, viewport.lighting_group.as_ref(), &[]);
+                bind_lighting(&mut pass);
+                if let Some(q) = stats {
+                    pass.begin_pipeline_statistics_query(q, 1);
+                }
                 draw(
                     &mut pass,
-                    &self.lit_pipelines,
+                    lit_pipelines,
                     viewport.main_draws.clone(),
                     Phase::Blend..Phase::End,
                     &lit_index,
                 );
                 viewport.particles.draw(&mut pass, &self.particles, world);
+                if stats.is_some() {
+                    pass.end_pipeline_statistics_query();
+                }
             }
         }
 
