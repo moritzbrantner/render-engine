@@ -959,7 +959,7 @@ fn sun_shadows() -> Scenario {
 /// materials, like a game's props), lit by a sun with Bevy's default four cascades. The camera
 /// stands near one edge and sees a wedge of it, so most instances lie outside the camera
 /// frustum and many outside every cascade: its GPU time measures frustum culling per view.
-fn many_instances() -> Scenario {
+pub fn many_instances() -> Scenario {
     let base = sun_cascades();
     let materials = [
         rgb(0.62, 0.58, 0.52),
@@ -1018,6 +1018,64 @@ fn many_instances() -> Scenario {
         },
         ..base
     }
+}
+
+/// Experiment #59, deliberately excluded from `all()` so that adding an experimental
+/// occlusion workload does not change the established parity/performance gates.
+pub fn occluded_instances() -> Scenario {
+    occluded_instances_density(1)
+}
+
+/// Every nth prop, with all occluders retained. The low/medium/full cases
+/// locate the minimum density where paying for two-phase Hi-Z becomes useful.
+pub fn occluded_instances_density(stride: usize) -> Scenario {
+    assert!([1, 2, 4].contains(&stride));
+    let mut scenario = many_instances();
+    scenario.name = match stride {
+        1 => "occluded_instances",
+        2 => "occluded_instances_50",
+        _ => "occluded_instances_25",
+    };
+    scenario.objects = scenario
+        .objects
+        .into_iter()
+        .enumerate()
+        .filter_map(|(i, obj)| (i == 0 || (i - 1) % stride == 0).then_some(obj))
+        .collect();
+    scenario.capability = "Hi-Z experiment: dense props behind opaque buildings";
+    let wall = Material {
+        base_color: rgb(0.43, 0.40, 0.36),
+        perceptual_roughness: 0.9,
+        ..Material::default()
+    };
+    // Three offset building rows: broad occluders, deliberate openings, and
+    // foreground props that remain partly visible around the silhouettes.
+    for (z, gaps) in [
+        (-34.0, [(-150.0, -10.0), (14.0, 150.0)]),
+        (-91.0, [(-150.0, -35.0), (-10.0, 150.0)]),
+        (-153.0, [(-150.0, 15.0), (35.0, 150.0)]),
+    ] {
+        for (left, right) in gaps {
+            scenario.objects.push(MeshInstance::new(
+                Shape::Cuboid(Vec3::new(right - left, 20.0, 5.0)),
+                Vec3::new((left + right) * 0.5, 10.0, z),
+                wall,
+            ));
+        }
+    }
+    // A small near-plane crossing and a protruding piece of façade are useful
+    // regression witnesses during the camera-cut and moving-camera captures.
+    scenario.objects.push(MeshInstance::new(
+        Shape::Cuboid(Vec3::new(0.7, 0.8, 1.5)),
+        Vec3::new(0.45, 3.5, 13.6),
+        wall,
+    ));
+    scenario.objects.push(MeshInstance::new(
+        Shape::Cuboid(Vec3::new(6.0, 3.0, 7.0)),
+        Vec3::new(13.0, 19.8, -34.0),
+        wall,
+    ));
+    scenario
 }
 
 /// Bevy's default cascades (4 cascades, 10 m first far bound, 150 m, 20% overlap) and Gaussian
@@ -1109,5 +1167,21 @@ fn sun_cascades() -> Scenario {
             moon: None,
             sky: None,
         },
+    }
+}
+
+#[cfg(test)]
+mod occlusion_tests {
+    #[test]
+    fn experimental_occluders_do_not_change_the_open_field_control() {
+        let open = super::many_instances();
+        let hidden = super::occluded_instances();
+        assert_eq!(open.objects.len(), 22_401);
+        assert_eq!(hidden.objects.len(), open.objects.len() + 8);
+        assert_eq!(open.scene.camera.eye, hidden.scene.camera.eye);
+        assert_eq!(open.scene.camera.target, hidden.scene.camera.target);
+        assert_eq!(hidden.name, "occluded_instances");
+        assert_eq!(super::occluded_instances_density(2).objects.len(), 11_209);
+        assert_eq!(super::occluded_instances_density(4).objects.len(), 5_609);
     }
 }

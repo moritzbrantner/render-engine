@@ -9,12 +9,15 @@
 //! being its fastest round's median frame.
 //!
 //! CI runs it on a software adapter (`WGPU_FORCE_FALLBACK_ADAPTER=1`, lavapipe): the image gate is
-//! enforced there, GPU times are printed as advisory. Locally on a GPU both gates apply.
+//! enforced there with `--no-timing` (software GPU times gate nothing). Locally on a GPU both
+//! gates apply.
 //!
 //! ```text
 //! oracle                         every scenario, both gates
 //! oracle --list                  scenario names
 //! oracle --only sun_shadows      run only these scenarios
+//! oracle --shard 2/4             run the second of four contiguous slices of the scenario list
+//!                                (CI runs the slices in parallel and joins their report.json)
 //! oracle --no-timing             image gate only
 //! oracle --out DIR               write <scenario>.{bevy,engine,flip}.png and report.json (default target/oracle)
 //! oracle --no-three              skip the three.js side (D8: headless Chromium, needs node + bun install)
@@ -27,6 +30,7 @@
 
 mod bevy_side;
 mod content;
+mod occlusion_bench;
 mod particles;
 mod scenarios;
 mod three_side;
@@ -51,6 +55,8 @@ const RETRIES: u32 = 2;
 
 struct Options {
     only: Vec<String>,
+    /// Slice `k` (1-based) of `n` of every scenario, lighting then particles, in list order.
+    shard: Option<(usize, usize)>,
     timing: bool,
     list: bool,
     out: PathBuf,
@@ -60,11 +66,18 @@ struct Options {
     variant: bevy_side::ParticleVariant,
     /// Also render each lighting scenario through the three.js port (D8).
     three: bool,
+    /// Separate, non-gating Bevy Hi-Z experiment (#59).
+    occlusion_bench: bool,
+    /// Internal child process: scene, mode, view, round.
+    occlusion_child: Option<(String, String, String, u32)>,
+    occlusion_rounds: u32,
+    occlusion_sweep: bool,
 }
 
 fn options() -> Result<Options, String> {
     let mut o = Options {
         only: Vec::new(),
+        shard: None,
         timing: true,
         list: false,
         out: PathBuf::from("target/oracle"),
@@ -73,6 +86,10 @@ fn options() -> Result<Options, String> {
         calibrate: false,
         variant: bevy_side::ParticleVariant::default(),
         three: true,
+        occlusion_bench: false,
+        occlusion_child: None,
+        occlusion_rounds: 2,
+        occlusion_sweep: false,
     };
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -80,6 +97,17 @@ fn options() -> Result<Options, String> {
             "--only" => o
                 .only
                 .push(args.next().ok_or("--only needs a scenario name")?),
+            "--shard" => {
+                o.shard = args
+                    .next()
+                    .and_then(|s| {
+                        let (k, n) = s.split_once('/')?;
+                        Some((k.parse().ok()?, n.parse().ok()?))
+                    })
+                    .filter(|&(k, n)| 1 <= k && k <= n)
+                    .map(Some)
+                    .ok_or("--shard needs K/N with 1 ≤ K ≤ N")?
+            }
             "--no-timing" => o.timing = false,
             "--list" => o.list = true,
             "--out" => o.out = args.next().ok_or("--out needs a directory")?.into(),
@@ -92,6 +120,25 @@ fn options() -> Result<Options, String> {
             }
             "--calibrate" => o.calibrate = true,
             "--no-three" => o.three = false,
+            "--occlusion-bench" => o.occlusion_bench = true,
+            "--occlusion-sweep" => o.occlusion_sweep = true,
+            "--occlusion-child" => {
+                let name = args.next().ok_or("--occlusion-child needs a scene")?;
+                let mode = args.next().ok_or("--occlusion-child needs a mode")?;
+                let view = args.next().ok_or("--occlusion-child needs a view")?;
+                let round = args
+                    .next()
+                    .and_then(|s| s.parse().ok())
+                    .ok_or("--occlusion-child needs a round number")?;
+                o.occlusion_child = Some((name, mode, view, round));
+            }
+            "--occlusion-rounds" => {
+                o.occlusion_rounds = args
+                    .next()
+                    .and_then(|s| s.parse().ok())
+                    .filter(|n| *n > 0 && *n <= 10)
+                    .ok_or("--occlusion-rounds needs a number between 1 and 10")?;
+            }
             "--seed" => {
                 o.variant.seed = Some(
                     args.next()
@@ -754,13 +801,25 @@ fn flip(w: u32, h: u32, reference: &[u8], test: &[u8]) -> Flip {
 }
 
 fn main() -> ExitCode {
-    let o = match options() {
+    let mut o = match options() {
         Ok(o) => o,
         Err(e) => {
             eprintln!("{e}");
             return ExitCode::FAILURE;
         }
     };
+    if let Some((name, mode, view, round)) = &o.occlusion_child {
+        return match occlusion_bench::child(name, mode, view, *round, &o) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("occlusion child: {e}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+    if o.occlusion_bench {
+        return occlusion_bench::run(&o);
+    }
     if let Some(name) = &o.bevy_side {
         return match bevy_child(name, &o) {
             Ok(()) => ExitCode::SUCCESS,
@@ -772,11 +831,35 @@ fn main() -> ExitCode {
     }
     let scenarios = scenarios::all();
     let particle_names: Vec<&str> = particles::all().iter().map(|s| s.name).collect();
+    if let Some((k, n)) = o.shard {
+        if !o.only.is_empty() {
+            eprintln!("--shard and --only exclude each other");
+            return ExitCode::FAILURE;
+        }
+        // Contiguous slices, so the shards' reports joined in shard order keep the list order.
+        let names: Vec<&str> = scenarios
+            .iter()
+            .map(|s| s.name)
+            .chain(particle_names.iter().copied())
+            .collect();
+        let size = names.len().div_ceil(n);
+        o.only = names
+            .iter()
+            .skip((k - 1) * size)
+            .take(size)
+            .map(|s| s.to_string())
+            .collect();
+        if o.only.is_empty() {
+            println!("shard {k}/{n}: no scenarios");
+            return ExitCode::SUCCESS;
+        }
+    }
+    let listed = |name: &str| o.only.is_empty() || o.only.iter().any(|n| n == name);
     if o.list {
-        for s in &scenarios {
+        for s in scenarios.iter().filter(|s| listed(s.name)) {
             println!("{:<24} {}", s.name, s.capability);
         }
-        for s in particles::all() {
+        for s in particles::all().into_iter().filter(|s| listed(s.name)) {
             println!("{:<24} {}", s.name, s.capability);
         }
         return ExitCode::SUCCESS;

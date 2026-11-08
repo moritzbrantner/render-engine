@@ -170,7 +170,8 @@ upgrade that changes a default shows up as a deliberate scenario change:
   filters the current frame's sky, which agrees once Bevy has warmed up and does not lag in a
   running day cycle. Bevy's raymarched mode, volumetric fog and stars are out of scope;
 - frustum culling (#28): Bevy's CPU culling (`check_visibility` and the light views'), with
-  GPU occlusion culling off as Bevy has it by default. Each mesh's local `Aabb` is computed
+  GPU occlusion culling off as Bevy has it by default (#59 measured Bevy's two-phase Hi-Z on
+  an RTX 3060 Ti: it never beat the no-prepass path, see `docs/occlusion-experiment.md`). Each mesh's local `Aabb` is computed
   once when the `World` uploads it; per frame, every instance's box under its model matrix is
   tested against each view's half spaces (`ViewFrustum::intersects_obb`): the camera without
   its far plane, each sun cascade without its near plane (casters between the sun and the
