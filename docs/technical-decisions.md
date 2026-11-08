@@ -1,7 +1,7 @@
 # Technical decisions
 
-Current direction, owner-approved 2026-10-30. Source code and the oracle prove what is
-implemented; GitHub issues track remaining work.
+Current direction, owner-approved 2026-10-30 and extended 2026-11-08 (D10). Source code and the
+oracle prove what is implemented; GitHub issues track remaining work.
 
 ## D1 — Bevy is the oracle and the performance baseline
 
@@ -31,6 +31,8 @@ Consumers, in priority order:
    can render into the client's device and passes. First feature consumer: mmorpg#529 (Greyhaven
    sun/sky, shadows, ambient/IBL).
 2. **mmorpg web client** (three.js 0.186), through a three.js port (see D8).
+
+This order says whose needs shape the API. It is not a migration plan: adoption stays opt-in (D10).
 
 ## D3 — The gate
 
@@ -132,7 +134,8 @@ upgrade that changes a default shows up as a deliberate scenario change:
   feature so `point_spot_soft` can switch on soft shadows. Bevy assigns lights to clusters;
   render-engine loops over the whole list in Bevy's order (point lights, then spot lights, each
   with the shadow casters first, then the sun). Outside its range a light contributes exactly
-  zero in both, so the sums agree; clustering waits until the GPU-time gate asks for it. The
+  zero in both, so the sums agree. Clustering is the preferred direction but is not implemented;
+  [#72](https://github.com/moritzbrantner/render-engine/issues/72) evaluates it (D10). The
   temporal shadow filter (it needs TAA) and light textures are out of scope;
 - consumer meshes and textured materials: `textured_props` reads CC0 glTF props
   (`assets/props/`) once in the oracle (`content.rs`, following Bevy's glTF loader: base
@@ -200,21 +203,36 @@ Later scenarios lift these one at a time (temporal filtering).
 ## D6 — Order: lighting first, then particles
 
 Lighting scenarios come first because mmorpg#529 is waiting on them: cascaded shadows,
-point/spot lights, ambient/IBL, time-of-day sky, fog. Then the mmorpg native integration and the
-web path. The particle track (bevy_hanabi oracle, emitters, GPU simulation, lit/soft particles)
+point/spot lights, ambient/IBL, time-of-day sky, fog. Then the mmorpg native integration (opt-in,
+D10) and the web path. The particle track (bevy_hanabi oracle, emitters, GPU simulation, lit/soft particles)
 starts after that. Its oracle side and parity rules are in D9.
 
 ## D7 — Ownership boundary
 
-render-engine owns render passes, lights, shadows, sky/fog/ambient, tone mapping and (later)
-particle simulation and rendering. Games own scene content, ECS, asset loading, the game loop,
-gameplay and the day clock that drives the sun. The consumer owns the wgpu device, queue and
-frame. It uploads meshes, textures and materials once into a `World` (stable handles,
-incremental `set_*` updates), describes each frame as a `Scene` (camera and lights) plus a list
-of instances (mesh, material, transform), and has `Renderer::encode` record into its encoder and
-colour target. Its UI draws on top afterwards. The engine keeps its MSAA, HDR, depth and
-shadow targets in a `Viewport`. The headless path uses the same calls. See
-[consumer integration](consumer-integration.md).
+render-engine is rendering-only (owner decision 2026-11-08, #70). This table is the authority
+boundary:
+
+| Owner | Owns |
+| --- | --- |
+| render-engine | GPU resources, pipelines, materials, lighting (light evaluation, shadows, sky/fog/ambient), visibility (culling per view), drawing, tone mapping, particle simulation and rendering |
+| Game | Entities and ECS, scene composition (what exists and what is listed each frame), camera intent, world state, gameplay, the game loop, the day clock that drives the sun, runtime asset loading, UI, the wgpu device, queue and frame |
+| [physics-engine](https://github.com/moritzbrantner/physics-engine) | Physics |
+| [asset-tooling](https://github.com/moritzbrantner/asset-tooling) | Asset source and processing |
+
+Scene data crosses this boundary from the game to the engine. The consumer uploads meshes, textures and
+materials once into a `World` (stable handles, incremental `set_*` updates), describes each frame
+as a `Scene` (camera and light values) plus a list of instances (mesh, material, transform), and
+has `Renderer::encode` record into its encoder and colour target. Its UI draws on top afterwards.
+The engine keeps its MSAA, HDR, depth and shadow targets in a `Viewport`. The headless path uses
+the same calls. See [consumer integration](consumer-integration.md), which has a small example of
+this data.
+
+Despite their names, `World` is a store of GPU resources and `Scene` a per-frame render
+description; neither is a game scene. Renderer-internal instance or visibility caches are
+allowed, but they are derived from what the game passed and are never the source of truth for
+game state. The engine reads no files and adds no asset or scene framework of its own. Its
+format helpers (`Cubemap::from_ktx2` on bytes the consumer passes, `MeshData::generate_tangents`)
+are conveniences for the upload call, not an asset pipeline.
 
 ## D8 — Web path: a three.js port gated by the same oracle
 
@@ -222,8 +240,10 @@ Owner decision 2026-10-31 (#10, option B). The web client gets parity through a 
 port** of the lighting, using three.js built-ins where they pass the gate and custom TSL/shader
 chunks where they don't. Each web scenario is checked against the **same Bevy oracle
 scenarios** through a headless Chromium side with the same FLIP thresholds (D3); GPU time is
-advisory there. Option A (render-engine compiled to WASM/WebGPU) stays available later for
-particles only, if three.js GPU particles cannot meet the gate. Scope of the first step: #11.
+advisory there. Option A (render-engine compiled to WASM/WebGPU) was held back at the time for
+particles only, if three.js GPU particles could not meet the gate. D10 widens that: the browser
+is now a target of the crate itself, but no WASM build exists, and the three.js port stays the
+web client's path unless a WebGPU build passes D10's adoption gate. Scope of the first step: #11.
 
 As built (#11):
 
@@ -454,6 +474,68 @@ Each capture is judged by one of two tiers:
   encoder (`bevy_side::HanabiTimer`, found by system name, which needs Bevy's `debug`
   feature); Bevy submits the encoders in system order. Rounds alternate as for lighting, each
   side keeping its fastest, and the local gate applies as for lighting.
+
+## D10 — Direction: a Rust-first wgpu/WebGPU renderer, adopted on evidence
+
+Owner decision 2026-11-08 (#70). render-engine develops as a **Rust-first, wgpu/WebGPU rendering
+library for native and browser targets**. Near term it complements mature renderers; long term it
+may become an independent backend for several games, if consumer evidence supports adoption. It
+stays rendering-only (D7), and D1–D9 stand as updated here: Bevy remains the oracle.
+
+- **Lighting architecture.** Forward+ (clustered lighting) is the initial preference. It must not
+  make deferred or hybrid alternatives impossible, so the consumer API keeps describing surfaces
+  and lights, not a shading technique.
+- **GPU-driven rendering.** Selective: adopted where the measured benefit exceeds its overhead,
+  with a suitable reference or fallback path retained.
+- **No mandatory migration.** No game has to move to this renderer, the mmorpg included, and
+  adopting it does not bring a duplicate asset or scene framework.
+
+### Agreed strategy versus what is implemented
+
+| Item | Status |
+| --- | --- |
+| Forward pass, every point and spot light evaluated for every fragment | **Implemented**, the reference path |
+| CPU frustum culling per view, instanced draws from the per-frame instance list | **Implemented**, the reference path; contracts in [consumer integration](consumer-integration.md#work-contracts) |
+| Compute simulation and indirect draws for particles | **Implemented**, for particles only |
+| three.js port for the web client | **Implemented** (D8) |
+| Two-phase Hi-Z occlusion culling | **Not adopted**: a negative result ([#59](https://github.com/moritzbrantner/render-engine/issues/59), [experiment](occlusion-experiment.md)) |
+| Forward+ clustered lighting | **Agreed preference, not implemented**; experiment [#72](https://github.com/moritzbrantner/render-engine/issues/72) |
+| GPU-driven visibility and indirect draws for meshes | **Agreed to evaluate, not implemented**; experiment [#71](https://github.com/moritzbrantner/render-engine/issues/71) |
+| render-engine in the browser (WASM/WebGPU) | **Direction only**: no `wasm32` build exists or is tested |
+| Deferred or hybrid rendering | **Not planned**; kept possible, needs its own evidence and issue |
+| Independent backend for several games | **Long-term possibility**, decided at stage 4 below |
+
+### Staged adoption
+
+| Stage | What it is | It moves on when |
+| --- | --- | --- |
+| 0. Reference path | Today's renderer and oracle. It stays as the baseline and the fallback. | A bounded experiment has a specific bottleneck to test. |
+| 1. Bounded experiment | The smallest opt-in prototype, compared with stage 0 on identical content, without changing game data (#71, #72). | Its report covers every evidence row below. A negative result ends it, and is a valid outcome. |
+| 2. Opt-in renderer path | Its own implementation issue. Stage 0 stays available. | It passes the oracle, updates the work contracts and has a defined behaviour where a feature is missing. |
+| 3. Consumer pilot | A real consumer enables it on its own workload, by its own choice. | It shows the gain there, at an integration cost that consumer accepts. |
+| 4. Default path or independent backend | Changing a default, or offering the engine as a backend to more games. | An owner decision on independent consumer evidence, recorded here. |
+
+### Evidence
+
+Every stage from 1 on reports each row, per target it claims:
+
+| Evidence | What is measured |
+| --- | --- |
+| Correctness | FLIP against Bevy with the D3 thresholds; where Bevy has no like-for-like path, the same thresholds against the reference path. Includes silhouettes, near-plane crossings, shadows, mutation and removal, camera cuts and overflow cases. |
+| GPU frame cost | D3's timestamp protocol on a hardware adapter at equal output, with the new path's own passes (compute, compaction, cluster assignment) attributed separately. |
+| CPU frame cost | `prepare`, `encode` and submission on the same hardware, and the frame of the consumer that claims the gain. |
+| Memory | GPU buffers and textures added at their high-water mark, and retained CPU state. |
+| Work counts | `viewport.work()` and `world.work()`, with [the contracts](consumer-integration.md#work-contracts) and `tests/work.rs` updated for any change of class ([#61](https://github.com/moritzbrantner/render-engine/issues/61)). |
+| Consumer integration complexity | From a real consumer: what code changes, what new data it must supply, whether the D7 boundary holds, and whether it can turn the path off. |
+| Native and browser features | Which [adapter features and limits](consumer-integration.md#native-and-browser-targets) it needs, and its fallback where they are absent. |
+
+A path is adopted only if it improves on the reference on a representative consumer workload
+after its own overhead, with no regression in the other rows. Beyond D3's gates no number is set
+in advance: each experiment reports its crossover. Measure the bottleneck the target actually has.
+On native, #59 found Hi-Z removed 93 % of the camera's vertex work and still never beat the
+no-prepass path. In the browser,
+[mmorpg#615](https://github.com/moenarch-games/mmorpg/issues/615) found Greyhaven bound by CPU
+draw-call submission, so 15 % fewer shadow triangles did not raise the frame rate.
 
 ## Standing rules
 

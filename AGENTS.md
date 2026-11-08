@@ -6,10 +6,15 @@ The current direction is in [technical decisions](docs/technical-decisions.md): 
 visual oracle and performance baseline (`bevy_pbr` for lighting, `bevy_hanabi` for particles),
 render-engine provides the lighting and particle capabilities the owner's games use through its
 own wgpu API, and lighting comes before particles. First consumer: the mmorpg native client
-(wgpu 30, `three-d-*` crates from 3d-lab), starting with mmorpg#529.
+(wgpu 30, `three-d-*` crates from 3d-lab), starting with mmorpg#529. Long-term direction (D10):
+a Rust-first wgpu/WebGPU rendering library for native and browser targets, adopted by consumers
+on evidence, with no mandatory migration. Forward+ and GPU-driven paths are agreed strategy to
+evaluate, not implemented features.
 
-Keep ECS, asset loading, game loops, gameplay and the day clock in the consumers. The engine
-never depends on Bevy outside `oracle/`.
+render-engine owns GPU resources, pipelines, materials, lighting, visibility and drawing (D7).
+Keep ECS, entities, scene composition, camera intent, world state, asset loading, game loops,
+gameplay and the day clock in the consumers, physics in physics-engine, and asset source and
+processing in asset-tooling. The engine never depends on Bevy outside `oracle/`.
 
 ## Rendering rules
 
