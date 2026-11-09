@@ -42,6 +42,7 @@ processing in asset-tooling. The engine never depends on Bevy outside `oracle/`.
 | `site/` | Report page over the last oracle run (`scripts/build-pages.sh` → `pages-dist/`) |
 | `packages/three-lighting/` | The web client's lighting on three.js (`@moritzbrantner/three-lighting`, root `package.json`): GLSL ports of `lit.wgsl`, `tonemap.wgsl` and the sky passes (`sky.js`, `sky-shaders.js`) and Bevy's cascade fitting (D8). A shading change in `lit.wgsl`, `tonemap.wgsl` or `src/shaders/sky/` makes the same change here |
 | `oracle/three/` | The oracle's three.js side: `render.mjs` renders exported scenarios in headless Chromium (Playwright, ANGLE on Vulkan); `oracle/src/three_side.rs` exports them and lists known gaps with their issues |
+| `oracle/webgpu-smoke/` | The crate compiled to wasm32 in headless Chromium WebGPU (`scripts/webgpu-smoke.sh`, [assessment](docs/webgpu-browser-assessment.md), #75): own manifest and lockfile, never built by default or by CI |
 
 ```sh
 bun install                                           # three.js side: three + Playwright (needs node); --no-three skips it

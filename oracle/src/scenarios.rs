@@ -207,7 +207,7 @@ fn skinned_figure() -> Scenario {
 /// dusk (2°, the disc touching the horizon) and night (sun 10° below the horizon, a moon
 /// trailing it by two hours at about 16°). The camera looks west into the sunset; the sun's
 /// raw illuminance is `RAW_SUNLIGHT` throughout, so the atmosphere alone dims and reddens it.
-fn sky_day_cycle() -> [Scenario; 4] {
+pub fn sky_day_cycle() -> [Scenario; 4] {
     let cycle = DayCycle {
         noon_elevation: 60f32.to_radians(),
         moon_lag_hours: 2.0,
@@ -420,7 +420,7 @@ fn textured_props() -> Scenario {
 /// spot light from above and an unshadowed uplight washing a wall (a spot pointing upwards).
 /// Rendered with the Gaussian filter, with 2×2 PCF on smaller maps, and with soft shadows (PCSS)
 /// from both shadow-casting lights grown to 0.4 m spheres.
-fn point_spot() -> [Scenario; 3] {
+pub fn point_spot() -> [Scenario; 3] {
     let dielectric = |base_color, perceptual_roughness| Material {
         base_color,
         perceptual_roughness,
@@ -618,7 +618,7 @@ fn point_spot() -> [Scenario; 3] {
 
 /// A long receding double row of pillars towards a low sun, under each `FogFalloff`, once
 /// without and once with sun inscattering (whose glow the pillars' shadows break up).
-fn fog_modes() -> Vec<Scenario> {
+pub fn fog_modes() -> Vec<Scenario> {
     let stone = Material {
         base_color: rgb(0.62, 0.58, 0.52),
         perceptual_roughness: 0.8,
@@ -758,7 +758,7 @@ fn tiergarten(intensity: f32) -> EnvironmentMap {
 /// Two rows of UV spheres sweeping perceptual roughness 0 → 1, dielectric in front and metallic
 /// behind, on a ground plane under the Tiergarten environment map: once with image-based light
 /// only, once with a shadowing sun as well.
-fn ibl_materials() -> [Scenario; 2] {
+pub fn ibl_materials() -> [Scenario; 2] {
     let mut meshes = vec![MeshInstance::new(
         Shape::Plane(Vec2::splat(14.0)),
         Vec3::ZERO,
@@ -852,7 +852,7 @@ const IBL_INTENSITY: f32 = 2000.0;
 /// The `sun_shadows` scene at a noon exposure (EV100 10.5, bright highlights on the gold box)
 /// and three stops dimmer (EV100 13.5, dusk-like shadows near black), each with Tony McMapface and
 /// AgX: the shoulder and the toe of both LUT operators.
-fn tonemap_range() -> [Scenario; 4] {
+pub fn tonemap_range() -> [Scenario; 4] {
     [
         ("tonemap_range_noon_tony", 10.5, Tonemapping::TonyMcMapface),
         ("tonemap_range_noon_agx", 10.5, Tonemapping::AgX),
@@ -875,7 +875,7 @@ fn rgb(r: f32, g: f32, b: f32) -> Vec3 {
 }
 
 /// Ground plane, PBR boxes (dielectric, metallic, rotated), a shadow-casting sun and ambient.
-fn sun_shadows() -> Scenario {
+pub fn sun_shadows() -> Scenario {
     let dielectric = |base_color, perceptual_roughness| Material {
         base_color,
         perceptual_roughness,
@@ -1081,7 +1081,7 @@ pub fn occluded_instances_density(stride: usize) -> Scenario {
 /// Bevy's default cascades (4 cascades, 10 m first far bound, 150 m, 20% overlap) and Gaussian
 /// filtering over a long corridor of pillars and boxes seen from a low camera, with the sun at
 /// 35° elevation so shadows cross every cascade boundary and the maximum shadow distance.
-fn sun_cascades() -> Scenario {
+pub fn sun_cascades() -> Scenario {
     let stone = Material {
         base_color: rgb(0.62, 0.58, 0.52),
         perceptual_roughness: 0.8,

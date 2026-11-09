@@ -244,8 +244,10 @@ chunks where they don't. Each web scenario is checked against the **same Bevy or
 scenarios** through a headless Chromium side with the same FLIP thresholds (D3); GPU time is
 advisory there. Option A (render-engine compiled to WASM/WebGPU) was held back at the time for
 particles only, if three.js GPU particles could not meet the gate. D10 widens that: the browser
-is now a target of the crate itself, but no WASM build exists, and the three.js port stays the
-web client's path unless a WebGPU build passes D10's adoption gate. Scope of the first step: #11.
+is now a target of the crate itself; a smoke build ran the oracle's fixtures in Chromium WebGPU
+([assessment](webgpu-browser-assessment.md), #75), but no consumer-facing WASM build exists, and
+the three.js port stays the web client's path unless a WebGPU build passes D10's adoption gate.
+Scope of the first step: #11.
 
 As built (#11):
 
@@ -503,7 +505,7 @@ stays rendering-only (D7), and D1–D9 stand as updated here: Bevy remains the o
 | Two-phase Hi-Z occlusion culling | **Not adopted**: a negative result ([#59](https://github.com/moritzbrantner/render-engine/issues/59), [experiment](occlusion-experiment.md)) |
 | Forward+ clustered lighting | **Agreed preference; opt-in experiment, not the default** ([experiment](forward-plus-experiment.md), [#72](https://github.com/moritzbrantner/render-engine/issues/72)): `LightAssignment::Clustered` is byte-identical to the reference on every tested scene and at 256 lights takes the GPU pass sum from 11.97 to 1.08 ms for 0.91 ms more `prepare` on an RTX 3060 Ti. Stage 1 result on synthetic scenes; needs consumer evidence to go further. |
 | GPU-driven visibility and indirect draws for meshes | **Not adopted as default** ([experiment](gpu-driven-experiment.md), [#71](https://github.com/moritzbrantner/render-engine/issues/71)): an opt-in, experimental `Culling::GpuIndirect` path reproduces the reference path's images on the tested scenes (byte-identical) and saves `prepare` CPU (0.44–0.64 ms at 22.4k instances) but makes draw-bound scenes slower. Stage 1 result; needs consumer evidence to go further. |
-| render-engine in the browser (WASM/WebGPU) | **Direction only**: no `wasm32` build exists or is tested |
+| render-engine in the browser (WASM/WebGPU) | **Feasibility assessed, no build shipped** ([assessment](webgpu-browser-assessment.md), [#75](https://github.com/moritzbrantner/render-engine/issues/75)): the crate compiles for `wasm32` with one WebGPU validation fix, and 14 oracle captures rendered in Chromium WebGPU on the RTX 3060 Ti are within D3's gates against Bevy (FLIP p99 ≤ 0.0143). Evidence is the Playwright headless shell on one machine; other browsers, skinned drawing and the opt-in GPU paths are unverified. The result is GO for a *separate* prototype issue, not adoption. |
 | Deferred or hybrid rendering | **Not planned**; kept possible, needs its own evidence and issue |
 | Independent backend for several games | **Long-term possibility**, decided at stage 4 below |
 
