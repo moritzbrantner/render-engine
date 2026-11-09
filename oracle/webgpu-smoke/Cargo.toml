@@ -1,0 +1,33 @@
+# The Chromium WebGPU smoke of `docs/webgpu-browser-assessment.md` (#75). Its own manifest and
+# lockfile, like the oracle: nothing here is part of the engine's native build or of CI.
+[package]
+name = "webgpu-smoke"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+render-engine = { path = "../.." }
+# `oracle/src/content.rs` is compiled here (scenario content is not duplicated).
+gltf = "1.4.1"
+bytemuck = "1.25.2"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# Keep in step with wgpu's: the wasm-bindgen CLI must match this version exactly.
+wasm-bindgen = "=0.2.130"
+wasm-bindgen-futures = "0.4.80"
+js-sys = "0.3.107"
+web-sys = { version = "0.3.107", features = ["HtmlCanvasElement", "Performance", "Window"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# The image comparison and the native baseline (`src/bin/compare.rs`).
+image = { version = "0.25.10", default-features = false, features = ["png"] }
+nv-flip = "0.1.2"
+pollster = "1.0.1"
+
+[profile.release]
+lto = true
+codegen-units = 1

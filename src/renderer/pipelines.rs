@@ -264,7 +264,13 @@ impl Renderer {
                 wgpu::BindGroupLayoutEntry {
                     binding: 8,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    // The blocker search's depth sampler: linear natively (Bevy's). WebGPU rejects a
+                    // filtering sampler on a depth texture, so the browser point-samples it.
+                    ty: wgpu::BindingType::Sampler(if cfg!(target_arch = "wasm32") {
+                        wgpu::SamplerBindingType::NonFiltering
+                    } else {
+                        wgpu::SamplerBindingType::Filtering
+                    }),
                     count: None,
                 },
                 wgpu::BindGroupLayoutEntry {
@@ -560,10 +566,15 @@ impl Renderer {
             compare: Some(wgpu::CompareFunction::GreaterEqual),
             ..Default::default()
         });
+        let shadow_blocker_filter = if cfg!(target_arch = "wasm32") {
+            wgpu::FilterMode::Nearest
+        } else {
+            wgpu::FilterMode::Linear
+        };
         let shadow_linear_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("shadow linear"),
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
+            mag_filter: shadow_blocker_filter,
+            min_filter: shadow_blocker_filter,
             ..Default::default()
         });
 
