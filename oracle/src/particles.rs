@@ -203,6 +203,7 @@ impl Emitter {
                 flipbook: t.flipbook,
             }),
             roundness: if self.round { 1.0 } else { 0.0 },
+            depth_fade: 0.0,
             blend: self.blend,
             active: false,
         }

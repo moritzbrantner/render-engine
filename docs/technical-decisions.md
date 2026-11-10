@@ -460,10 +460,23 @@ Each capture is judged by one of two tiers:
   fragment stage has no frag-coord expression), so particles meet geometry with the hard edge of
   the depth test (`smoke_and_sparks` shows it where the smoke meets the ground and the box).
   Collision with the depth buffer is unchecked on the README's roadmap. render-engine therefore
-  renders particles unlit, unfogged and without depth fade, like its oracle; the lit set around
-  `particles_textured` and `smoke_and_sparks` (sun with a shadow cascade, ambient light, a point
-  light) lights the geometry only. Lit or soft particles would need another oracle or a hanabi
-  version that has them; they are not built without one.
+  renders particles unlit, unfogged and without depth fade by default, like its oracle; the lit
+  set around `particles_textured` and `smoke_and_sparks` (sun with a shadow cascade, ambient
+  light, a point light) lights the geometry only. hanabi v0.20.0 (the pinned commit) still has
+  none of the three.
+- **Opt-in beyond hanabi** (owner decision 2026-11-10, after the asset-kit renders of #82 showed
+  hard edges on terrain, smoke glowing at night and particles unfogged in fog). Soft, lit and
+  fogged particles are built as opt-in emitter options; every default stays hanabi parity, so
+  the particle scenarios above are unchanged. Lit and fogged particles are gated against Bevy
+  `StandardMaterial` camera-facing quads (#84). Soft particles have no Bevy counterpart and are
+  checked by engine tests and the kit scenes:
+  - **Soft particles** (#83, `Emitter::depth_fade`): over the last `depth_fade` metres of view
+    distance in front of the opaque scene, alpha is scaled by `clamp((scene − particle) /
+    depth_fade, 0, 1)`, with the scene's distance from sample 0 of the multisampled depth
+    (reverse-Z infinite: distance = near / depth; depth 0 is infinitely far). The particles
+    of a frame with a soft emitter draw in a pass of their own after the main pass, with the
+    depth target attached read-only and bound as a texture; a frame without one keeps them in
+    the main pass and renders as before.
 - **Recycling in practice.** On the RTX 3060 Ti and on lavapipe, both sides' atomics happen to
   recycle slots in the same order for `particles_fountain` and `particles_100k`, so their late
   captures also match nearly exactly (FLIP mean ≤ 0.0002, statistics 0.000). The statistical

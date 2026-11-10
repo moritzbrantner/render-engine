@@ -401,6 +401,7 @@ fn gpu_particles_spawn_age_die_and_draw() {
         orient: Orient::CameraPlane,
         texture: None,
         roundness: 0.0,
+        depth_fade: 0.0,
         blend: ParticleBlend::Add,
         active: true,
     };
@@ -505,4 +506,112 @@ fn blended_shadow_cutoff_preserves_visible_water() {
         visible > 20,
         "the blue blended water must remain visible: {visible} pixels"
     );
+}
+
+/// Soft particles (`Emitter::depth_fade`): a quad 0.1 m in front of a wall fades to a tenth with
+/// a 1 m fade, one 3 m in front of it and one in front of nothing (depth 0) draw as they do with
+/// hard edges, and the hard path is unchanged by a soft emitter elsewhere in the frame.
+#[test]
+fn soft_particles_fade_in_front_of_geometry_only() {
+    use render_engine::particles::*;
+    let gpu = Headless::new().expect("a wgpu adapter");
+    let mut scene = scene(false, Tonemapping::AcesFitted);
+    scene.sun = None;
+    scene.clear_color = Vec3::ZERO;
+    scene.camera.eye = Vec3::new(0.0, 0.0, 10.0);
+    scene.camera.target = Vec3::ZERO;
+    let quads = [
+        Vec3::new(-2.0, 0.0, 0.1),
+        Vec3::new(2.0, 0.0, 3.0),
+        Vec3::new(0.0, 3.0, 0.0),
+    ];
+    let emitter = |at: Vec3, depth_fade| Emitter {
+        capacity: 1,
+        spawner: Spawner::once(1.0),
+        seed: 3,
+        init: vec![
+            InitModifier::Position(Value::Const(at)),
+            InitModifier::Lifetime(Value::Const(100.0)),
+            InitModifier::Size(Value::Const(0.6)),
+            InitModifier::Color(Value::Const(Vec4::new(0.5, 0.0, 0.0, 1.0))),
+        ],
+        accel: Vec3::ZERO,
+        size_over_life: None,
+        color_over_life: None,
+        orient: Orient::CameraPlane,
+        texture: None,
+        roundness: 0.0,
+        depth_fade,
+        blend: ParticleBlend::Add,
+        active: true,
+    };
+    let (w, h) = (160, 90);
+    let render = |fade: [f32; 3]| {
+        let mut world = World::new(gpu.renderer());
+        let wall = world.add_mesh(&MeshData::shape(Shape::Cuboid(Vec3::new(6.0, 3.0, 0.2))));
+        let black = world.add_material(&StandardMaterial {
+            base_color: Vec4::new(0.0, 0.0, 0.0, 1.0),
+            unlit: true,
+            ..StandardMaterial::default()
+        });
+        for (q, f) in quads.iter().zip(fade) {
+            world.add_emitter(&emitter(*q, f));
+        }
+        let mut encoder = gpu.device.create_command_encoder(&Default::default());
+        world.step_particles(&mut encoder, 1.0 / 64.0, None);
+        gpu.queue.submit([encoder.finish()]);
+        let mut viewport = Viewport::new(gpu.renderer(), w, h);
+        let frame = gpu
+            .render(
+                &mut viewport,
+                &world,
+                &scene,
+                &[at(wall, black, Vec3::new(0.0, 0.0, -0.1))],
+            )
+            .unwrap();
+        (frame, viewport.pass_labels().contains(&"particles"))
+    };
+    // The camera looks down -z from z = 10, so a point projects by its distance alone.
+    let f = 1.0 / (scene.camera.fov_y / 2.0).tan();
+    let centre = |p: Vec3| {
+        let d = scene.camera.eye.z - p.z;
+        let ndc = Vec2::new(f * h as f32 / w as f32 * p.x / d, f * p.y / d);
+        (
+            ((ndc.x * 0.5 + 0.5) * w as f32) as u32,
+            ((0.5 - ndc.y * 0.5) * h as f32) as u32,
+        )
+    };
+    let red = |frame: &Frame, p: Vec3| {
+        let (x, y) = centre(p);
+        pixel(frame, x, y)[0]
+    };
+    let (hard, hard_pass) = render([0.0; 3]);
+    let (soft, soft_pass) = render([1.0; 3]);
+    let (mixed, _) = render([1.0, 0.0, 0.0]);
+    assert!(
+        !hard_pass && soft_pass,
+        "only a soft emitter adds the particle pass"
+    );
+    for q in quads {
+        assert!(
+            red(&hard, q) > 100,
+            "hard quad at {q} is drawn: {}",
+            red(&hard, q)
+        );
+    }
+    // 0.1 m in front of the wall with a 1 m fade: a tenth of the colour before tone mapping.
+    assert!(
+        red(&soft, quads[0]) < red(&hard, quads[0]) / 2,
+        "near the wall the soft quad fades: {} vs {}",
+        red(&soft, quads[0]),
+        red(&hard, quads[0])
+    );
+    assert!(red(&soft, quads[0]) > 0, "it fades, not vanishes");
+    // Far from the wall, and in front of the cleared background, nothing changes.
+    for q in &quads[1..] {
+        assert_eq!(red(&soft, *q), red(&hard, *q), "quad at {q}");
+    }
+    // Hard emitters drawn in the particle pass look as they do in the main pass.
+    assert_eq!(red(&mixed, quads[1]), red(&hard, quads[1]));
+    assert_eq!(red(&mixed, quads[2]), red(&hard, quads[2]));
 }

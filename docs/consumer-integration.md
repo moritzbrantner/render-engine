@@ -341,6 +341,7 @@ let sparks = world.add_emitter(&Emitter {
         flipbook: None,                      // Some(Flipbook { grid: UVec2::new(2, 2), frames: 4 })
     }),
     roundness: 0.0,                          // 0 = square quads, 1 = discs
+    depth_fade: 0.0,                         // metres of soft edge against geometry; 0 = hard
     blend: ParticleBlend::Add,               // or ParticleBlend::Alpha (emitters back to front)
     active: true,
 });
@@ -367,10 +368,15 @@ world.step_particles(&mut encoder, dt, None);
 - **Draw order.** Emitters are drawn back to front by their transform's position, additive and
   alpha-blended alike (as Bevy sorts hanabi effects); inside an emitter the order is the GPU's
   alive-list order, as in hanabi.
-- **Unlit, unfogged, hard edges.** Particles are not lit by the scene's lights, fog does not
-  apply to them, and they are cut hard where they meet geometry (depth tested, no depth fade):
-  bevy_hanabi renders them this way, and it is the oracle (technical decisions D9). Tint an
-  emitter's colours yourself for the time of day.
+- **Unlit and unfogged.** Particles are not lit by the scene's lights and fog does not apply to
+  them: bevy_hanabi renders them this way, and it is the oracle (technical decisions D9). Tint
+  an emitter's colours yourself for the time of day.
+- **Soft edges (opt-in).** By default a particle is cut hard where it meets geometry (depth
+  tested, as in hanabi). `depth_fade: 0.3` fades it out over the last 0.3 m in front of the
+  opaque scene, for smoke, fire, mist and spray against the ground. A frame with a soft emitter
+  draws all particles in one extra pass (`"particles"` in `Viewport::pass_labels`) that reads
+  the depth target; nothing changes for frames without one. Keep it 0 for sparks and other
+  small, fast particles, where the edge is not visible.
 - **Cost.** `particles_100k` (about 100k alive in one fountain plus 50 small effects) runs on
   the GPU; see the oracle report for its timings against hanabi.
 
@@ -391,6 +397,7 @@ not change the web client. "Ran in Chromium" below means that smoke, on that ada
 | `TIMESTAMP_QUERY` | GPU timing only, at pass begin and end | adapter-dependent | optional `timestamp-query`; ran in Chromium on NVIDIA, present on SwiftShader | advisory timing through `EXT_disjoint_timer_query_webgl2` |
 | Compute and write-only storage textures | The sky's environment filter, particle simulation | available | core; ran in Chromium | none in WebGL 2 |
 | `draw_indirect` | Particle draws | available | core; ran in Chromium | none in WebGL 2 |
+| A read-only depth attachment also bound as a multisampled depth texture | Soft particles (`Emitter::depth_fade`), opt-in | available | core; not run in a browser yet | not applicable (no particle port) |
 | Indirect draws with a non-zero `first_instance` | Required by the opt-in `Culling::GpuIndirect`; it stays on the CPU path without it. Measured on the RTX 3060 Ti ([experiment](gpu-driven-experiment.md)) | `INDIRECT_FIRST_INSTANCE` | optional `indirect-first-instance`, present in Chromium on both adapters; the path has not run in a browser | none in WebGL 2 |
 | A fourth bind group and 4 fragment-stage storage buffers | Required by the opt-in `LightAssignment::Clustered`; it stays per-fragment without them. Measured on the RTX 3060 Ti ([experiment](forward-plus-experiment.md)) | adapter/limits-dependent | within the WebGPU defaults, 16 on NVIDIA and 10 on SwiftShader in Chromium; the path has not run in a browser | none in WebGL 2 (no fragment storage buffers) |
 | `multi_draw_*_indirect_count` | Not used by the experiment: with one mesh per run it could only remove empty draws. The RTX 3060 Ti reports it; it would need a shared vertex and index buffer to batch runs | `MULTI_DRAW_INDIRECT_COUNT`, Vulkan 1.2+ and DX12 | none: native-only in wgpu | none in WebGL 2 |

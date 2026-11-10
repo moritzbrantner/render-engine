@@ -11,6 +11,7 @@
 //!
 //! Particles are unlit and unfogged, and their edges are hard against the scene's depth: that is
 //! what bevy_hanabi renders (technical decisions D9, "Lighting, fog and soft particles").
+//! [`Emitter::depth_fade`] opts an emitter into soft edges.
 //!
 //! The simulation replays hanabi's. On the CPU: the spawner's per-frame count
 //! (`EffectSpawner::tick`) and the effect's per-frame seed chain
@@ -242,6 +243,12 @@ pub struct Emitter {
     /// Round mask (hanabi `RoundModifier`): 0 square, 1 a disc; the quad's corners are cut where
     /// `|2u − 1|^(2/r) + |2v − 1|^(2/r) > 1`.
     pub roundness: f32,
+    /// Soft particles (opt-in, not in bevy_hanabi): over the last `depth_fade` metres in front of
+    /// the opaque scene the particle fades out, `alpha · clamp((scene − particle) / depth_fade,
+    /// 0, 1)` in view distance, so quads no longer cut a hard line where they meet the ground or
+    /// a wall. 0 keeps hanabi's hard edge. Emitters with a fade draw in their own pass after the
+    /// blended instances, which reads the scene's depth (technical decisions D9).
+    pub depth_fade: f32,
     pub blend: ParticleBlend,
     /// Whether the spawner runs; an inactive emitter keeps simulating its particles.
     pub active: bool,

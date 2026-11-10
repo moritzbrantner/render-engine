@@ -164,7 +164,11 @@ impl Renderer {
             clear,
             depth,
             resolve,
+            read_only_depth: false,
         };
+        // Soft emitters read the scene depth, so all particles then move into a pass of their
+        // own after the main pass's last part, which no longer resolves.
+        let soft = viewport.particles.soft();
         let clear_color = viewport.clear_color;
         let lit_index = |d: &Draw| lit_pipeline_index(d.skinned, d.face, d.phase);
         let (lit_pipelines, cluster_group) = match &viewport.clustered {
@@ -187,7 +191,7 @@ impl Renderer {
                     encoder,
                     targets,
                     clear_color,
-                    part("lit", true, true, true),
+                    part("lit", true, true, !soft),
                     stamps.render(),
                 );
                 bind_lighting(&mut pass);
@@ -201,7 +205,9 @@ impl Renderer {
                     Phase::Opaque..Phase::End,
                     &lit_index,
                 );
-                viewport.particles.draw(&mut pass, &self.particles, world);
+                if !soft {
+                    viewport.particles.draw(&mut pass, &self.particles, world);
+                }
                 if stats.is_some() {
                     pass.end_pipeline_statistics_query();
                 }
@@ -242,7 +248,7 @@ impl Renderer {
                     encoder,
                     targets,
                     clear_color,
-                    part("lit transparent", false, true, true),
+                    part("lit transparent", false, true, !soft),
                     stamps.render(),
                 );
                 bind_lighting(&mut pass);
@@ -256,13 +262,31 @@ impl Renderer {
                     Phase::Blend..Phase::End,
                     &lit_index,
                 );
-                viewport.particles.draw(&mut pass, &self.particles, world);
+                if !soft {
+                    viewport.particles.draw(&mut pass, &self.particles, world);
+                }
                 if stats.is_some() {
                     pass.end_pipeline_statistics_query();
                 }
             }
         }
 
+        if soft {
+            let mut pass = begin_main_pass(
+                encoder,
+                targets,
+                clear_color,
+                MainPass {
+                    label: "particles",
+                    clear: false,
+                    depth: true,
+                    resolve: true,
+                    read_only_depth: true,
+                },
+                stamps.render(),
+            );
+            viewport.particles.draw(&mut pass, &self.particles, world);
+        }
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("tonemap"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -316,6 +340,9 @@ struct MainPass {
     /// Resolve into the HDR frame and discard the MSAA targets (else store them for the next
     /// part).
     resolve: bool,
+    /// Attach the depth target read-only, so the pass can also read it as a texture (the
+    /// particle pass of soft emitters).
+    read_only_depth: bool,
 }
 
 fn begin_main_pass<'a>(
@@ -347,7 +374,7 @@ fn begin_main_pass<'a>(
         })],
         depth_stencil_attachment: p.depth.then_some(wgpu::RenderPassDepthStencilAttachment {
             view: &targets.depth_view,
-            depth_ops: Some(wgpu::Operations {
+            depth_ops: (!p.read_only_depth).then_some(wgpu::Operations {
                 load: if p.clear {
                     wgpu::LoadOp::Clear(0.0)
                 } else {

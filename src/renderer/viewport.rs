@@ -462,6 +462,7 @@ impl Viewport {
             if let Some(sky) = &mut self.sky {
                 sky.depth_changed();
             }
+            self.particles.depth_changed();
         }
     }
 
@@ -482,7 +483,7 @@ impl Viewport {
 
     /// One label per timed pass, in the order [`Renderer::encode`] writes their timestamps: the
     /// sky's compute passes, the GPU culling pass, the shadow passes, the main pass (three parts
-    /// with a sky), tone mapping and the blit.
+    /// with a sky, then the particle pass when a soft emitter draws), tone mapping and the blit.
     pub fn pass_labels(&self) -> Vec<&'static str> {
         let sky_passes = self.sky.as_ref().map_or(0, |s| s.compute_passes()) as usize;
         let mut labels = vec!["sky"; sky_passes];
@@ -494,6 +495,9 @@ impl Viewport {
             labels.extend(["lit opaque", "render sky", "lit transparent"]);
         } else {
             labels.push("lit");
+        }
+        if self.particles.soft() {
+            labels.push("particles");
         }
         labels.extend(["tonemap", "blit"]);
         labels
