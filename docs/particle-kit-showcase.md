@@ -88,6 +88,20 @@ parity kept as the default. Lit and fogged particles get an oracle of Bevy `Stan
 camera-facing quads; soft particles are checked by tests and these kit scenes. D9 is updated
 in those PRs.
 
+## Soft particles (#83)
+
+`Emitter::depth_fade` is opt-in. In the kit scenes the fire (0.35 m), smoke (0.8 m), mist
+(1.5 m), waterfall spray (0.6 m) and alpha bursts (0.15 m) use it; `--hard` renders the same
+frames without it. Left hard, right soft, same seeds and steps:
+
+![Campfire, hard and soft](particle-kit-showcase/soft_campfire.jpg)
+![Waterfall spray, hard and soft](particle-kit-showcase/soft_waterfall.jpg)
+![Rain mist, hard and soft](particle-kit-showcase/soft_rain.jpg)
+
+The fire's base no longer cuts a flat line across the stones, and the spray and mist meet the
+rocks and ground without an edge. The other oracle particle scenarios still pass on lavapipe
+(default path, no fade).
+
 ## Measurements
 
 **Adapter:** llvmpipe (lavapipe, LLVM 21, software Vulkan) under WSL2. This machine has no
