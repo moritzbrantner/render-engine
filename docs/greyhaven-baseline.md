@@ -4,34 +4,51 @@ What render-engine costs on real Greyhaven frames, through the game's own native
 profiling paths. This is evidence, not a migration: nothing here changes the renderer, its
 defaults or the Bevy oracle gates.
 
-**Result.** The native client renders Greyhaven on render-engine. At 1280×720 on an RTX 3060 Ti a
-frame takes 14 to 19 ms (median over runs), and about 90 % of it is inside the renderer boundary
-(`prepare`, `encode`, submission and the wait for the GPU). The existing path cannot split that
-further, so **no renderer-owned gap is measured yet and no render-engine issue is filed**. What
-is measured: game-side composition is a steady 1.7 ms, GPU-skinned units upload only their joint
-palettes after the first frame, the lake is the most expensive view on both renderers, and
-browser sun cascades are about two thirds of its triangles. The missing native attribution is
-filed as [mmorpg#692](https://github.com/moenarch-games/mmorpg/issues/692).
+**Result.** At 1280×720 on an RTX 3060 Ti a native Greyhaven frame takes 15.3 to 19.7 ms (median),
+and the renderer's share now splits: GPU 8.4 to 13.2 ms, CPU `prepare` 2.8 to 3.1 ms, `encode`
+0.3 to 0.5 ms. Two renderer-owned gaps are measured:
+
+1. **The per-fragment light loop is the largest single cost.** Greyhaven has 13 point lights, and
+   the main pass evaluates all of them for every fragment. The engine's existing opt-in
+   `LightAssignment::Clustered` (#72) cuts the main pass from 5.2–9.8 to 2.5–3.4 ms and the GPU
+   frame by 2.7 to 6.6 ms, 32 to 50 %. What looked like the lake's water cost in the first slice
+   was this loop. Filed as [#94](https://github.com/moritzbrantner/render-engine/issues/94) (stage 2,
+   needs a decision) and, for the consumer's opt-in,
+   [mmorpg#725](https://github.com/moenarch-games/mmorpg/issues/725).
+2. **`prepare` rewrites every instance every frame**: about 26,000 mostly static instances, 4.1
+   to 4.4 MB a frame, about 3 ms of CPU. GPU culling (#71) does not help on this content. Filed as
+   [#95](https://github.com/moritzbrantner/render-engine/issues/95).
+
+Game-owned: a 2.8 s stall on the first frame
+([mmorpg#726](https://github.com/moenarch-games/mmorpg/issues/726)), the missing starter-area and
+crowd cameras ([mmorpg#724](https://github.com/moenarch-games/mmorpg/issues/724)), and browser GPU
+spikes that now hold two scenarios at 23 to 32 fps
+([mmorpg#727](https://github.com/moenarch-games/mmorpg/issues/727)). Nothing is filed for
+asset-tooling. The numeric visual comparison still lacks an approved capture set (below).
+
+The first slice ([#78](https://github.com/moritzbrantner/render-engine/pull/78), game `6ebc4c64`,
+render-engine `bd4708dd`, a heavily loaded machine) had only `render_ms` natively. This revision
+replaces its numbers; where they differ, that is said below.
 
 ## Sources and setup
 
 | | Native | Browser |
 | --- | --- | --- |
-| Game | `moenarch-games/mmorpg` `6ebc4c64` | same |
-| Renderer | render-engine `bd4708dd` (`Cargo.lock`), 27 commits behind `dff98d8` (this PR's base). It predates `Viewport::work` (#65), `Culling::GpuIndirect` (#71) and `LightAssignment::Clustered` (#72). | three.js 0.186.1 and `@moritzbrantner/three-lighting` at `81752f2` |
-| Path | `outpost_frame_time` (`crates/mmorpg-client/src/graphics.rs`), `imported_mesh_buffer_observation`, `greyhaven_lighting_shots` | `scripts/profile-browser.py` (`web/dist`, `?debug&profile`) |
-| Build | `cargo test --release --locked`, rustc 1.99.1, wgpu 30.0.1 | `bun run build`; Chromium 156.0.8078.4 headless (Playwright 1.64.1), ANGLE on OpenGL ES 3.2 |
-| Resolution | 1280×720 (skinned-unit path 640×360), offscreen, no present | 1440×900, device pixel ratio 1, on-page canvas |
-| Scene settings | Zone hour from `ZONE_START_TIME` (08:00). Four sun cascades over 160 m, 2048 per cascade, 4× MSAA, Tony McMapface, Gaussian shadow filter | Same hour source and tone mapping, three sun cascades over 160 m (three.js redraws the scene per cascade) |
+| Game | `moenarch-games/mmorpg` `05a1e3eb` (mmorpg#692 merged) | same |
+| Renderer | render-engine `df5597b5` (`Cargo.lock`) | three.js 0.186.1 and `@moritzbrantner/three-lighting` at `81752f2` |
+| Path | `outpost_frame_time` (`crates/mmorpg-client/src/graphics.rs`), `imported_mesh_buffer_observation`, `greyhaven_lighting_shots` | `scripts/profile-browser.py` (`web/dist`, `?debug&profile`), which now counts multi-draws |
+| Build | `cargo test --release --locked`, rustc 1.99.1, wgpu 30.0.1, `TIMESTAMP_QUERY` on | `bun run build`; Chromium 158.0.8127.18 headless (Playwright 1.65.0), ANGLE on OpenGL ES 3.2 |
+| Resolution | 1280×720, offscreen, no present | 1440×900, device pixel ratio 1, on-page canvas |
+| Scene settings | Zone hour from `ZONE_START_TIME` (08:00). Four sun cascades over 160 m, 2048 per cascade, 4× MSAA, Tony McMapface, Gaussian shadow filter, 13 unshadowed point lights, CPU culling, per-fragment lights | Same hour source and tone mapping, three sun cascades over 160 m (three.js redraws the scene per cascade) |
 | Content | Greyhaven Vale, full scenery, NPCs in interest, one player | same |
 
 Machine: AMD Ryzen 7 5700X, 16 logical CPUs, 30 GB RAM, NVIDIA GeForce RTX 3060 Ti (8 GB), driver
-595.99.02, Linux 7.0.0-42. Measured 2026-11-08/09.
+595.99.02, Linux 7.0.0-42. Measured 2026-11-10.
 
-**The machine was shared.** Other agent sessions ran during these runs, with a 1-minute load
-average between 5 and 33. The same view's native median varied by up to 1.8× between runs (`vale`:
-12.23 to 22.47 ms), and every run's load is recorded below. Comparisons between views within a run
-are the sturdier numbers: `lake` was the slowest view in 8 of the 9 runs.
+**Load.** The machine was nearly idle this time: the 1-minute load average was 2.4 to 7.5 at the
+start of the native runs (the higher figures right after a build) and 0.5 to 4.0 during the
+browser runs. The six native baseline runs agree within 2 % on every median, so the numbers below
+are not marked advisory for load. They remain one machine, one driver.
 
 ### Matched cameras
 
@@ -40,194 +57,277 @@ Native and browser use the same viewpoint poses (`DEBUG_VIEWPOINTS` in
 
 | Issue camera | Native view | Browser scenario | Eye / target |
 | --- | --- | --- | --- |
-| Starter area | none of its own | `idle` (view after entry, on the spawn plaza) | not a debug viewpoint |
+| Starter area | none timed ([mmorpg#724](https://github.com/moenarch-games/mmorpg/issues/724)) | `idle` (view after entry, on the spawn plaza) | not a debug viewpoint |
 | Hub | `hub` | `dense-hub` | `[5, 8.5, 31]` / `[-14, 3, 4]` |
 | Forest / vegetation | `woods` | `dense-woods` | `[-41, 18, 16]` / `[-69, 14, 0]` |
 | Water | `lake` | `western-lake` | `[-56, 33, -39]` / `[-87, 11, -53]` |
 | Whole Vale | `vale` | `overview` | `[0, 70, 95]` / `[0, 0, -10]` |
-| Dense units | no crowd scene exists; see the skinned-unit path below | none | |
+| Dense units | none ([mmorpg#724](https://github.com/moenarch-games/mmorpg/issues/724)); see the skinned-unit path below | none | |
 
 New characters spawn on the hub plaza, so `hub` is the closest native view to the starter area.
-No existing path puts a crowd of units in a real Greyhaven camera on either renderer.
+No existing path puts a crowd of units in a real Greyhaven camera on either renderer; building one
+is game work, filed as mmorpg#724.
 
 ## Native measurements
 
-`outpost_frame_time`, 9 runs. In each run each view renders 240 frames and the last 200 are kept.
-`frame_ms` is one posed, submitted and completed frame; `render_ms` is the part of it inside
-`SceneRenderer::render` plus the wait for the device. The test prints only the median and p95.
+`outpost_frame_time`, 6 runs. Each view renders 240 frames; statistics leave out the first 40
+(the first frame and the raw lists keep them). `frame_ms` is one composed, rendered and completed
+frame; `render_ms` is `FrameRenderer::render` plus the wait for the device. `prepare` and `encode`
+are render-engine's CPU calls; GPU is the sum of the frame's timestamped passes. Each cell is the
+range of that statistic over the 6 runs.
 
-| View | `frame_ms` median (min / median / max of 9 runs) | `frame_ms` p95 (same) | `render_ms` median (same) | `render_ms` p95 (same) |
-| --- | --- | --- | --- | --- |
-| `hub` | 13.11 / 16.03 / 19.76 | 15.63 / 22.40 / 47.44 | 11.69 / 14.36 / 17.89 | 13.86 / 20.21 / 43.79 |
-| `woods` | 15.04 / 17.59 / 21.80 | 16.69 / 21.98 / 26.19 | 13.67 / 15.90 / 19.79 | 15.16 / 19.97 / 23.99 |
-| `vale` | 12.23 / 14.39 / 22.47 | 14.34 / 17.79 / 44.73 | 10.81 / 12.73 / 19.91 | 12.49 / 15.61 / 39.00 |
-| `lake` | 18.24 / 19.10 / 22.29 | 20.13 / 21.38 / 28.23 | 16.74 / 17.41 / 20.66 | 18.44 / 19.20 / 24.73 |
+| View | `frame_ms` median | p95 | p99 | max | `render_ms` median | `prepare` median | `encode` median | GPU median |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `hub` | 15.28–15.54 | 16.06–17.56 | 17.16–20.26 | 17.52–21.69 | 13.94–14.18 | 3.00–3.08 | 0.44–0.46 | 8.38–8.47 |
+| `woods` | 17.89–18.08 | 18.80–20.47 | 20.02–21.80 | 20.04–22.37 | 16.54–16.76 | 2.88–2.96 | 0.33–0.37 | 11.56–11.67 |
+| `vale` | 16.85–17.05 | 17.51–19.16 | 18.38–21.98 | 19.11–24.97 | 15.50–15.73 | 2.82–2.88 | 0.39–0.44 | 10.40–10.51 |
+| `lake` | 19.46–19.67 | 20.41–22.52 | 21.45–23.35 | 21.93–25.55 | 18.11–18.32 | 2.91–2.95 | 0.32–0.36 | 13.10–13.23 |
 
-Load average at the start of the runs, 1 to 9: 17.7, 11.2, 8.4, 6.2, 7.1, 5.9, 7.2, 6.6, 6.0.
+GPU p99 is within 0.4 ms of its median on every view; the CPU side carries the tail.
 
-`frame_ms` minus `render_ms` (median of each) is 1.66 to 1.69 ms on all four views: the game's
-scene composition, with unit poses and the level-of-detail pick. It does not depend on the view.
+**Where a frame goes** (`hub`, medians of one run; the others split the same way):
 
-Per process, over a whole run (which includes start-up and 960 frames):
-
-| Metric | Value across runs | Source |
+| Part | ms | Owner |
 | --- | --- | --- |
-| Wall time | 19.9 to 27.9 s | `time -v` |
-| CPU user + system | 12.6 to 18.7 s | `time -v` |
-| Peak resident memory | 1,539 to 1,567 MB | `time -v` |
-| GPU memory, process | 718 MB, peak | `nvidia-smi pmon`, runs 2 to 9 |
-| GPU busy, process | 28 to 41 % mean, 50 to 64 % peak | `nvidia-smi pmon`, runs 2 to 9, 1 s samples, including start-up |
+| Game composition (`presentation.frame`: units, LOD pick) = `frame_ms` − `render_ms` | 1.34 | game |
+| Instance-list build in `FrameRenderer::render` before `prepare` (local timer, one run: 0.26 to 0.28 on all views) | 0.28 | game |
+| render-engine `prepare` | 3.02 | renderer |
+| render-engine `encode` | 0.44 | renderer |
+| GPU passes | 8.43 | renderer (shading cost of game content) |
+| Remainder: submission, timestamp resolve, the queued buffer writes and waking from the wait | 1.78 | not split (1.5 to 1.8 on all views) |
 
-The GPU busy samples say the frame loop is not GPU-saturated, so part of `render_ms` is likely CPU
-work. They are coarse and include start-up, so that is a hint, not a split.
+The test waits for the GPU each frame, so CPU and GPU time add up here. A windowed client overlaps
+them, and its frame would be closer to the larger of the two.
+
+**GPU passes**, median ms, ranges over the 6 runs:
+
+| View | `sky` (LUTs) | `shadow` (4 cascades) | `lit_opaque` | `lit_transparent` | `render_sky` + `tonemap` + `blit` |
+| --- | --- | --- | --- | --- | --- |
+| `hub` | 0.47–0.48 | 2.56–2.58 | 5.20–5.25 | 0.05 | 0.09 |
+| `woods` | 0.48 | 2.46–2.49 | 8.43–8.51 | 0.09 | 0.10 |
+| `vale` | 0.45–0.46 | 1.62–1.63 | 8.13–8.22 | 0.09 | 0.11 |
+| `lake` | 0.45–0.46 | 2.50–2.53 | 9.78–9.87 | 0.26–0.27 | 0.11 |
+
+**Work per frame** (`Viewport::work()`, the same in every run; static camera):
+
+| View | Instances | Views culled | CPU bounds tests | Visible: camera / shadow views | Draws: main / shadow | Upload | Allocations |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `hub` | 26,978 | 5 | 134,890 | 9,826 / 32,093 | 469 / 2,550 | 4.37 MB | 0 |
+| `woods` | 26,148 | 5 | 130,740 | 4,638 / 29,253 | 198 / 2,066 | 4.23 MB | 0 |
+| `vale` | 25,183 | 5 | 125,915 | 14,070 / 25,131 | 878 / 1,865 | 4.12 MB | 0 |
+| `lake` | 26,014 | 5 | 130,070 | 3,402 / 32,049 | 185 / 1,896 | 4.22 MB | 0 |
+
+About 3.4 MB of each upload is the instance array itself (128 B per instance), rewritten whether
+or not anything moved; the rest is the visible-index lists, lights, shadow views and the frame
+uniform. Triangle counts are not observable natively: `PrepareWork` counts draws and instances,
+not indices.
+
+### Engine options on the same frames
+
+The client uses render-engine's defaults. To attribute the main pass and `prepare`, the same build
+ran with the engine's two existing opt-in paths switched on in `FrameRenderer::new` (a local,
+uncommitted change in the measurement clone; `Culling::GpuIndirect` also needed the device feature
+`INDIRECT_FIRST_INSTANCE`, which the client does not request). One run each, medians in ms, GPU /
+`render_ms` / `prepare` / `encode`:
+
+| View | Default | `LightAssignment::Clustered` | `Culling::GpuIndirect` | Both |
+| --- | --- | --- | --- | --- |
+| `hub` | 8.38 / 14.00 / 3.00 / 0.46 | 5.69 / 11.45 / 3.15 / 0.43 | 8.62 / 15.17 / 2.27 / 0.79 | 5.80 / 12.35 / 2.29 / 0.80 |
+| `woods` | 11.62 / 16.67 / 2.88 / 0.36 | 6.45 / 11.62 / 3.05 / 0.33 | 11.74 / 18.05 / 2.23 / 0.76 | 6.55 / 12.87 / 2.23 / 0.77 |
+| `vale` | 10.47 / 15.64 / 2.82 / 0.42 | 5.38 / 10.90 / 2.94 / 0.49 | 10.51 / 16.68 / 2.12 / 0.76 | 5.45 / 11.66 / 2.13 / 0.75 |
+| `lake` | 13.18 / 18.29 / 2.93 / 0.35 | 6.61 / 11.84 / 2.98 / 0.33 | 13.20 / 19.50 / 2.19 / 0.77 | 6.71 / 12.96 / 2.22 / 0.74 |
+
+- **Clustered lights**: `lit_opaque` falls to 2.52 (`hub`), 3.35, 3.14 and 3.44 ms; nothing else
+  moves. The cluster assignment costs no measurable `prepare` time (3 to 1,316 light–cluster tests,
+  no overflows). The images were not compared here; #72 found the output unchanged on its scenes.
+- **GPU culling**: the bounds tests move to a 0.03 ms compute pass and `prepare` drops by about
+  0.7 ms, but the indirect path issues 957 to 1,209 main and 4,272 to 4,630 shadow draws (one per
+  run), `encode` rises by 0.4 ms and `render_ms` gets worse by 1.0 to 1.4 ms. The upload is
+  unchanged. This matches #59/#71: not a win on this hardware, now also on real content.
+
+### Pacing and stutter
+
+The native path renders offscreen, one frame at a time, with no present and no vsync, so this is
+the cost of each frame, not display pacing. After warm-up, p99 is at most 1.33× the median and no
+frame took twice the median in the run checked. After a camera cut to `woods` and `vale`, the first
+40 frames cost 1.5 to 2.7 ms more GPU than the settled frames (13.1 to 13.8 ms against 11.6 and
+10.4); this is consistent with level-of-detail cross-fades drawing dissolve copies for 0.35 s, but
+that was not verified. Each cut builds 24 to 38 meshes (0.4 to 0.7 MB) and its first frame takes
+22 to 30 ms.
+
+**Startup.** The first frame of the process takes **2,781 to 2,992 ms**:
+
+| Part | ms |
+| --- | --- |
+| Game composition (`presentation.frame`) | about 1,530 |
+| `FrameRenderer::render` before `prepare` (`NatureGpu::upload`, the first meshes and textures into `World`) | 1,209 (one run, local timer) |
+| render-engine `prepare` / `encode` | 4.1–5.9 / 0.9 |
+| GPU | 17–90 |
+
+That frame uploads 379 MB into render-engine's `World`: 1,659 meshes, 77 textures, 1,654
+materials. The game decides what is built and uploaded when, so this is game-owned
+([mmorpg#726](https://github.com/moenarch-games/mmorpg/issues/726)); the share of the upload calls
+themselves is not split from the client's mesh building.
+
+Per process, the test binary run directly (start-up and 960 frames):
+
+| Metric | Value | Source |
+| --- | --- | --- |
+| Wall time | 22.7 s | `time -v` |
+| CPU user + system | 11.1 + 0.9 s | `time -v` |
+| Peak resident memory | 1,769 MB | `time -v` |
+| GPU memory, process | 718 MB peak (844 MB in one run) | `nvidia-smi pmon` |
+| GPU busy, process | 50 % mean, 66 % peak | `nvidia-smi pmon`, 19 samples of 1 s |
 
 ### Skinned units (real Ranger asset, not a Greyhaven scene)
 
-`imported_mesh_buffer_observation` draws the pinned Ranger (13 primitives) with no scenery, at
-640×360. Counts are deterministic; the times are one sample of one run.
-
-| Units | First frame: buffers / bytes uploaded | Later frames: buffers / mesh bytes / palette uploads | Later frame, render through GPU complete |
-| --- | --- | --- | --- |
-| 1 | 13 / 2,147,256 | 0 / 0 / 1 | 2.6 ms |
-| 10 | 13 / 2,147,256 | 0 / 0 / 10 | 3.2 ms |
-| 50 | 13 / 2,147,256 | 0 / 0 / 50 | 5.7 ms |
-
-GPU skinning removed the per-frame churn measured earlier
-([#338 report](https://github.com/moenarch-games/mmorpg/tree/main/docs/reviews/native-mesh-allocation)):
-later frames create no buffers and upload no mesh bytes, only one joint palette per unit. The very
-first frame of the process took 342 ms to submit; a first frame on a later renderer in the same
-process took about 40 ms. Those are the only startup numbers the native paths give, for this
-units-only scene.
+Not rerun; from the first slice. `imported_mesh_buffer_observation` draws the pinned Ranger (13
+primitives) with no scenery, at 640×360. Later frames create no buffers and upload no mesh bytes,
+only one joint palette per unit: 1, 10 and 50 units took 2.6, 3.2 and 5.7 ms from render through
+GPU completion (one sample each). A crowd in a real camera is mmorpg#724.
 
 ## Browser measurements
 
-`profile-browser.py`, primary run with load average 5.4 at start and 7.4 at the end. Times are
-per animation frame: `rAF` is the interval between frames (frame pacing, vsynced to 60 Hz); `CPU`
-is main-thread time for the whole frame; `GPU` is `EXT_disjoint_timer_query_webgl2` for the frame's
-commands.
+`profile-browser.py`, two runs, load average 1.2 at the start of the first and 0.5 of the second
+(4.0 at most at the end). Times are per animation frame: `rAF` is the interval between frames
+(vsynced to 60 Hz); `CPU` is main-thread time for the whole frame; `GPU` is
+`EXT_disjoint_timer_query_webgl2` for the frame's commands. First run:
 
 | Scenario | fps | rAF p50 / p95 / p99 / max ms | CPU p50 / p95 / p99 ms | GPU p50 / p95 / p99 ms |
 | --- | --- | --- | --- | --- |
-| `idle` | 60.7 | 16.7 / 16.8 / 33.4 / 100.0 | 13.8 / 18.3 / 28.3 | 9.34 / 11.04 / 14.50 |
-| `dense-woods` | 44.8 | 16.7 / 50.0 / 183.3 / 383.4 | 10.8 / 14.4 / 17.6 | 12.74 / 26.38 / 112.96 |
-| `dense-hub` | 48.0 | 16.7 / 66.6 / 166.7 / 516.7 | 11.8 / 15.3 / 21.9 | 10.18 / 40.25 / 121.59 |
-| `western-lake` | 51.5 | 16.7 / 33.4 / 99.9 / 283.4 | 12.8 / 17.4 / 21.5 | 14.86 / 28.03 / 42.55 |
-| `overview` | 41.5 | 16.7 / 66.7 / 216.7 / 650.0 | 14.0 / 24.7 / 31.8 | 10.91 / 34.33 / 59.31 |
+| `idle` | 63.0 | 16.7 / 16.7 / 16.8 / 100.0 | 11.4 / 12.7 / 14.8 | 10.39 / 11.32 / 12.24 |
+| `move-rotate` | 58.4 | 16.7 / 50.0 / 66.7 / 799.9 | 12.7 / 18.9 / 50.4 | 10.10 / 25.10 / 54.42 |
+| `dense-woods` | 30.0 | 16.7 / 199.9 / 283.3 / 416.6 | 9.4 / 14.1 / 16.4 | 14.62 / 114.80 / 200.79 |
+| `dense-hub` | 32.3 | 16.7 / 183.2 / 283.4 / 516.6 | 9.8 / 13.5 / 18.6 | 11.87 / 114.65 / 212.86 |
+| `western-lake` | 49.7 | 16.7 / 33.4 / 183.2 / 416.6 | 8.2 / 11.8 / 14.0 | 16.29 / 31.00 / 141.40 |
+| `overview` | 41.8 | 16.7 / 100.0 / 233.3 / 500.0 | 10.0 / 14.3 / 17.0 | 13.26 / 75.34 / 176.37 |
 
-A second run, started at load average 33 and including the viewport sweep, gives GPU p50 of 9.61,
-13.35, 10.59, 14.57 and 12.00 ms and CPU p50 of 14.0, 11.9, 12.8, 11.1 and 15.1 ms on the same
-scenarios in the same order. The tails (p95 and up) are dominated by the load, so only the p50s
-compare between the two runs.
+The second run (`--no-sweep`) reproduces it: `dense-woods` 28.3 fps with GPU p95 173.08 ms,
+`dense-hub` 22.8 fps with 255.54 ms, `western-lake` 45.5 fps with 36.56 ms, `idle` unchanged. At
+`6ebc4c64` these GPU p95s were 26.38, 40.25 and 28.03 ms on a loaded machine: the p50s are close,
+the tails grew. The CPU frame stays under 16 ms at p95 and no frame creates resources, so the
+stalls are GPU work on some frames, unattributed; filed as
+[mmorpg#727](https://github.com/moenarch-games/mmorpg/issues/727).
 
-Per frame, three's own count per pass (`drawsByPass`), mean over the same scenario (these counts
-include `BatchedMesh` multi-draws, which the wrapped GL `drawCallsPerFrame` does not; see
-[mmorpg#692](https://github.com/moenarch-games/mmorpg/issues/692)):
+Per frame, first run. *GL draws* counts every draw at the WebGL boundary, now including each
+sub-draw of a multi-draw; *calls by pass* is three's own count per pass (`drawsByPass`), where one
+`BatchedMesh` multi-draw is one call:
 
-| Scenario | Calls: all / sun cascades / main opaque | Triangles: all / sun cascades / main opaque | Instance batches |
-| --- | --- | --- | --- |
-| `idle` | 500 / 254 / 168 | 5.28 M / 3.94 M / 1.34 M | 2,493 |
-| `dense-woods` | 395 / 193 / 124 | 5.42 M / 3.72 M / 1.70 M | 2,493 |
-| `dense-hub` | 524 / 230 / 217 | 5.95 M / 3.89 M / 2.06 M | 2,493 |
-| `western-lake` | 345 / 159 / 109 | 4.63 M / 3.20 M / 1.43 M | 2,493 |
-| `overview` | 488 / 153 / 256 | 4.25 M / 2.66 M / 1.59 M | 2,493 |
+| Scenario | GL draws | GL triangles | Calls by pass: all / sun cascades / main opaque | Triangles by pass: all / sun cascades / main opaque | Instance batches |
+| --- | --- | --- | --- | --- | --- |
+| `idle` | 8,773 | 8.67 M | 532 / 276 / 177 | 6.91 M / 4.73 M / 2.19 M | 153 |
+| `move-rotate` | 6,188 | 5.72 M | 633 / 348 / 210 | 6.66 M / 4.56 M / 2.10 M | 169 |
+| `dense-woods` | 6,935 | 7.52 M | 498 / 276 / 144 | 7.52 M / 4.72 M / 2.80 M | 181 |
+| `dense-hub` | 7,223 | 7.95 M | 662 / 303 / 280 | 7.91 M / 4.64 M / 3.26 M | 162 |
+| `western-lake` | 6,861 | 5.74 M | 453 / 248 / 128 | 5.72 M / 3.73 M / 1.98 M | 167 |
+| `overview` | 7,086 | 5.90 M | 641 / 237 / 323 | 5.90 M / 3.44 M / 2.45 M | 168 |
 
-Main-thread phases, p50 in ms (`?profile`), range over the five scenarios: `render` 7.4 to 9.6,
-`simulation` 1.5 to 1.6, `scene` 0.8 to 0.9, `units` 0.5 to 0.9, `projection` 0.3 to 0.4, `hud` 0.3
-to 0.4. No frame in these scenarios created resources (`framesCreatingResources` 0).
+With multi-draws counted, the browser submits 6,200 to 8,800 draws a frame, against 185 to 878 main
+and 1,865 to 2,550 shadow draws natively; the native counts are of instanced draws, so neither
+side's count is a measure of the other's work. Instance batches fell from 2,493 at `6ebc4c64` to
+153 to 181 (the game's tile streaming and batching since).
 
-Startup: 5.5 to 5.7 s from navigation to an enabled Enter button (`coldSelectionSeconds`), 3.4 to
-3.6 s for the Enter World key to a playable view (`enterWorldKey.wallSeconds`). Not comparable to
-the native start-up: the browser downloads and compiles the bundle.
+Main-thread phases, p50 in ms (`?profile`), range over the six scenarios: `render` 4.2 to 7.3,
+`simulation` 1.5 to 2.1, `scene` 1.2 to 2.0, `units` 0.6 to 0.9, `projection` 0.3, `hud` 0.2 to
+0.4.
 
-The 1280×720 row of the viewport sweep (second run) gives `idle` GPU p50 of 9.08 ms, the only
-browser number at the native resolution.
+Startup: 3.56 and 3.65 s from navigation to an enabled Enter button (`coldSelectionSeconds`), 3.28
+and 3.16 s from the Enter World key to a playable view. Not comparable to the native start-up: the
+browser downloads and compiles the bundle and streams the scenery.
+
+Viewport sweep (first run), `idle`: GPU p50 10.02 ms at 1280×720 (the native resolution) and 12.36
+ms at 1920×1080.
 
 ### Not comparable between native and browser
 
 - **Resolution and cascades**: 1280×720 with four cascades, against 1440×900 with three.
-- **`render_ms` and browser `render`**: native is `prepare`, `encode`, submission and the wait for
-  the GPU; browser is main-thread three.js and WebGL submission only, and the GPU time is separate.
-- **Pacing**: the native test renders offscreen as fast as it can, with no present and no vsync;
-  the browser is vsynced to 60 Hz and rAF intervals quantize to it. The browser's rAF p50 of 16.7
-  ms is vsync, not cost.
-- **Renderer revision**: the two pin different render-engine commits (`bd4708dd` native, `81752f2`
-  for the three.js port).
-- **Draws and instances**: native counts are not observable; the browser's come from three.
+- **CPU time**: native `prepare` and `encode` are the renderer's calls alone; browser `render` is
+  main-thread three.js and WebGL submission. GPU time is separate on both.
+- **Pacing**: native renders offscreen with no present or vsync and waits for each frame; the
+  browser is vsynced to 60 Hz and rAF intervals quantize to it. The browser's rAF p50 of 16.7 ms
+  is vsync, not cost.
+- **Draws**: native counts instanced draws per pass after culling; the browser counts WebGL draws
+  and multi-draw sub-draws. Native has no triangle count.
+- **Point lights**: the native default evaluates all 13 per fragment; the browser's light path is
+  three-lighting's own and was not measured here.
+- **Renderer revision**: render-engine `df5597b5` native, `81752f2` for the three.js port.
 
 ## Bottlenecks, by owning boundary
 
-1. **Renderer boundary, native (render-engine `prepare`/`encode` and GPU, unsplit).** 12.7 to 17.4 ms
-   of the 14.4 to 19.1 ms median frame. The largest measured block. Blocker: the client passes no
-   timestamps and the pinned engine has no work counters, so nothing inside it can be attributed
-   (`mmorpg#692`). Until that runs, no renderer gap can be named, and neither Forward+ nor
-   GPU-driven culling can be judged on this content.
-2. **Water view.** The lake is the most expensive view on both: native `render_ms` median 17.41 ms
-   against 12.73 to 15.90 ms for the others, browser GPU p50 14.86 ms against 10.18 to 12.74 ms on
-   the other three views. The browser draws the fewest calls there (345, against 395 to 524), and
-   the overview draws fewer triangles (4.25 M against 4.63 M) yet costs 3.95 ms less GPU, so the
-   cost looks like shading or overdraw rather than geometry. The owner cannot be named without
-   pass timing (renderer, or game water material).
-3. **Browser sun cascades.** About two thirds of all triangles (2.66 to 3.94 M of 4.25 to 5.95 M)
-   and 153 to 254 of the 345 to 524 calls in every scenario. Game scene composition and
-   `three-lighting`, which redraws the scene per cascade. mmorpg#615 owns the draw-call work here
-   and found triangles alone do not limit the frame, so this report files nothing new.
-4. **Browser main-thread render.** 7.4 to 9.6 ms of a 10.8 to 14.0 ms CPU frame (p50). Owned by
-   mmorpg#615.
-5. **Asset preparation and loading.** Native first-frame cost is visible only for the Ranger-only
-   scene (342 ms at process start, 40 ms after). The start-up of a full Greyhaven scene is not
-   measured (below).
+Native, largest first, for the `lake` view (the slowest; the others order the same way):
 
-Measured and not a bottleneck: game composition (1.7 ms native, stable), simulation (1.6 ms browser
-p50), animation (browser `units` under 1 ms; native skinned units upload one palette per unit).
+1. **Renderer: per-fragment point lights** in `lit_opaque`. 9.8 ms of the 13.2 ms GPU frame, of
+   which 6.4 ms goes away with clustered assignment (2.7 to 6.4 ms over the views). The first
+   slice's "water view" bottleneck was this: `lit_transparent`, where the water draws, is 0.27 ms.
+   [#94](https://github.com/moritzbrantner/render-engine/issues/94) (needs a decision),
+   consumer opt-in [mmorpg#725](https://github.com/moenarch-games/mmorpg/issues/725).
+2. **Renderer: `prepare`**, 2.8 to 3.1 ms of CPU, mostly rewriting about 26,000 static instances
+   (3.4 MB) and testing them against 5 views. GPU culling moves the tests but costs more than it
+   saves. [#95](https://github.com/moritzbrantner/render-engine/issues/95).
+3. **Renderer: sun shadows**, 1.6 to 2.6 ms of GPU over 1,865 to 2,550 draws and 25,000 to 32,000
+   shadow-visible instances in four cascades. Measured, not filed: no gap against Bevy's cascade
+   defaults is shown, and #59 found Hi-Z no help on this hardware.
+4. **Unsplit remainder** inside `render_ms`, 1.5 to 1.8 ms: submission, timestamp resolve, the
+   queued writes and the wake-up from the wait. Partly an artefact of waiting each frame.
+5. **Game: first-frame stall**, 2.8 s at start-up (composition 1.5 s, asset upload 1.2 s, 379 MB).
+   [mmorpg#726](https://github.com/moenarch-games/mmorpg/issues/726).
+6. **Game: steady composition**, 1.34 ms, plus 0.26 ms of instance building. Stable and small.
+
+Browser:
+
+1. **GPU spikes** in `dense-woods`, `dense-hub`, `western-lake` and `overview` (GPU p95 31 to 255
+   ms), new since `6ebc4c64`. Owner not yet known; [mmorpg#727](https://github.com/moenarch-games/mmorpg/issues/727)
+   routes any three-lighting share back here.
+2. **Sun cascades**: two thirds of the triangles (3.4 to 4.7 M of 5.7 to 7.9 M) and 237 to 348 of
+   the 453 to 662 calls by pass. Game composition and three-lighting; mmorpg#615 (closed) did the
+   draw-call work and found triangles alone do not limit the frame.
+3. **Main-thread render**, 4.2 to 7.3 ms of a 8.2 to 12.7 ms CPU frame (p50). Down from 7.4 to 9.6
+   ms at `6ebc4c64`.
+
+Measured and not a bottleneck: game composition (1.34 ms native), simulation (1.5 to 2.1 ms browser
+p50), animation (browser `units` under 1 ms; native skinned units upload one palette per unit),
+GPU memory (718 MB of 8 GB), allocations (0 per steady frame).
 
 ## Visual comparison
 
-There is no designated approved reference set. The closest are the merged review images in
-`docs/reviews/web-lighting/native-vs-web-{noon,dusk,night,woods-mid}.jpg` (mmorpg#610). They are
-not formally approved, they were taken from an older game and render-engine, and the Greyhaven
-content has moved on since.
+There is still no approved reference capture set. The closest are the merged review images in
+`docs/reviews/web-lighting/native-vs-web-{noon,dusk,night,woods-mid}.jpg` in the mmorpg repository
+(mmorpg#610). They are not formally approved, were taken from an older game and render-engine, and
+their camera poses no longer match the current shots (see #78's revision of this report). No
+numeric image comparison was run in this revision; it waits on the owner's choice of a reference
+set, asked on #74.
 
-`greyhaven_lighting_shots` at the current pin was viewed against them for noon, night and
-woods-mid. The camera poses no longer match (the current `noon`/`night` shots are the
-`OrbitCamera` default at spawn, the reviewed ones a different spot), and the woods have new tree
-kits and ground. Sky, exposure, sun and shadow character look the same as the reviewed native
-images; the night shot's lamp pool is present in both. This is a visual review of a few frames
-only, not a measurement. No FLIP or numeric image comparison was run. Numeric comparison needs an
-approved capture set first.
-
-The existing Bevy oracle gates are untouched: this PR changes docs only.
+The existing Bevy oracle gates are untouched: this change is docs only.
 
 ## Not measured, with the blocker
 
 | Item | Blocker |
 | --- | --- |
-| Native CPU `prepare`, `encode` | `outpost_frame_time` times the whole `SceneRenderer::render`. |
-| Native GPU pass times | The client requests no `TIMESTAMP_QUERY` and passes no timestamps to `encode`. |
-| Native instance, draw and triangle counts | `Viewport::work` is not in the pinned engine (`bd4708dd`); the test prints none of them. |
-| Native uploads and allocations on a full Greyhaven frame | Only the units-only path above counts them. |
-| Native frame p99 | The test prints the median and p95 only. |
-| Native frame pacing | The path renders offscreen. A real window run (`--frames`) has no frame-time output. |
-| Native startup and loading stutter on Greyhaven | The test drops the first 40 frames of each view and prints no load time. |
-| A dense-unit Greyhaven camera (either renderer) | No existing path spawns a crowd in a real scene. |
-| Starter-area native view | No timed native path uses the spawn camera (the shots use it, untimed). |
-| Browser `move-rotate` Chromium trace | Chromium was OOM-killed at about 7.1 GB with `--trace`; the two reported runs ran without it. |
+| Native triangle counts | `PrepareWork` counts draws and instances, not indices. |
+| Native display pacing | The path renders offscreen and waits each frame. A windowed run (`--frames`) prints no frame times. |
+| A dense-unit Greyhaven camera, a timed native starter-area view | Not in any existing path: [mmorpg#724](https://github.com/moenarch-games/mmorpg/issues/724). |
+| Images with clustered lights on Greyhaven | Not captured; part of [mmorpg#725](https://github.com/moenarch-games/mmorpg/issues/725). |
+| Numeric visual comparison | No approved reference capture set; owner question on #74. |
+| Browser GPU spike cause | Needs a trace or a bisection: [mmorpg#727](https://github.com/moenarch-games/mmorpg/issues/727). |
 | Native `perf`/CPU sampling | `kernel.perf_event_paranoid` is 4 on this machine. |
-| A quiet machine | Shared with other sessions; see the load figures. |
 
 ## Reproducing
 
 ```sh
-git clone https://github.com/moenarch-games/mmorpg && cd mmorpg && git checkout 6ebc4c64
+git clone https://github.com/moenarch-games/mmorpg && cd mmorpg && git checkout 05a1e3eb
 bash scripts/fetch-bundles.sh && bash scripts/prepare-ranger-native.sh
 cargo test --release --locked -p mmorpg-client --lib outpost_frame_time -- --ignored --nocapture
-cargo test --release --locked -p mmorpg-client --lib imported_mesh_buffer_observation -- --ignored --nocapture
-MMORPG_LIGHTING_SHOTS=/some/dir cargo test --release --locked -p mmorpg-client --lib greyhaven_lighting_shots -- --ignored --nocapture
 (cd web && bun install --frozen-lockfile && bun run build)
-python scripts/profile-browser.py --out artifacts/profile/report.json   # needs Playwright; omit --trace on a machine that can OOM
+python scripts/profile-browser.py --out artifacts/profile/report.json   # needs Playwright
 ```
 
-Wrap the native command in `/usr/bin/time -v` and run `nvidia-smi pmon -s um -d 1` beside it for
-the memory and GPU-busy figures.
+Run the test binary (`target/release/deps/mmorpg_client-*`, arguments `outpost_frame_time --ignored
+--nocapture`) under `/usr/bin/time -v` with `nvidia-smi pmon -s um -d 1` beside it for the process
+figures; under `cargo test` they include cargo. The engine-option table needs, in
+`FrameRenderer::new` after `Viewport::new`, `viewport.set_light_assignment(&renderer,
+LightAssignment::Clustered(Default::default()))` or `viewport.set_culling(&renderer,
+Culling::GpuIndirect)` (the latter with `INDIRECT_FIRST_INSTANCE` added to the client's
+`required_features`).
 
 Scope of this report: no renderer, shader, default or gate changed, and no new profiler or timing
 ratchet was added.

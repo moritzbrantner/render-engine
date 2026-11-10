@@ -618,11 +618,11 @@ no-prepass path. In the browser,
 [mmorpg#615](https://github.com/moenarch-games/mmorpg/issues/615) found Greyhaven bound by CPU
 draw-call submission, so 15 % fewer shadow triangles did not raise the frame rate.
 
-The first real-consumer numbers are in the [Greyhaven baseline](greyhaven-baseline.md) (#74): on
-real frames the native client spends about 90 % of its frame inside the renderer boundary, at a
-game pin older than the work counters and both experiments. It cannot yet split that into `prepare`,
-`encode` and GPU passes, so no stage 1 experiment has consumer evidence so far
-([mmorpg#692](https://github.com/moenarch-games/mmorpg/issues/692) adds the attribution).
+The first real-consumer numbers are in the [Greyhaven baseline](greyhaven-baseline.md) (#74),
+now split into `prepare`, `encode` and GPU passes. On those frames the clustered path (#72) cuts
+the GPU frame by 32 to 50 % with 13 point lights, so it has consumer evidence for stage 2
+([#94](https://github.com/moritzbrantner/render-engine/issues/94), the owner's decision). GPU
+culling (#71) does not beat the CPU path there, as #59 found for Hi-Z.
 
 ## Standing rules
 
