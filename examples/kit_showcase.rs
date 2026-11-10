@@ -475,6 +475,8 @@ fn burst(
             0.0
         },
         blend,
+        lighting: None,
+        fog: false,
         active: true,
     }
 }
@@ -556,6 +558,8 @@ fn fire(puff: TextureId, seed: u32) -> Emitter {
         roundness: 0.0,
         depth_fade: 0.35,
         blend: ParticleBlend::Add,
+        lighting: None,
+        fog: true,
         active: true,
     }
 }
@@ -594,6 +598,8 @@ fn embers(seed: u32) -> Emitter {
         roundness: 0.0,
         depth_fade: 0.0,
         blend: ParticleBlend::Add,
+        lighting: None,
+        fog: true,
         active: true,
     }
 }
@@ -635,6 +641,8 @@ fn smoke(puff: TextureId, seed: u32) -> Emitter {
         roundness: 0.0,
         depth_fade: 0.8,
         blend: ParticleBlend::Alpha,
+        lighting: Some(ParticleLighting::diffuse()),
+        fog: true,
         active: true,
     }
 }
@@ -698,6 +706,8 @@ fn precipitation(
         roundness: if snow { 1.0 } else { 0.0 },
         depth_fade: 0.0,
         blend: ParticleBlend::Alpha,
+        lighting: Some(ParticleLighting::diffuse()),
+        fog: true,
         active: true,
     }
 }
@@ -741,6 +751,8 @@ fn mist(puff: TextureId, count: u32, half: Vec3, color: Vec4, size: f32, seed: u
         roundness: 0.0,
         depth_fade: 1.5,
         blend: ParticleBlend::Alpha,
+        lighting: Some(ParticleLighting::diffuse()),
+        fog: true,
         active: true,
     }
 }
@@ -780,6 +792,8 @@ fn waterfall(puff: TextureId, width: f32, seed: u32) -> Emitter {
         roundness: 0.0,
         depth_fade: 0.6,
         blend: ParticleBlend::Alpha,
+        lighting: Some(ParticleLighting::diffuse()),
+        fog: true,
         active: true,
     }
 }
@@ -827,6 +841,8 @@ fn magic_cloud(count: u32, radius: f32, seed: u32) -> Emitter {
         roundness: 1.0,
         depth_fade: 0.0,
         blend: ParticleBlend::Add,
+        lighting: None,
+        fog: true,
         active: true,
     }
 }

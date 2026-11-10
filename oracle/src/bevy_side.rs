@@ -1275,11 +1275,28 @@ pub fn run_particles(
             sim_frame: 0,
             updates: 0,
             captures: scenario.captures.iter().map(|c| c.frame).collect(),
-            emitters: scenario.emitters.len(),
+            // hanabi effects that must compile before the spawners start (none for quads).
+            emitters: if scenario.reference == particles::Reference::Hanabi {
+                scenario.emitters.len()
+            } else {
+                0
+            },
             timed_frames,
         });
     insert_scene_resources(&mut app, &scenario.scene);
     let seed = variant.seed.unwrap_or(scenario.seed);
+    let quads = scenario.reference == particles::Reference::StandardQuads;
+    let quad_spawns = quads.then(|| particles::quad_spawns(&scenario));
+    if quads {
+        let cam = scenario.scene.camera;
+        app.insert_resource(QuadReference {
+            emitters: scenario.emitters.clone(),
+            gravity_scale: variant.gravity_scale,
+            rotation: Transform::from_translation(v3(cam.eye))
+                .looking_at(v3(cam.target), Vec3::Y)
+                .rotation,
+        });
+    }
     app.add_systems(
         Startup,
         move |mut set: SceneSet, mut effects: ResMut<Assets<hanabi::EffectAsset>>| {
@@ -1290,6 +1307,10 @@ pub fn run_particles(
                 &scenario.assets,
                 None,
             );
+            if quads {
+                spawn_quads(&mut set, &scenario, &images);
+                return;
+            }
             for (i, e) in scenario.emitters.iter().enumerate() {
                 let asset = effect_asset(e, seed.wrapping_add(i as u32), variant.gravity_scale);
                 let spawner = hanabi::EffectSpawner::new(&asset.spawner).with_active(false);
@@ -1307,7 +1328,7 @@ pub fn run_particles(
             }
         },
     )
-    .add_systems(Update, drive_particles)
+    .add_systems(Update, (drive_particles, pose_quads).chain())
     .add_systems(Last, record_frame);
     let hanabi_spans = Arc::new(HanabiSpans::default());
     app.insert_resource(HanabiSpansHandle(hanabi_spans.clone()));
@@ -1316,11 +1337,107 @@ pub fn run_particles(
     app.run();
     let mut run = shared.0.lock().unwrap();
     run.sim_ms = std::mem::take(&mut *hanabi_spans.ms.lock().unwrap());
+    if let Some(spawns) = quad_spawns {
+        run.spawns = spawns;
+    }
     std::mem::take(&mut *run)
 }
 
 #[derive(Component)]
 struct EmitterIndex(usize);
+
+/// A [`particles::Reference::StandardQuads`] scenario's emitters, whose particle states
+/// [`pose_quads`] draws each frame, and the camera's rotation, which the quads take.
+#[derive(Resource)]
+struct QuadReference {
+    emitters: Vec<Emitter>,
+    gravity_scale: f32,
+    rotation: Quat,
+}
+
+/// One particle's quad: its emitter and its index among that emitter's particles.
+#[derive(Component)]
+struct QuadIndex(usize, usize);
+
+/// Lit and fogged particles (#84) as Bevy draws them: per particle a unit `Rectangle` (normal
+/// +z, uvs as hanabi's quad) with its own `StandardMaterial`: the particle's colour times the
+/// emitter's texture, lit with the emitter's `ParticleLighting` or unlit, `fog_enabled` per
+/// emitter, blended like the emitter. The quads cast no shadows (particles do not); hidden until
+/// [`pose_quads`] places them.
+fn spawn_quads(set: &mut SceneSet, s: &ParticleScenario, images: &[Handle<Image>]) {
+    let rectangle = set.meshes.add(Rectangle::new(1.0, 1.0));
+    for (i, e) in s.emitters.iter().enumerate() {
+        let Spawn::Burst { count } = e.spawn else {
+            panic!("{}: a quad reference needs a burst", e.name);
+        };
+        if let Some(t) = e.texture {
+            assert!(
+                t.mapping == TextureMapping::Modulate && t.flipbook.is_none(),
+                "{}: a quad reference modulates by its texture, without a flipbook",
+                e.name
+            );
+        }
+        let lighting = e.lighting.unwrap_or_default();
+        for k in 0..count.min(e.capacity) as usize {
+            let material = set.materials.add(StandardMaterial {
+                base_color_texture: e.texture.map(|t| images[t.texture].clone()),
+                perceptual_roughness: lighting.perceptual_roughness,
+                metallic: lighting.metallic,
+                reflectance: lighting.reflectance,
+                unlit: e.lighting.is_none(),
+                fog_enabled: e.fog,
+                alpha_mode: match e.blend {
+                    ParticleBlend::Add => AlphaMode::Add,
+                    ParticleBlend::Alpha => AlphaMode::Blend,
+                },
+                ..default()
+            });
+            set.commands.spawn((
+                Mesh3d(rectangle.clone()),
+                MeshMaterial3d(material),
+                Transform::default(),
+                Visibility::Hidden,
+                bevy::light::NotShadowCaster,
+                QuadIndex(i, k),
+            ));
+        }
+    }
+}
+
+/// Places every quad at its particle's state after this simulation frame
+/// (`particles::quad_states`), facing the camera like hanabi's `ParallelCameraDepthPlane`.
+fn pose_quads(
+    plan: Res<ParticlePlan>,
+    reference: Option<Res<QuadReference>>,
+    mut quads: Query<(
+        &QuadIndex,
+        &mut Transform,
+        &mut Visibility,
+        &MeshMaterial3d<StandardMaterial>,
+    )>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let Some(r) = reference else { return };
+    if plan.sim_frame == 0 {
+        return;
+    }
+    let states = particles::quad_states(&r.emitters, plan.sim_frame, r.gravity_scale);
+    for (q, mut transform, mut visibility, material) in &mut quads {
+        let Some(s) = states.iter().filter(|s| s.emitter == q.0).nth(q.1) else {
+            *visibility = Visibility::Hidden;
+            continue;
+        };
+        *visibility = Visibility::Visible;
+        *transform = Transform {
+            translation: v3(s.position),
+            rotation: r.rotation,
+            scale: Vec3::new(s.size.x, s.size.y, 1.0),
+        };
+        if let Some(mut m) = materials.get_mut(&material.0) {
+            m.base_color = Color::linear_rgba(s.color.x, s.color.y, s.color.z, s.color.w);
+        }
+    }
+}
 
 fn screenshot(commands: &mut Commands, target: &TargetImage, shared: &ParticleShared, frame: u32) {
     let shared = shared.clone();

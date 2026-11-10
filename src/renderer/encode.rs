@@ -206,7 +206,13 @@ impl Renderer {
                     &lit_index,
                 );
                 if !soft {
-                    viewport.particles.draw(&mut pass, &self.particles, world);
+                    viewport.particles.draw(
+                        &mut pass,
+                        &self.particles,
+                        world,
+                        frame_group,
+                        viewport.lighting_group.as_ref(),
+                    );
                 }
                 if stats.is_some() {
                     pass.end_pipeline_statistics_query();
@@ -263,7 +269,13 @@ impl Renderer {
                     &lit_index,
                 );
                 if !soft {
-                    viewport.particles.draw(&mut pass, &self.particles, world);
+                    viewport.particles.draw(
+                        &mut pass,
+                        &self.particles,
+                        world,
+                        frame_group,
+                        viewport.lighting_group.as_ref(),
+                    );
                 }
                 if stats.is_some() {
                     pass.end_pipeline_statistics_query();
@@ -285,7 +297,13 @@ impl Renderer {
                 },
                 stamps.render(),
             );
-            viewport.particles.draw(&mut pass, &self.particles, world);
+            viewport.particles.draw(
+                &mut pass,
+                &self.particles,
+                world,
+                frame_group,
+                viewport.lighting_group.as_ref(),
+            );
         }
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("tonemap"),

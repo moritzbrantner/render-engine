@@ -468,8 +468,8 @@ Each capture is judged by one of two tiers:
   hard edges on terrain, smoke glowing at night and particles unfogged in fog). Soft, lit and
   fogged particles are built as opt-in emitter options; every default stays hanabi parity, so
   the particle scenarios above are unchanged. Lit and fogged particles are gated against Bevy
-  `StandardMaterial` camera-facing quads (#84). Soft particles have no Bevy counterpart and are
-  checked by engine tests and the kit scenes:
+  `StandardMaterial` camera-facing quads (#84, `particles_lit_fog`). Soft particles have no Bevy
+  counterpart and are checked by engine tests and the kit scenes:
   - **Soft particles** (#83, `Emitter::depth_fade`): over the last `depth_fade` metres of view
     distance in front of the opaque scene, alpha is scaled by `clamp((scene − particle) /
     depth_fade, 0, 1)`, with the scene's distance from sample 0 of the multisampled depth
@@ -477,6 +477,34 @@ Each capture is judged by one of two tiers:
     of a frame with a soft emitter draw in a pass of their own after the main pass, with the
     depth target attached read-only and bound as a texture; a frame without one keeps them in
     the main pass and renders as before.
+  - **Lit and fogged particles** (#84, `Emitter::lighting`, `Emitter::fog`): a lit particle is
+    shaded as a Bevy `StandardMaterial` on its camera-facing quad. Its base colour is the
+    particle's colour after its texture, its roughness, metallic and reflectance come from
+    `ParticleLighting`, and its normal is the quad's, turned towards the camera.
+    `lit.wgsl`'s `lit_radiance` shades it, so the lights, sun shadows, ambient and environment
+    light and the exposure are those of lit geometry. The fragment stage does not use the
+    clustered light lookup. A fogged particle, lit or not, goes through `apply_fog` like Bevy's
+    `main_pass_post_lighting_processing`, alpha kept. Like Bevy's unlit `StandardMaterial`, an
+    unlit particle is not exposed. These emitters draw with pipelines compiled from
+    `lit.wgsl`, `particles.wgsl` (its groups moved to 2 and 3) and `particles_shaded.wgsl`.
+    The pipelines bind the lit pass's frame and lighting groups; unlit, unfogged emitters keep
+    hanabi's shader. **Oracle:** `particles_lit_fog` runs in the lit set under exponential fog
+    with sun inscattering (`Reference::StandardQuads`). On the Bevy side hanabi does not run.
+    Instead Bevy draws each particle's state (`particles::quad_states`) as a unit `Rectangle`
+    with its own `StandardMaterial`. That material is lit or unlit, sets `fog_enabled` per
+    emitter, uses `AlphaMode::Blend` or `Add`, has `NotShadowCaster`, and takes the camera's
+    rotation. The states come from the emitters without random draws: one puff per emitter,
+    spawned on frame 1 at a fixed position and velocity, stepped like the engine's update pass.
+    Both sides therefore draw the same particles, and they sort the emitters by the same
+    positions, so every capture is in the exact tier (the FLIP gate). The gate is on the
+    shading alone; the hanabi scenarios gate the simulation. GPU time compares render-engine's
+    simulation plus rendering with Bevy's rendering of the quads, since hanabi has nothing to
+    simulate. On the RTX 3060 Ti and on lavapipe both captures score FLIP mean 0.0000 and p99
+    ≤ 0.0009. Rendering the same particles unlit scores mean 0.0067–0.0103 and p99 0.26–0.28;
+    rendering them unfogged scores mean 0.0038–0.0060 and p99 0.12–0.13. Both fail the gate.
+    `--calibrate` gives 0 for a rerun and for every other seed, since there are no random
+    draws. Gravity × 1.25 moves the puffs by 1.6 mm at 0.5 s, which passes (p99 0.022). At
+    2.5 s it fails with p99 0.20. GPU time is 0.151 ms against Bevy's 0.274 ms.
 - **Recycling in practice.** On the RTX 3060 Ti and on lavapipe, both sides' atomics happen to
   recycle slots in the same order for `particles_fountain` and `particles_100k`, so their late
   captures also match nearly exactly (FLIP mean ≤ 0.0002, statistics 0.000). The statistical

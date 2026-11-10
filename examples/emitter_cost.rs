@@ -55,6 +55,8 @@ fn spark(texture: render_engine::world::TextureId, seed: u32) -> Emitter {
         roundness: 0.0,
         depth_fade: 0.0,
         blend: ParticleBlend::Add,
+        lighting: None,
+        fog: false,
         active: true,
     }
 }

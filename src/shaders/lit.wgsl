@@ -827,6 +827,7 @@ struct MaterialSample {
     emissive: vec3<f32>,
     metallic: f32,
     perceptual_roughness: f32,
+    reflectance: f32,
     diffuse_occlusion: f32,
     // Tangent-space normal in [-1, 1], when the material has a normal map.
     Nt: vec3<f32>,
@@ -850,6 +851,7 @@ fn sample_material(in: VertexOut) -> MaterialSample {
         m.perceptual_roughness *= mr.g;
         m.metallic *= mr.b;
     }
+    m.reflectance = material.reflectance;
     m.diffuse_occlusion = 1.0;
     if ((material.flags & MATERIAL_OCCLUSION_TEXTURE) != 0u) {
         m.diffuse_occlusion = textureSample(occlusion_texture, occlusion_sampler, in.uv).r;
@@ -912,7 +914,9 @@ fn shade(in: VertexOut, is_front: bool, m: MaterialSample) -> vec4<f32> {
             }
             N = normalize(Nt.x * T + Nt.y * B + Nt.z * world_normal);
         }
-        color = vec4(lit_radiance(in, world_normal, N, m), m.base_color.a);
+        // Emissive light is scaled by alpha and exposed like the rest (Bevy, `emissive.a` = 1).
+        let emissive = m.emissive * m.base_color.a * mix(1.0, frame.flags.x, material.emissive.a);
+        color = vec4(lit_radiance(in, world_normal, N, m) + emissive, m.base_color.a);
     }
     if (frame.fog_bi.w > 0.5) {
         return vec4(apply_fog(color.rgb, in.world), color.a);
@@ -920,13 +924,14 @@ fn shade(in: VertexOut, is_front: bool, m: MaterialSample) -> vec4<f32> {
     return color;
 }
 
-// Exposed radiance of a lit fragment with shading normal `N`; shadows are looked up with the
-// interpolated vertex normal, as in Bevy.
+// Exposed radiance of a lit fragment with shading normal `N`, without its emissive light; shadows
+// are looked up with the interpolated vertex normal, as in Bevy. Reads no material or instance
+// binding, so lit particles (`particles_shaded.wgsl`) shade with it too.
 fn lit_radiance(in: VertexOut, world_normal: vec3<f32>, N: vec3<f32>, m: MaterialSample) -> vec3<f32> {
     let base = m.base_color.rgb;
     let metallic = m.metallic;
     let perceptual_roughness = m.perceptual_roughness;
-    let reflectance = material.reflectance;
+    let reflectance = m.reflectance;
     let roughness = perceptual_roughness_to_roughness(perceptual_roughness);
 
     let V = normalize(frame.eye.xyz - in.world);
@@ -1003,9 +1008,7 @@ fn lit_radiance(in: VertexOut, world_normal: vec3<f32>, N: vec3<f32>, m: Materia
     indirect += (diffuse_ambient + specular_ambient * specular_occlusion) * frame.ambient_color.rgb
         * m.diffuse_occlusion;
 
-    // Emissive light is scaled by alpha and exposed like the rest (Bevy, `emissive.a` = 1).
-    let emissive = m.emissive * m.base_color.a * mix(1.0, frame.flags.x, material.emissive.a);
-    return frame.flags.x * (direct + indirect) + emissive;
+    return frame.flags.x * (direct + indirect);
 }
 
 // ---------------------------------------------------------------- directional lights
