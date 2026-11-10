@@ -11,6 +11,8 @@ struct View {
     right: vec4<f32>,
     up: vec4<f32>,
     eye: vec4<f32>,
+    // x: the camera's near plane. Reverse-Z infinite depth d is near / view distance.
+    params: vec4<f32>,
 }
 
 const ORIENT_CAMERA_PLANE: u32 = 0u;
@@ -28,13 +30,17 @@ struct Emitter {
     // Flipbook sprites per row (0: no flipbook) and 1 / grid size.
     flipbook_columns: u32,
     flipbook_scale: vec2<f32>,
-    _pad: vec2<f32>,
+    // Soft particles: metres over which the particle fades out in front of the scene (0: off).
+    depth_fade: f32,
+    _pad: f32,
 }
 
 @group(0) @binding(0) var<uniform> view: View;
 @group(0) @binding(1) var<uniform> emitter: Emitter;
 @group(1) @binding(0) var particle_texture: texture_2d<f32>;
 @group(1) @binding(1) var particle_sampler: sampler;
+// The opaque scene's depth, for `fragment_soft` (the particle pass binds the target read-only).
+@group(2) @binding(0) var scene_depth: texture_depth_multisampled_2d;
 
 struct Instance {
     @location(0) position: vec3<f32>,
@@ -82,8 +88,7 @@ fn vertex(@builtin(vertex_index) vertex_index: u32, instance: Instance) -> Verte
     return out;
 }
 
-@fragment
-fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
+fn shade(in: VertexOutput) -> vec4<f32> {
     var color = in.color;
     // Sampled in uniform control flow: every fragment of the draw takes the same branch.
     let tex = textureSample(particle_texture, particle_sampler, in.uv);
@@ -99,5 +104,25 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
             discard;
         }
     }
+    return color;
+}
+
+@fragment
+fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
+    return shade(in);
+}
+
+// Soft particles (not in bevy_hanabi): alpha fades to zero over the last `depth_fade` metres of
+// view distance in front of the opaque scene, read from sample 0 of the multisampled depth.
+// Additive and alpha blending both scale the colour by alpha, so one fade serves both.
+@fragment
+fn fragment_soft(in: VertexOutput) -> @location(0) vec4<f32> {
+    var color = shade(in);
+    let near = view.params.x;
+    let scene = textureLoad(scene_depth, vec2<i32>(in.position.xy), 0);
+    // Depth 0 (nothing drawn: sky) is infinitely far.
+    let scene_distance = near / max(scene, 1e-30);
+    let distance = near / in.position.z;
+    color.a = color.a * clamp((scene_distance - distance) / emitter.depth_fade, 0.0, 1.0);
     return color;
 }

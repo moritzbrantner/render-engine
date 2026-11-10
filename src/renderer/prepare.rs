@@ -264,6 +264,8 @@ impl Renderer {
             world,
             clip_from_view * view_from_world,
             world_from_view,
+            cam.near,
+            &viewport.targets.depth_view,
         );
         let c = scene.clear_color;
         viewport.clear_color = wgpu::Color {

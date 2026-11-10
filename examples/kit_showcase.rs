@@ -36,6 +36,9 @@ use std::{
     time::Instant,
 };
 
+/// `--hard`: every emitter without its depth fade, for before/after comparisons.
+static HARD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 const WIDTH: u32 = 1280;
 const HEIGHT: u32 = 720;
 const DT: f32 = 1.0 / 60.0;
@@ -466,6 +469,11 @@ fn burst(
             }),
         }),
         roundness: 0.0,
+        depth_fade: if blend == ParticleBlend::Alpha {
+            0.15
+        } else {
+            0.0
+        },
         blend,
         active: true,
     }
@@ -546,6 +554,7 @@ fn fire(puff: TextureId, seed: u32) -> Emitter {
         orient: Orient::CameraPlane,
         texture: tex(puff),
         roundness: 0.0,
+        depth_fade: 0.35,
         blend: ParticleBlend::Add,
         active: true,
     }
@@ -583,6 +592,7 @@ fn embers(seed: u32) -> Emitter {
         orient: Orient::AlongVelocity,
         texture: None,
         roundness: 0.0,
+        depth_fade: 0.0,
         blend: ParticleBlend::Add,
         active: true,
     }
@@ -623,6 +633,7 @@ fn smoke(puff: TextureId, seed: u32) -> Emitter {
         orient: Orient::CameraPlane,
         texture: tex(puff),
         roundness: 0.0,
+        depth_fade: 0.8,
         blend: ParticleBlend::Alpha,
         active: true,
     }
@@ -685,6 +696,7 @@ fn precipitation(
         },
         texture: None,
         roundness: if snow { 1.0 } else { 0.0 },
+        depth_fade: 0.0,
         blend: ParticleBlend::Alpha,
         active: true,
     }
@@ -727,6 +739,7 @@ fn mist(puff: TextureId, count: u32, half: Vec3, color: Vec4, size: f32, seed: u
         orient: Orient::CameraPlane,
         texture: tex(puff),
         roundness: 0.0,
+        depth_fade: 1.5,
         blend: ParticleBlend::Alpha,
         active: true,
     }
@@ -765,6 +778,7 @@ fn waterfall(puff: TextureId, width: f32, seed: u32) -> Emitter {
         orient: Orient::CameraPlane,
         texture: tex(puff),
         roundness: 0.0,
+        depth_fade: 0.6,
         blend: ParticleBlend::Alpha,
         active: true,
     }
@@ -811,6 +825,7 @@ fn magic_cloud(count: u32, radius: f32, seed: u32) -> Emitter {
         orient: Orient::CameraPlane,
         texture: None,
         roundness: 1.0,
+        depth_fade: 0.0,
         blend: ParticleBlend::Add,
         active: true,
     }
@@ -1253,7 +1268,10 @@ fn build(name: &str, a: &Assets, gpu: &Headless) -> Option<Built> {
     let instances = std::mem::take(&mut p.instances);
     let ids = emitters
         .into_iter()
-        .map(|(e, m)| {
+        .map(|(mut e, m)| {
+            if HARD.load(std::sync::atomic::Ordering::Relaxed) {
+                e.depth_fade = 0.0;
+            }
             let id = world.add_emitter(&e);
             world.set_emitter_transform(id, m);
             (id, e.capacity)
@@ -1467,10 +1485,18 @@ fn scaling(gpu: &Headless, a: &Assets, out: &Path) -> Json {
 }
 
 fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(at) = args.iter().position(|a| a == "--hard") {
+        args.remove(at);
+        HARD.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let kits = repo.join("target/kits");
-    let out = repo.join("target/kit-showcase");
+    let out = repo.join(if HARD.load(std::sync::atomic::Ordering::Relaxed) {
+        "target/kit-showcase/hard"
+    } else {
+        "target/kit-showcase"
+    });
     std::fs::create_dir_all(&out).unwrap();
     let a = Assets {
         terrain: Kit::open(kits.join("greyhaven-terrain")),
