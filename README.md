@@ -13,8 +13,8 @@ and GPU frame time. See [technical decisions](docs/technical-decisions.md).
 
 - **Consumer-owned frame:** the game keeps its wgpu device, window and UI. Meshes (glTF
   attributes), textures and `StandardMaterial`s are uploaded once into a `World` under stable
-  handles. Each frame the game passes a list of instances (mesh, material, transform), and the
-  renderer encodes into the game's encoder and colour target. See
+  handles. Instances (mesh, material, transform) are retained in the `World` until edited, or
+  listed per frame; the renderer encodes into the game's encoder and colour target. See
   [consumer integration](docs/consumer-integration.md).
 - **Scene in physical units:** `render_engine::scene` describes the camera, sun, point and spot
   lights, ambient light, environment map and fog in Bevy's units (lux, lumens, cd/m², EV100,
@@ -60,9 +60,9 @@ and GPU frame time. See [technical decisions](docs/technical-decisions.md).
 ## Example
 
 The consumer owns the device and the frame: content goes into a `World` once, and every frame
-is a `Scene` (camera and lights) plus a list of instances, encoded into the consumer's target
-(see [consumer integration](docs/consumer-integration.md)). `Headless` runs the same path
-offscreen:
+is a `Scene` (camera and lights) plus its instances (retained in the `World` or listed), encoded
+into the consumer's target (see [consumer integration](docs/consumer-integration.md)).
+`Headless` runs the same path offscreen:
 
 ```rust,no_run
 use glam::{Mat4, Vec2, Vec3, Vec4};

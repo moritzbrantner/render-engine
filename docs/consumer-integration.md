@@ -12,17 +12,18 @@ is how to integrate if a game chooses to, not a required migration (technical de
 | Type | Lifetime | Role |
 | --- | --- | --- |
 | `renderer::Renderer` | one per device and output format | pipelines, samplers, tone-mapping LUTs |
-| `world::World` | one per device, for as long as the content lives | meshes, textures, materials, joint palettes and particle emitters behind stable handles (`MeshId`, `TextureId`, `MaterialId`, `SkinId`, `EmitterId`) |
+| `world::World` | one per device, for as long as the content lives | meshes, textures, materials, joint palettes, retained instances and particle emitters behind stable handles (`MeshId`, `TextureId`, `MaterialId`, `SkinId`, `InstanceId`, `EmitterId`) |
 | `renderer::Viewport` | one per output surface | the engine's targets for one size, plus per-frame buffers (instances, lights, shadow maps) that it reuses and grows |
 | `scene::Scene` | rebuilt every frame (plain values) | camera, sun, moon, sky, point and spot lights, ambient light, environment map, fog |
-| `world::Instance` | a list rebuilt every frame | `{ mesh, material, world_from_local, skin }`, one per drawn copy |
+| `world::Instance` | retained in the `World` until edited or removed, or listed for one frame | `{ mesh, material, world_from_local, skin }`, one per drawn copy |
 
 ## What the game provides
 
 The authority boundary is [technical decisions D7](technical-decisions.md#d7--ownership-boundary):
 the game decides what exists and where the camera goes, and the engine decides how to draw it.
-Each frame the game turns its own state into plain values. The engine keeps nothing of the game's
-entities, and `World` and `Scene` are not a game scene. Physics stays in physics-engine and asset
+The game turns its own state into plain values: the frame's camera and lights each frame, its
+instances either each frame or, for what stays put, once ([retained instances](#retained-instances)).
+The engine keeps nothing of the game's entities, and `World` and `Scene` are not a game scene. Physics stays in physics-engine and asset
 processing in asset-tooling; the game passes the engine their results as transforms and uploaded
 content.
 
@@ -280,6 +281,51 @@ frame.present();
   writes a begin and an end timestamp on each pass (`viewport.timestamp_queries()` in all);
   the frame's GPU time is the sum of the spans.
 
+## Retained instances
+
+Scenery that does not move need not be listed every frame. An instance added to the `World` is
+drawn every frame, in every viewport, beside the frame's listed `instances`, until it is removed:
+
+```rust
+// Once, when the zone's scenery is built.
+let scenery: Vec<InstanceId> = props.iter().map(|p| world.add_instance(Instance {
+    mesh: mesh_ids[&p.resource_key],
+    material: p.material,
+    world_from_local: p.transform,
+    skin: None,
+})).collect();
+
+// When a prop changes (a door opens, a level of detail switches):
+world.set_instance(scenery[i], Instance { world_from_local: door_transform, ..world.instance(scenery[i]) });
+world.remove_instance(scenery[j]);
+
+// Every frame: only what moves (units, projectiles) is listed.
+renderer.prepare(&mut viewport, &world, &scene, &units);
+```
+
+Bevy's retained render world is the model: a mesh entity's render data persists, and only changed
+entities are extracted again. Each viewport keeps a copy of the world's retained instances and,
+in `prepare`, derives and writes only those added, changed or removed since its last `prepare`
+(`set_instance` with an unchanged value is no change), plus those whose mesh or material was
+edited. It re-sorts them only when one changes its mesh, material, phase or face; blended ones
+are ordered by depth and skinned ones posed from their skin every frame. Culling still tests every
+instance in every view each frame.
+
+- **Same image.** Retained instances take the instance buffer's first rows, one per handle slot,
+  so among otherwise equal instances they draw first, by slot. The image is the one of listing
+  them first in slot order (`tests/retained_instances.rs`, also under `Culling::GpuIndirect`).
+- **Lifetimes.** A retained instance's mesh, material and skin must outlive it; `prepare` panics
+  on a removed one, as for a listed instance. A removed instance's handle may be reused.
+- **Cost.** On Greyhaven Vale in the mmorpg native client (`outpost_frame_time`, its scenery
+  batches and trees retained in a local trial, about 616 units and props still listed; RTX 3060 Ti,
+  Ryzen 7 5700X, three runs), `prepare` falls from 2.98–3.28 to 1.29–1.54 ms on the four views,
+  the upload from 4.1–4.4 to 0.96–0.99 MB a frame and `render_ms` by 1.7 to 2.2 ms; GPU time and
+  the culled counts and draws are unchanged. What remains is mostly culling (`N · V` box tests).
+  `cargo run --release --example retained_instances` reproduces the saving without the game
+  (26 016 instances, five views: 3.27 → 1.18 ms, 3.43 → 0.10 MB).
+- **The game owns what is retained.** The engine draws a retained instance exactly as set; the
+  game's entities stay the source of truth (D7).
+
 ## Work contracts
 
 The engine's CPU-side frame work and edit costs are counted where they happen and held to
@@ -288,23 +334,26 @@ these growth bounds by `tests/work.rs`, with exact counts over 64, 1 024 and 22 
 time stays the oracle's local gate (D3). `viewport.work()` reports the last `prepare`,
 `world.work()` the edits so far; subtract two readings of the latter.
 
-With `N` instances, `k` of them visible to the camera, `V` views (the camera plus every sun
-cascade, spot map and point-light cube face) and `L` shadowed point or spot lights:
+With `N` instances (retained plus listed, `N_l` of them listed), `k` of them visible to the
+camera, `V` views (the camera plus every sun cascade, spot map and point-light cube face) and `L`
+shadowed point or spot lights:
 
 | Operation | Contract |
 | --- | --- |
-| `prepare` | A full pass over the instance list, not incremental: `N · V + N · L` bounds tests and `N` instances uploaded, whether or not anything changed. Hidden instances cost their test and instance data and nothing else. The camera's visible indices (4 bytes each) and draws follow `k`; one draw per mesh/material/face run with a visible instance. |
-| Unchanged frame | The same work as the previous frame, no GPU allocation, no `World` upload. |
-| Moved instance | The same `prepare` work as an unchanged frame (no extra cost, no saving). |
-| `set_mesh`, `set_mesh_positions_normals`, `set_material` | That mesh's or material's bytes alone, independent of what else the world holds. `prepare` never re-uploads content. |
-| Mutation, removal, mesh bounds, camera cut | Nothing culled is kept between frames, so each shows in the next `prepare`. |
+| `prepare` | Culling is a full pass over every instance, not incremental: `N · V + N · L` bounds tests, whether or not anything changed. Every listed instance is written (`N_l` rows, 128 bytes each); a retained one only when it changed (below). Hidden instances cost their test and, if listed, their instance data, and nothing else. The camera's visible indices (4 bytes each) and draws follow `k`; one draw per mesh/material/face run with a visible instance, retained and listed alike. |
+| Unchanged frame | The same work as the previous frame, no GPU allocation, no `World` upload; no retained instance written (`instance_writes` is `N_l`, plus any skinned retained instances, posed each frame). |
+| Moved listed instance | The same `prepare` work as an unchanged frame (no extra cost, no saving). |
+| `add_instance`, `set_instance`, `remove_instance` | One `instance_edits` each and no upload in the `World`; the next `prepare` of each viewport writes that instance's row alone (128 bytes), independent of how many instances the world retains. Setting an unchanged value is no edit. A viewport's first `prepare` on a world, or one whose instance buffer grows, writes every retained row once. |
+| `set_mesh`, `set_mesh_positions_normals`, `set_material` | That mesh's or material's bytes alone, independent of what else the world holds. `prepare` never re-uploads content; it derives and writes again the retained instances that use the edited mesh or material. |
+| Mutation, removal, mesh bounds, camera cut | Nothing culled is kept between frames, so each shows in the next `prepare`, for retained and listed instances alike. |
 | `prepare` with `Culling::GpuIndirect` (opt-in) | The CPU tests only blended and skinned instances; the rest cost `gpu_bounds_tests` (`N · V`) on the GPU, with no sphere tests on the CPU. `visible` and `shadow_visible` count CPU-culled instances only (`read_gpu_culled` has the rest). One indirect draw per eligible run and view, emptied by culling or not. Upload drops the visible indices and adds the group and view tables and the indirect arguments. |
 | `prepare` with `LightAssignment::Clustered` (opt-in) | The instance work above, plus one assignment pass over the lights each frame, whatever changed: `light_cluster_tests` box tests over the clusters each light's bounds reach, `light_cluster_entries` list entries, `cluster_overflows` clusters past the limit. Upload adds the cluster table (12 bytes per cluster) and the index list (4 bytes per entry plus the all-lights run). The counters are zero on the default path. |
 
 Culling has no spatial hierarchy: `O(N · V)` is the adopted class, and the Hi-Z experiment
-(`docs/occlusion-experiment.md`) did not pay off. A change that makes `prepare` incremental, or
-adds work that grows with hidden instances, has to update these contracts and their tests. Any
-cache it adds stays renderer-internal (D7).
+(`docs/occlusion-experiment.md`) did not pay off. Retained instances (#95) make the instance
+writes incremental, not culling. A change that makes culling incremental, or adds work that grows
+with hidden instances, has to update these contracts and their tests. Any cache it adds is
+derived from what the game set and stays renderer-internal (D7).
 
 ## Particles
 
@@ -614,7 +663,7 @@ leaves at the far plane.
   three.js port keeps its own per-fragment loop.
 - GPU-driven visibility and indirect mesh draws as the default: an opt-in experiment
   ([results](gpu-driven-experiment.md), #71) reproduces the reference path but is not adopted (D10).
-  Retained GPU instances and multi-draw batching are not implemented.
+  Multi-draw batching is not implemented.
 - A supported browser build of the crate: only a measurement smoke exists (see [Native and browser targets](#native-and-browser-targets)).
 - glTF features outside the core metallic-roughness model: texture transforms, a second UV set,
   clearcoat, transmission.

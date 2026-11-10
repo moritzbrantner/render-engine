@@ -263,7 +263,9 @@ Native, largest first, for the `lake` view (the slowest; the others order the sa
    consumer opt-in [mmorpg#725](https://github.com/moenarch-games/mmorpg/issues/725).
 2. **Renderer: `prepare`**, 2.8 to 3.1 ms of CPU, mostly rewriting about 26,000 static instances
    (3.4 MB) and testing them against 5 views. GPU culling moves the tests but costs more than it
-   saves. [#95](https://github.com/moritzbrantner/render-engine/issues/95).
+   saves. [#95](https://github.com/moritzbrantner/render-engine/issues/95) adds retained instances:
+   with the scenery retained, `prepare` takes 1.3 to 1.5 ms on the same views (game adoption
+   [mmorpg#728](https://github.com/moenarch-games/mmorpg/issues/728)).
 3. **Renderer: sun shadows**, 1.6 to 2.6 ms of GPU over 1,865 to 2,550 draws and 25,000 to 32,000
    shadow-visible instances in four cascades. Measured, not filed: no gap against Bevy's cascade
    defaults is shown, and #59 found Hi-Z no help on this hardware.

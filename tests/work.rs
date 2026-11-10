@@ -321,3 +321,68 @@ fn mutation_removal_bounds_and_camera_cuts_take_effect_next_frame() {
     assert_eq!(w.visible, n - SPARSE - 1);
     assert_eq!(w.bounds_tests, u64::from(n));
 }
+
+/// Retained instances (`World::add_instance`) are culled like listed ones every frame, but
+/// written once: an unchanged frame writes none, and an edit writes that instance alone,
+/// whatever else the world retains.
+#[test]
+fn retained_instances_are_written_once_and_again_only_when_edited() {
+    let scene = scene(Lights::SunShadows);
+    let stride = 128;
+    let mut edits = Vec::new();
+    for n in [SIZES[0], SIZES[1]] {
+        let mut f = Fixture::new();
+        let all = f.instances(n, SPARSE);
+        let mut listed_viewport = f.viewport();
+        f.prepare(&mut listed_viewport, &scene, &all);
+        let listed = f.prepare(&mut listed_viewport, &scene, &all);
+        let ids: Vec<_> = all.iter().map(|i| f.world.add_instance(*i)).collect();
+        assert_eq!(f.world.work().instance_edits, u64::from(n));
+
+        let mut viewport = f.viewport();
+        let first = f.prepare(&mut viewport, &scene, &[]);
+        assert_eq!(
+            first.instance_writes, n,
+            "N = {n}: the first frame writes them all"
+        );
+        let steady = f.prepare(&mut viewport, &scene, &[]);
+        assert_eq!(steady.instance_writes, 0, "N = {n}");
+        assert_eq!(steady.allocations, 0, "N = {n}");
+        // The same culling and draws as listing them, without the instance upload.
+        assert_eq!(
+            PrepareWork {
+                instance_writes: n,
+                upload_bytes: steady.upload_bytes + stride * u64::from(n),
+                ..steady
+            },
+            listed,
+            "N = {n}"
+        );
+
+        // Setting an unchanged value is no edit.
+        let before = f.world.work();
+        f.world.set_instance(ids[1], all[1]);
+        assert_eq!(f.world.work(), before);
+        assert_eq!(f.prepare(&mut viewport, &scene, &[]), steady);
+
+        // A moved instance: one row written.
+        let mut moved = all[3];
+        moved.world_from_local *= Mat4::from_translation(Vec3::new(0.1, 0.0, 0.0));
+        f.world.set_instance(ids[3], moved);
+        let w = f.prepare(&mut viewport, &scene, &[]);
+        assert_eq!(w.instance_writes, 1, "N = {n}");
+        assert_eq!(w.upload_bytes, steady.upload_bytes + stride, "N = {n}");
+
+        // A removed instance: its row is cleared, and it is no longer drawn or tested.
+        f.world.remove_instance(ids[0]);
+        let w = f.prepare(&mut viewport, &scene, &[]);
+        assert_eq!((w.instances, w.instance_writes), (n - 1, 1), "N = {n}");
+        assert_eq!(w.visible, SPARSE - 1, "N = {n}");
+        edits.push(f.world.work() - before);
+
+        // A second viewport writes every row once.
+        let mut other = f.viewport();
+        assert_eq!(f.prepare(&mut other, &scene, &[]).instance_writes, n);
+    }
+    assert_eq!(edits[0], edits[1], "edits cost the same in a larger world");
+}

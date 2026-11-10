@@ -25,7 +25,10 @@ use glam::{Mat3, Mat4, UVec4, Vec3, Vec4};
 use std::{collections::HashMap, sync::Arc};
 
 impl Renderer {
-    /// Writes one frame's camera, lights and instances into `viewport`. Only buffers whose
+    /// Writes one frame's camera, lights and instances into `viewport`. The frame draws the
+    /// world's retained instances ([`World::add_instance`]) and `instances`, listed for this
+    /// frame alone; a retained instance is written to the viewport only when it was added or
+    /// changed since the viewport's last `prepare`, listed ones every frame. Only buffers whose
     /// contents changed size are reallocated; meshes, textures and materials stay in `world`.
     pub fn prepare(
         &self,
@@ -35,10 +38,7 @@ impl Renderer {
         instances: &[Instance],
     ) {
         let (device, queue) = (&self.device, &self.queue);
-        viewport.work = PrepareWork {
-            instances: instances.len() as u32,
-            ..PrepareWork::default()
-        };
+        viewport.work = PrepareWork::default();
         let aspect = viewport.width as f32 / viewport.height as f32;
         let cam = &scene.camera;
         let view_from_world = look_at(cam.eye, cam.target);
@@ -453,16 +453,86 @@ fn frame_uniform(
 
 /// The frame's instances in draw order, grouped for culling.
 struct Grouped {
-    /// Consecutive sorted instances sharing a pipeline, material and mesh.
+    /// Consecutive sorted instances sharing a pipeline, material and mesh: ranges over the
+    /// draw order.
     groups: Vec<Draw>,
-    /// Each sorted instance's box, compact for the per-view culling loops.
+    /// Per position in the draw order: the instance's row in the instance buffer.
+    rows: Vec<u32>,
+    /// Per position in the draw order: the instance's box, compact for the per-view culling
+    /// loops.
     obbs: Vec<Obb>,
     /// With `Culling::GpuIndirect`, the groups the compute pass culls; each group's `gpu` is
     /// its row here.
     gpu_rows: Vec<GroupRow>,
 }
 
-/// Writes the instance and joint buffers and groups the instances into draws.
+/// An instance's key (`index` set, `view_z` not), box and GPU row (`flags.w` zero). A skinned
+/// instance is posed with its skin at `joint_offset` in the joint buffer; without one its box
+/// and row are left empty (the retained copy poses skinned instances each frame).
+pub(super) fn derive_instance(
+    world: &World,
+    instance: &Instance,
+    index: u32,
+    joint_offset: Option<u32>,
+) -> (DrawKey, Obb, InstanceData) {
+    let material = &world.material(instance.material).material;
+    let mesh = world.mesh(instance.mesh);
+    let m = instance.world_from_local;
+    let skinned = mesh.skin.is_some();
+    match (skinned, instance.skin) {
+        (true, None) => panic!("an instance of a skinned mesh needs a skin"),
+        (false, Some(_)) => panic!("a skin on an instance of an unskinned mesh"),
+        _ => {}
+    }
+    let key = DrawKey {
+        phase: match material.alpha_mode {
+            AlphaMode::Opaque => Phase::Opaque,
+            AlphaMode::Mask(_) => Phase::Mask,
+            AlphaMode::Blend => Phase::Blend,
+        },
+        face: face_variant(
+            Mat3::from_mat4(m).determinant() < 0.0,
+            material.double_sided,
+        ),
+        material: instance.material,
+        mesh: instance.mesh,
+        view_z: 0.0,
+        skinned,
+        index,
+    };
+    let local_aabb = match (instance.skin, joint_offset) {
+        (None, _) => mesh.aabb,
+        (Some(skin), Some(_)) => {
+            let palette = world.skin(skin);
+            mesh.joint_bounds
+                .iter()
+                .filter_map(|(j, b)| Some(b.transformed(*palette.get(*j as usize)?)))
+                .reduce(|a, b| a.union(&b))
+                .unwrap_or(mesh.aabb)
+        }
+        (Some(_), None) => return (key, Obb::default(), InstanceData::zeroed()),
+    };
+    let normal = Mat3::from_mat4(m).inverse().transpose();
+    let data = InstanceData {
+        world_from_local: m,
+        normal_from_local: [
+            normal.x_axis.extend(0.0),
+            normal.y_axis.extend(0.0),
+            normal.z_axis.extend(0.0),
+        ],
+        flags: UVec4::new(
+            u32::from(mesh.has_tangents),
+            (key.face & 1) as u32,
+            joint_offset.unwrap_or(0),
+            0,
+        ),
+    };
+    (key, Obb::new(local_aabb, m), data)
+}
+
+/// Writes the instance and joint buffers and groups the instances into draws: the world's
+/// retained instances (rows `0..R`, written where they changed) and the frame's listed ones
+/// (rows `R..`, written every frame).
 fn write_instances(
     viewport: &mut Viewport,
     device: &wgpu::Device,
@@ -471,80 +541,68 @@ fn write_instances(
     view_from_world: Mat4,
     instances: &[Instance],
 ) -> Grouped {
-    // Instances, grouped into draws: opaque, then alpha-masked (each by pipeline, material
-    // and mesh), then blended from back to front by origin (Bevy's transparent sort). Ties keep
-    // the consumer's order.
-    // Each skin's palette once, in order of first use (Bevy `prepare_skins`).
+    let retained = &mut viewport.retained;
+    retained.sync(world);
+    let first_listed = retained.rows();
+
+    // Each skin's palette once, in order of first use (Bevy `prepare_skins`): retained
+    // instances by slot, then the listed ones.
     let mut joints: Vec<Mat4> = Vec::new();
     let mut skin_offsets: HashMap<SkinId, u32> = HashMap::new();
-    // Each instance's box, in the consumer's order.
-    let mut input_obbs: Vec<Obb> = Vec::with_capacity(instances.len());
-    let keys = &mut viewport.draw_keys;
-    keys.clear();
-    keys.extend(instances.iter().enumerate().map(|(index, inst)| {
-        let material = &world.material(inst.material).material;
-        let mesh = world.mesh(inst.mesh);
-        let m = inst.world_from_local;
-        let skinned = mesh.skin.is_some();
-        let (joint_offset, local_aabb) = match (skinned, inst.skin) {
-            (false, None) => (0, mesh.aabb),
-            (true, Some(skin)) => {
+    let mut joint_offset = |skin: Option<SkinId>| {
+        skin.map(|skin| {
+            *skin_offsets.entry(skin).or_insert_with(|| {
                 let palette = world.skin(skin);
-                let offset = *skin_offsets.entry(skin).or_insert_with(|| {
-                    joints.extend_from_slice(palette);
-                    (joints.len() - palette.len()) as u32
-                });
-                let aabb = mesh
-                    .joint_bounds
-                    .iter()
-                    .filter_map(|(j, b)| Some(b.transformed(*palette.get(*j as usize)?)))
-                    .reduce(|a, b| a.union(&b))
-                    .unwrap_or(mesh.aabb);
-                (offset, aabb)
-            }
-            (true, None) => panic!("an instance of a skinned mesh needs a skin"),
-            (false, Some(_)) => panic!("a skin on an instance of an unskinned mesh"),
-        };
-        input_obbs.push(Obb::new(local_aabb, m));
-        DrawKey {
-            phase: match material.alpha_mode {
-                AlphaMode::Opaque => Phase::Opaque,
-                AlphaMode::Mask(_) => Phase::Mask,
-                AlphaMode::Blend => Phase::Blend,
-            },
-            face: face_variant(
-                Mat3::from_mat4(m).determinant() < 0.0,
-                material.double_sided,
-            ),
-            material: inst.material,
-            mesh: inst.mesh,
-            view_z: (view_from_world * m.w_axis).z,
-            skinned,
-            joint_offset,
-            index: index as u32,
-        }
-    }));
-    keys.sort_unstable_by(|a, b| {
-        a.phase
-            .cmp(&b.phase)
-            .then_with(|| {
-                if a.phase == Phase::Blend {
-                    a.view_z.total_cmp(&b.view_z)
-                } else {
-                    (a.face, a.material, a.mesh).cmp(&(b.face, b.material, b.mesh))
-                }
+                joints.extend_from_slice(palette);
+                (joints.len() - palette.len()) as u32
             })
-            .then(a.index.cmp(&b.index))
-    });
+        })
+    };
+    for &slot in &retained.skinned {
+        let instance = world.instance_at(slot).expect("a skinned slot is live");
+        let (_, obb, data) = derive_instance(world, instance, slot, joint_offset(instance.skin));
+        retained.obbs[slot as usize] = obb;
+        retained.data[slot as usize] = data;
+        retained.dirty.push(slot);
+    }
 
-    // The boxes on their own in draw order, compact for the per-view culling loops.
-    let mut obbs: Vec<Obb> = Vec::with_capacity(keys.len());
-    let mut groups: Vec<Draw> = Vec::new();
+    // Draw order: opaque, then alpha-masked (each by pipeline, material and mesh), then
+    // blended from back to front by origin (Bevy's transparent sort); ties keep the rows'
+    // order. The retained opaque and masked keys are kept sorted; this frame's keys (the
+    // listed instances and the retained blended ones) are sorted and merged into them.
+    let frame_keys = &mut viewport.frame_keys;
+    frame_keys.clear();
+    for &slot in &retained.blended {
+        let mut key = retained.key(slot);
+        key.view_z = (view_from_world * retained.data[slot as usize].world_from_local.w_axis).z;
+        frame_keys.push(key);
+    }
+    let listed_data = &mut viewport.instance_data;
+    listed_data.clear();
+    let mut listed_obbs: Vec<Obb> = Vec::with_capacity(instances.len());
+    for (i, instance) in instances.iter().enumerate() {
+        let (mut key, obb, data) = derive_instance(
+            world,
+            instance,
+            first_listed + i as u32,
+            joint_offset(instance.skin),
+        );
+        key.view_z = (view_from_world * instance.world_from_local.w_axis).z;
+        frame_keys.push(key);
+        listed_obbs.push(obb);
+        listed_data.push(data);
+    }
+    frame_keys.sort_unstable_by(DrawKey::draw_order);
+    let keys = &mut viewport.draw_keys;
+    merge_sorted(&retained.sorted, frame_keys, keys);
+
     // Rows of the compute pass's group table (empty on the CPU path); the instance data
     // carries `row + 1`, zero for instances the pass skips.
     let gpu_on = viewport.gpu_culling.is_some();
     let mut gpu_rows: Vec<GroupRow> = Vec::new();
-    viewport.instance_data.clear();
+    let mut groups: Vec<Draw> = Vec::new();
+    let mut rows: Vec<u32> = Vec::with_capacity(keys.len());
+    let mut obbs: Vec<Obb> = Vec::with_capacity(keys.len());
     for (i, key) in keys.iter().enumerate() {
         let i = i as u32;
         match groups.last_mut() {
@@ -575,37 +633,49 @@ fn write_instances(
         if let Some(row) = gpu_row {
             gpu_rows[row as usize].count += 1;
         }
-        obbs.push(input_obbs[key.index as usize]);
-        let m = instances[key.index as usize].world_from_local;
-        let normal = Mat3::from_mat4(m).inverse().transpose();
-        let has_tangents = world.mesh(key.mesh).has_tangents;
-        viewport.instance_data.push(InstanceData {
-            world_from_local: m,
-            normal_from_local: [
-                normal.x_axis.extend(0.0),
-                normal.y_axis.extend(0.0),
-                normal.z_axis.extend(0.0),
-            ],
-            flags: UVec4::new(
-                u32::from(has_tangents),
-                (key.face & 1) as u32,
-                key.joint_offset,
-                gpu_row.map_or(0, |row| row + 1),
-            ),
-        });
+        let row_plus_one = gpu_row.map_or(0, |row| row + 1);
+        rows.push(key.index);
+        if key.index < first_listed {
+            obbs.push(retained.obbs[key.index as usize]);
+            if gpu_on {
+                retained.set_gpu_row(key.index, row_plus_one);
+            }
+        } else {
+            let listed = (key.index - first_listed) as usize;
+            obbs.push(listed_obbs[listed]);
+            if gpu_on {
+                listed_data[listed].flags.w = row_plus_one;
+            }
+        }
     }
-    if viewport.instance_data.is_empty() {
-        viewport.instance_data.push(InstanceData::zeroed());
+
+    // The instance buffer: the retained rows that changed, then every listed row (one zeroed
+    // row when there is no instance at all).
+    let stride = size_of::<InstanceData>() as u64;
+    if first_listed == 0 && listed_data.is_empty() {
+        listed_data.push(InstanceData::zeroed());
     }
-    if write_growable(
-        &mut viewport.instance_buffer,
-        &mut viewport.work,
-        device,
-        queue,
-        bytemuck::cast_slice(&viewport.instance_data),
-    ) {
+    let total = u64::from(first_listed) + listed_data.len() as u64;
+    let replaced = viewport.instance_buffer.reserve(device, total * stride);
+    let work = &mut viewport.work;
+    let retained_written = retained.upload(&viewport.instance_buffer, replaced, queue, work);
+    let listed_bytes: &[u8] = bytemuck::cast_slice(listed_data);
+    if !listed_bytes.is_empty() {
+        queue.write_buffer(
+            &viewport.instance_buffer.buffer,
+            u64::from(first_listed) * stride,
+            listed_bytes,
+        );
+    }
+    work.upload_bytes += listed_bytes.len() as u64;
+    work.allocations += u32::from(replaced);
+    work.instances = retained.count() + instances.len() as u32;
+    work.instance_writes = retained_written + instances.len() as u32;
+    viewport.instance_rows = total as u32;
+    if replaced {
         viewport.frame_group = None;
     }
+
     if joints.is_empty() {
         joints.push(Mat4::IDENTITY);
     }
@@ -620,9 +690,33 @@ fn write_instances(
     }
     Grouped {
         groups,
+        rows,
         obbs,
         gpu_rows,
     }
+}
+
+/// Merges two key lists, each in draw order, into `out` (taking `b`'s allocation when `a` is
+/// empty).
+fn merge_sorted(a: &[DrawKey], b: &mut Vec<DrawKey>, out: &mut Vec<DrawKey>) {
+    if a.is_empty() {
+        std::mem::swap(b, out);
+        return;
+    }
+    out.clear();
+    out.reserve(a.len() + b.len());
+    let (mut i, mut j) = (0, 0);
+    while i < a.len() && j < b.len() {
+        if a[i].draw_order(&b[j]).is_le() {
+            out.push(a[i]);
+            i += 1;
+        } else {
+            out.push(b[j]);
+            j += 1;
+        }
+    }
+    out.extend_from_slice(&a[i..]);
+    out.extend_from_slice(&b[j..]);
 }
 
 /// Writes the shadow-view buffer and the list of shadow passes.
@@ -718,6 +812,7 @@ fn cull_views(
 ) {
     let Grouped {
         groups,
+        rows,
         obbs,
         gpu_rows,
     } = grouped;
@@ -741,7 +836,13 @@ fn cull_views(
             }
             tests += u64::from(group.instances.end - group.instances.start);
             let first = visible.len() as u32;
-            visible.extend(group.instances.clone().filter(|&i| sees(i as usize)));
+            visible.extend(
+                group
+                    .instances
+                    .clone()
+                    .filter(|&i| sees(i as usize))
+                    .map(|i| rows[i as usize]),
+            );
             let end = visible.len() as u32;
             if end > first {
                 draws.push(Draw {

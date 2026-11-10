@@ -1,6 +1,8 @@
 //! The consumer's GPU-resident content: meshes, textures and materials uploaded once and kept
-//! under stable handles until removed. Each frame the consumer lists [`Instance`]s (a mesh, a
-//! material and a transform) and the renderer draws them; nothing else is uploaded again.
+//! under stable handles until removed. [`Instance`]s (a mesh, a material and a transform) reach
+//! the renderer two ways: retained in the world ([`World::add_instance`], drawn every frame until
+//! removed and rewritten only when edited) or listed per frame to [`Renderer::prepare`]. Nothing
+//! else is uploaded again.
 //! Particle emitters live here too: the consumer advances them with [`World::step_particles`]
 //! and the renderer draws every alive particle.
 
@@ -36,8 +38,12 @@ pub struct EmitterId(u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SkinId(u32);
 
-/// One drawn copy of a mesh this frame.
-#[derive(Clone, Copy, Debug)]
+/// A retained instance in a [`World`]; drawn every frame until [`World::remove_instance`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct InstanceId(u32);
+
+/// One drawn copy of a mesh: listed for one frame, or retained in a [`World`].
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Instance {
     pub mesh: MeshId,
     pub material: MaterialId,
@@ -121,6 +127,9 @@ pub(crate) struct GpuMesh {
     /// Skinned meshes: the bind-pose box of the vertices each joint moves (Bevy
     /// `SkinnedMeshBounds`), by joint index.
     pub joint_bounds: Vec<(u16, Aabb)>,
+    /// The [`World`] tick of its last upload or edit; retained instances of it are derived
+    /// again when it is newer than a viewport's copy.
+    pub changed: u64,
 }
 
 struct GpuTexture {
@@ -134,6 +143,8 @@ struct GpuTexture {
 pub(crate) struct GpuMaterial {
     pub material: StandardMaterial,
     pub group: wgpu::BindGroup,
+    /// The [`World`] tick of its last build, like [`GpuMesh::changed`].
+    pub changed: u64,
 }
 
 /// Slot storage with stable indices; removed slots are reused.
@@ -188,6 +199,16 @@ pub struct World {
     skins: Slots<Vec<Mat4>>,
     emitters: Slots<EmitterState>,
     particles: ParticlePool,
+    instances: Slots<Instance>,
+    /// Per instance slot, the tick of its last add, set or removal.
+    instance_ticks: Vec<u64>,
+    /// Counts the edits retained instances depend on (instances, meshes, materials); every
+    /// such edit stamps what it changed with the new value.
+    tick: u64,
+    /// The tick of the last mesh or material edit.
+    content_tick: u64,
+    /// Tells worlds apart, so a viewport's retained copy follows the world it is given.
+    id: u64,
     work: WorldWork,
 }
 
@@ -208,6 +229,10 @@ pub struct WorldWork {
     pub texture_uploads: u64,
     /// Materials built (`add_material`, `set_material`).
     pub material_builds: u64,
+    /// Retained instances added, changed or removed (`add_instance`, `set_instance` with a
+    /// different value, `remove_instance`). They upload nothing here: the next
+    /// [`Renderer::prepare`] of each viewport writes the edited instances alone.
+    pub instance_edits: u64,
     /// Bytes written to the GPU by all of the above.
     pub upload_bytes: u64,
 }
@@ -221,6 +246,7 @@ impl std::ops::Sub for WorldWork {
             mesh_rewrites: self.mesh_rewrites - earlier.mesh_rewrites,
             texture_uploads: self.texture_uploads - earlier.texture_uploads,
             material_builds: self.material_builds - earlier.material_builds,
+            instance_edits: self.instance_edits - earlier.instance_edits,
             upload_bytes: self.upload_bytes - earlier.upload_bytes,
         }
     }
@@ -256,8 +282,108 @@ impl World {
             skins: Slots::new(),
             emitters: Slots::new(),
             particles: ParticlePool::new(renderer.device(), renderer.sim_pipelines()),
+            instances: Slots::new(),
+            instance_ticks: Vec::new(),
+            tick: 0,
+            content_tick: 0,
+            id: {
+                static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+                NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            },
             work: WorldWork::default(),
         }
+    }
+
+    fn next_tick(&mut self) -> u64 {
+        self.tick += 1;
+        self.tick
+    }
+
+    fn touch_content(&mut self) -> u64 {
+        self.content_tick = self.next_tick();
+        self.content_tick
+    }
+
+    /// Adds an instance that is drawn every frame, in every viewport, until removed, beside
+    /// the frame's listed instances (Bevy: a mesh entity in the retained render world). A
+    /// viewport writes it to the GPU once and again only after it changes, so static scenery
+    /// costs no instance upload per frame. Its mesh, material and skin must outlive it.
+    pub fn add_instance(&mut self, instance: Instance) -> InstanceId {
+        let slot = self.instances.insert(instance);
+        self.stamp_instance(slot);
+        InstanceId(slot)
+    }
+
+    /// Replaces a retained instance (a new transform, mesh, material or skin); the next
+    /// [`Renderer::prepare`] draws the new value. Setting the value it already has costs
+    /// nothing.
+    pub fn set_instance(&mut self, id: InstanceId, instance: Instance) {
+        let slot = self.instances.items[id.0 as usize]
+            .as_mut()
+            .expect("set_instance on a removed instance");
+        if *slot != instance {
+            *slot = instance;
+            self.stamp_instance(id.0);
+        }
+    }
+
+    /// A retained instance's current value.
+    pub fn instance(&self, id: InstanceId) -> Instance {
+        *self
+            .instances
+            .get(id.0)
+            .expect("instance() of a removed instance")
+    }
+
+    /// Stops drawing a retained instance; its handle may be reused.
+    pub fn remove_instance(&mut self, id: InstanceId) {
+        if self.instances.remove(id.0).is_some() {
+            self.stamp_instance(id.0);
+        }
+    }
+
+    fn stamp_instance(&mut self, slot: u32) {
+        let tick = self.next_tick();
+        let slot = slot as usize;
+        if self.instance_ticks.len() <= slot {
+            self.instance_ticks.resize(slot + 1, 0);
+        }
+        self.instance_ticks[slot] = tick;
+        self.work.instance_edits += 1;
+    }
+
+    /// Every retained-instance slot (`None` where removed) with the tick of its last edit.
+    pub(crate) fn instance_slots(&self) -> impl Iterator<Item = (Option<&Instance>, u64)> {
+        self.instances
+            .items
+            .iter()
+            .map(Option::as_ref)
+            .zip(self.instance_ticks.iter().copied())
+    }
+
+    /// The retained instance in `slot`.
+    pub(crate) fn instance_at(&self, slot: u32) -> Option<&Instance> {
+        self.instances.get(slot)
+    }
+
+    /// Retained-instance slots, the removed ones included.
+    pub(crate) fn instance_slot_count(&self) -> usize {
+        self.instances.items.len()
+    }
+
+    /// Tells this world apart from every other one.
+    pub(crate) fn id(&self) -> u64 {
+        self.id
+    }
+
+    /// The tick of the last edit retained instances depend on.
+    pub(crate) fn tick(&self) -> u64 {
+        self.tick
+    }
+
+    /// The tick of the last mesh or material edit.
+    pub(crate) fn content_tick(&self) -> u64 {
+        self.content_tick
     }
 
     /// The work done for the consumer's edits so far.
@@ -286,9 +412,11 @@ impl World {
             self.meshes.items[id.0 as usize] = Some(gpu);
             return;
         }
+        let changed = self.touch_content();
         let slot = self.meshes.items[id.0 as usize]
             .as_mut()
             .expect("checked above");
+        slot.changed = changed;
         let q = &self.queue;
         q.write_buffer(&slot.positions, 0, bytemuck::cast_slice(&mesh.positions));
         q.write_buffer(&slot.normals, 0, bytemuck::cast_slice(&mesh.normals));
@@ -310,9 +438,11 @@ impl World {
     /// poses through [`World::set_skin`] instead (their per-joint bounds stay those of the
     /// first upload).
     pub fn set_mesh_positions_normals(&mut self, id: MeshId, positions: &[Vec3], normals: &[Vec3]) {
+        let changed = self.touch_content();
         let slot = self.meshes.items[id.0 as usize]
             .as_mut()
             .expect("set_mesh_positions_normals on a removed mesh");
+        slot.changed = changed;
         let n = slot.vertex_count as usize;
         assert!(
             positions.len() == n && normals.len() == n,
@@ -330,6 +460,7 @@ impl World {
     }
 
     fn gpu_mesh(&mut self, mesh: &MeshData) -> GpuMesh {
+        let changed = self.touch_content();
         let streams = Streams::new(mesh);
         self.work.mesh_builds += 1;
         self.work.upload_bytes += streams.bytes(mesh);
@@ -368,6 +499,7 @@ impl World {
             has_tangents: !mesh.tangents.is_empty(),
             aabb: Aabb::from_points(&mesh.positions),
             joint_bounds: joint_bounds(mesh),
+            changed,
         }
     }
 
@@ -420,14 +552,12 @@ impl World {
     /// Adds a material; its textures must be in this world.
     pub fn add_material(&mut self, material: &StandardMaterial) -> MaterialId {
         let gpu = self.gpu_material(material);
-        self.count_material();
         MaterialId(self.materials.insert(gpu))
     }
 
     /// Replaces a material in place; instances using it pick up the change next frame.
     pub fn set_material(&mut self, id: MaterialId, material: &StandardMaterial) {
         let gpu = self.gpu_material(material);
-        self.count_material();
         let slot = self
             .materials
             .items
@@ -592,12 +722,11 @@ impl World {
             .expect("instance uses a removed material")
     }
 
-    fn count_material(&mut self) {
+    /// Builds a material, counting it and stamping it with a new content tick.
+    fn gpu_material(&mut self, m: &StandardMaterial) -> GpuMaterial {
         self.work.material_builds += 1;
         self.work.upload_bytes += size_of::<MaterialUniform>() as u64;
-    }
-
-    fn gpu_material(&self, m: &StandardMaterial) -> GpuMaterial {
+        let changed = self.touch_content();
         let mut f = 0;
         let mut slot = |texture: Option<TextureId>, flag: u32| match texture {
             Some(id) => {
@@ -681,6 +810,7 @@ impl World {
         GpuMaterial {
             material: *m,
             group,
+            changed,
         }
     }
 }
