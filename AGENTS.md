@@ -36,6 +36,7 @@ processing in asset-tooling. The engine never depends on Bevy outside `oracle/`.
 | `assets/props/` | CC0 glTF props for `textured_props` (provenance in its README) |
 | `assets/figure/` | CC0 rigged character for `skinned_figure` (provenance in its README) |
 | `examples/kit_showcase.rs`, `scripts/fetch-kits.sh`, `docs/particle-kit-showcase.md` | Particles on the owner's asset-tooling kits (Greyhaven terrain and nature, crag kit, combat and zoo flipbooks; SHA-256-pinned rolling releases in `target/kits/`): screenshots, recordings and particle/emitter scaling. Evidence, not a gate |
+| `examples/emitter_cost.rs` | Microbenchmark: per-emitter CPU cost of particles (step, prepare, encode, submit) at 1 to 2000 small burst emitters (#85) |
 | `examples/mesh_upload.rs` | Microbenchmark: per-frame pose uploads (`set_mesh`, `set_mesh_positions_normals`, `set_skin`) |
 | `docs/consumer-integration.md` | How a consumer (the mmorpg native client) drives the engine |
 | `docs/gpu-driven-experiment.md`, `scripts/bench-gpu-driven.sh`, `oracle/src/gpu_driven_bench.rs`, `tests/gpu_culling.rs` | The #71 GPU culling experiment (`--gpu-driven-bench`, not a gate): the opt-in `Culling::GpuIndirect` path against the CPU reference, and its report |

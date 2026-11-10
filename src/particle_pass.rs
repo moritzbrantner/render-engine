@@ -13,7 +13,7 @@ use crate::{
     particle_sim::{COUNTER_BYTES, QUAD_BYTES},
     particles::{Emitter, Orient, ParticleBlend, TextureMapping},
     renderer::{DEPTH_FORMAT, Growable, HDR_FORMAT, SAMPLE_COUNT},
-    world::World,
+    world::{TextureId, World},
 };
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec2, Vec4};
@@ -75,7 +75,8 @@ const EMITTER_STRIDE: u64 = 256;
 /// particle pass, whose depth attachment is read-only.
 pub(crate) struct ParticlePipelines {
     layout: wgpu::BindGroupLayout,
-    texture_layout: wgpu::BindGroupLayout,
+    /// Each world texture's particle bind group is built with this layout (`World`).
+    pub texture_layout: wgpu::BindGroupLayout,
     depth_layout: wgpu::BindGroupLayout,
     pipelines: [wgpu::RenderPipeline; 2],
     soft: [wgpu::RenderPipeline; 2],
@@ -246,14 +247,14 @@ impl ParticlePipelines {
 }
 
 /// One drawn emitter: its pipeline, its id (draw arguments), its slot range (quads) and its
-/// texture.
+/// texture (its bind group lives with the texture in the world).
 struct EmitterDraw {
     blend: usize,
     soft: bool,
     id: u32,
     base: u32,
     capacity: u32,
-    texture: wgpu::BindGroup,
+    texture: Option<TextureId>,
 }
 
 /// One viewport's particle draws for the frame.
@@ -316,27 +317,13 @@ impl ParticleFrame {
             .emitter_ids()
             .filter_map(|(id, e)| {
                 let depth = (e.transform.w_axis.truncate() - eye).dot(forward);
-                let (view, sampler) = world.particle_texture(e.desc.texture.map(|t| t.texture));
                 let draw = EmitterDraw {
                     blend: blend_index(e.desc.blend),
                     soft: e.desc.depth_fade > 0.0,
                     id,
                     base: e.base?,
                     capacity: e.desc.capacity,
-                    texture: device.create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("particle texture"),
-                        layout: &pipelines.texture_layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: wgpu::BindingResource::TextureView(view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: wgpu::BindingResource::Sampler(sampler),
-                            },
-                        ],
-                    }),
+                    texture: e.desc.texture.map(|t| t.texture),
                 };
                 Some((depth, draw, EmitterUniform::new(&e.desc)))
             })
@@ -409,19 +396,29 @@ impl ParticleFrame {
         world: &World,
     ) {
         let (quads, args) = world.particle_pool().draw_buffers();
+        // Emitters are drawn in depth order; consecutive ones often share a pipeline and a
+        // texture, so only changes are recorded (#85).
+        let mut pipeline = None;
+        let mut texture = None;
         for (i, d) in self.draws.iter().enumerate() {
-            if d.soft {
-                pass.set_pipeline(&pipelines.soft[d.blend]);
-                pass.set_bind_group(2, self.depth_group.as_ref(), &[]);
-            } else {
-                pass.set_pipeline(&pipelines.pipelines[d.blend]);
+            if pipeline != Some((d.soft, d.blend)) {
+                if d.soft {
+                    pass.set_pipeline(&pipelines.soft[d.blend]);
+                    pass.set_bind_group(2, self.depth_group.as_ref(), &[]);
+                } else {
+                    pass.set_pipeline(&pipelines.pipelines[d.blend]);
+                }
+                pipeline = Some((d.soft, d.blend));
             }
             pass.set_bind_group(
                 0,
                 self.group.as_ref(),
                 &[(i as u64 * EMITTER_STRIDE) as u32],
             );
-            pass.set_bind_group(1, &d.texture, &[]);
+            if texture != Some(d.texture) {
+                pass.set_bind_group(1, world.particle_texture(d.texture), &[]);
+                texture = Some(d.texture);
+            }
             let start = u64::from(d.base) * QUAD_BYTES;
             pass.set_vertex_buffer(
                 0,
