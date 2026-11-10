@@ -102,6 +102,15 @@ The fire's base no longer cuts a flat line across the stones, and the spray and 
 rocks and ground without an edge. The other oracle particle scenarios still pass on lavapipe
 (default path, no fade).
 
+## Lit and fogged particles (#84)
+
+`Emitter::lighting` and `Emitter::fog` are opt-in. In the kit scenes the smoke, mist,
+waterfall spray and precipitation are lit (`ParticleLighting::diffuse()`) and fogged; the fire,
+embers and magic cloud stay unlit and are fogged; the burst presets keep hanabi's default. The
+oracle scenario `particles_lit_fog` gates the shading against Bevy `StandardMaterial` quads
+(D9). These kit images have not been re-rendered with it yet (the kit bundles were not
+available when it landed).
+
 ## Measurements
 
 **Adapter:** llvmpipe (lavapipe, LLVM 21, software Vulkan) under WSL2. This machine has no

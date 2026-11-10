@@ -596,6 +596,7 @@ impl Renderer {
             },
         );
 
+        let particles = ParticlePipelines::new(device, &frame_layout, &lighting_layout);
         Self {
             device: device.clone(),
             queue: queue.clone(),
@@ -617,7 +618,7 @@ impl Renderer {
             agx_lut: load_lut(device, queue, AGX_LUT),
             lut_sampler,
             sky: SkyPipelines::new(device, queue),
-            particles: ParticlePipelines::new(device),
+            particles,
             sim: SimPipelines::new(device),
             no_transmittance: device
                 .create_texture_with_data(

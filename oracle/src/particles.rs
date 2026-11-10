@@ -20,10 +20,11 @@ use render_engine::material::{Sampler, TextureData};
 use render_engine::mesh::Shape;
 use render_engine::particles::{
     self, ColorBlend, ColorOverLife, Flipbook, Gradient, InitModifier, Orient, ParticleBlend,
-    ParticleTexture, ShapeDimension, Spawner, TextureMapping, Value,
+    ParticleLighting, ParticleTexture, ShapeDimension, Spawner, TextureMapping, Value,
 };
 use render_engine::scene::{
-    Ambient, Camera, PointLight, Scene, ShadowFilter, ShadowMapSizes, Sun, SunShadows, Tonemapping,
+    Ambient, Camera, Fog, FogFalloff, PointLight, Scene, ShadowFilter, ShadowMapSizes, Sun,
+    SunShadows, Tonemapping,
 };
 use render_engine::{wgpu, world::TextureId};
 
@@ -65,6 +66,20 @@ pub struct ParticleScenario {
     pub captures: Vec<Capture>,
     /// Gate of the statistical captures.
     pub stat_max: StatThresholds,
+    /// What the Bevy side draws the particles with.
+    pub reference: Reference,
+}
+
+/// The Bevy side of a particle scenario.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Reference {
+    /// bevy_hanabi simulates and draws the same effects.
+    Hanabi,
+    /// Lit and fogged particles, which hanabi does not have (#84): Bevy draws each particle's
+    /// state ([`quad_states`]) as a camera-facing `Rectangle` with a `StandardMaterial` (lit or
+    /// unlit, `fog_enabled` per emitter). The states follow from the emitters without random
+    /// draws, so both sides draw the same particles; the gate is on their shading.
+    StandardQuads,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -143,6 +158,10 @@ pub struct Emitter {
     /// The emitter's transform (a translation): where its spawn positions and velocities are
     /// placed, and, for alpha-blended emitters, the position they are sorted by.
     pub translation: Vec3,
+    /// Lit particles (opt-in beyond hanabi, #84): [`Reference::StandardQuads`] scenarios only.
+    pub lighting: Option<ParticleLighting>,
+    /// Fogged particles (opt-in beyond hanabi, #84): [`Reference::StandardQuads`] scenarios only.
+    pub fog: bool,
 }
 
 /// An emitter's texture: [`Assets::textures`] index, mapping and flipbook.
@@ -205,6 +224,8 @@ impl Emitter {
             roundness: if self.round { 1.0 } else { 0.0 },
             depth_fade: 0.0,
             blend: self.blend,
+            lighting: self.lighting,
+            fog: self.fog,
             active: false,
         }
     }
@@ -237,6 +258,7 @@ pub fn all() -> Vec<ParticleScenario> {
         alpha(),
         particles_textured(),
         smoke_and_sparks(),
+        lit_fog(),
     ]
 }
 
@@ -385,6 +407,8 @@ fn sparks(translation: Vec3) -> Emitter {
         round: true,
         blend: ParticleBlend::Add,
         translation,
+        lighting: None,
+        fog: false,
     }
 }
 
@@ -437,6 +461,8 @@ fn particles_textured() -> ParticleScenario {
                 round: false,
                 blend: ParticleBlend::Add,
                 translation: Vec3::new(-0.7, 0.05, 0.3),
+                lighting: None,
+                fog: false,
             },
             sparks(Vec3::new(0.6, 0.3, 0.5)),
         ],
@@ -454,6 +480,7 @@ fn particles_textured() -> ParticleScenario {
         // colour ≤ 0.074. Gravity ×1.25 scores 0.028 / 0.064 / 0.022 there, inside seed noise
         // (the sparks' arcs shift by a few pixels); the exact capture rejects it (FLIP mean
         // 0.0155, p99 0.53), and every other seed scores mean ≥ 0.019 and p99 ≥ 0.57 there.
+        reference: Reference::Hanabi,
         stat_max: StatThresholds {
             coverage: 0.092,
             spatial: 0.10,
@@ -511,6 +538,8 @@ fn smoke_and_sparks() -> ParticleScenario {
                 round: false,
                 blend: ParticleBlend::Alpha,
                 translation: Vec3::new(-0.75, 0.1, -0.2),
+                lighting: None,
+                fog: false,
             },
             sparks(Vec3::new(0.3, 0.3, 0.9)),
         ],
@@ -527,12 +556,215 @@ fn smoke_and_sparks() -> ParticleScenario {
         // Seed noise over eight seeds and both captures (RTX 3060 Ti): coverage ≤ 0.061, spatial
         // ≤ 0.090, colour ≤ 0.061; a Bevy rerun alone scores up to 0.0008 (the atomics reorder
         // the smoke). Gravity and buoyancy ×1.25 scores spatial 0.160 at 1.0 s, which fails.
+        reference: Reference::Hanabi,
         stat_max: StatThresholds {
             coverage: 0.09,
             spatial: 0.135,
             colour: 0.09,
         },
     }
+}
+
+/// A soft round puff, 64 × 64 texels: white, alpha `(1 − r²)²`. Linear, one level, bilinear and
+/// clamped. Generated here (no external asset); both sides upload the same texels.
+fn puff() -> TextureData {
+    const SIZE: u32 = 64;
+    let mut texels = vec![0u8; (SIZE * SIZE * 4) as usize];
+    for y in 0..SIZE {
+        for x in 0..SIZE {
+            let u = (x as f32 + 0.5) / SIZE as f32 * 2.0 - 1.0;
+            let v = (y as f32 + 0.5) / SIZE as f32 * 2.0 - 1.0;
+            let alpha = (1.0 - (u * u + v * v)).max(0.0).powi(2);
+            let i = ((y * SIZE + x) * 4) as usize;
+            texels[i..i + 4].copy_from_slice(&[255, 255, 255, (alpha * 255.0).round() as u8]);
+        }
+    }
+    TextureData {
+        width: SIZE,
+        height: SIZE,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        levels: vec![texels],
+        sampler: Sampler {
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+        },
+    }
+}
+
+/// `particles_lit_fog` (#84): lit and fogged particles in the lit set under exponential distance
+/// fog with sun inscattering. Each emitter is one puff (the [`puff`] texture), spawned on the
+/// first frame and drifting up; the Bevy side draws the same puffs as `StandardMaterial` quads
+/// ([`Reference::StandardQuads`]). Diffuse puffs beside the warm point light, in and just above
+/// box 2's sun shadow, and at three depths of fog; one with Bevy's default specular reflectance;
+/// unlit, fogged glows at the lamp and far back; and an unlit, unfogged puff (hanabi's default)
+/// as the control. Every capture is exact: the particles are the same on both sides, emitters
+/// are sorted by their position on both, and they all move alike.
+fn lit_fog() -> ParticleScenario {
+    let (mut scene, objects) = lit_set(set_camera());
+    scene.fog = Some(Fog {
+        color: Vec4::new(0.45, 0.5, 0.58, 1.0),
+        directional_light_color: Vec4::new(1.0, 0.85, 0.7, 0.5),
+        directional_light_exponent: 20.0,
+        falloff: FogFalloff::Exponential { density: 0.03 },
+    });
+    let mut assets = Assets::default();
+    assets.textures.push(puff());
+    // How a puff looks: colour, lighting, fog and blending.
+    type Look = (Vec4, Option<ParticleLighting>, bool, ParticleBlend);
+    let (grey, glow) = (Vec4::new(0.6, 0.6, 0.6, 0.9), Vec4::new(4.0, 1.6, 0.4, 0.8));
+    let diffuse = Some(ParticleLighting::diffuse());
+    let smoke: Look = (grey, diffuse, true, ParticleBlend::Alpha);
+    let unfogged: Look = (grey, diffuse, false, ParticleBlend::Alpha);
+    let glossy: Look = (
+        Vec4::new(0.5, 0.55, 0.6, 0.9),
+        Some(ParticleLighting::default()),
+        true,
+        ParticleBlend::Alpha,
+    );
+    // Unlit and fogged; unlit and unfogged (hanabi's default).
+    let lamp: Look = (glow, None, true, ParticleBlend::Add);
+    let hanabi: Look = (grey, None, false, ParticleBlend::Alpha);
+    let puff = |name, at: Vec3, size: f32, (color, lighting, fog, blend): Look| Emitter {
+        name,
+        capacity: 1,
+        spawn: Spawn::Burst { count: 1 },
+        position: Vec3::ZERO,
+        radius: 0.0,
+        velocity: Velocity::Jitter {
+            base: Vec3::new(0.0, 0.15, 0.0),
+            spread: Vec3::ZERO,
+        },
+        lifetime: 256.0 * DT,
+        gravity: Vec3::new(0.0, 0.05, 0.0),
+        size: square(&[(0.0, size), (1.0, size * 1.6)]),
+        color: vec![(0.0, color), (1.0, color * Vec4::new(1.0, 1.0, 1.0, 0.6))],
+        orient: Orient::CameraPlane,
+        texture: Some(EmitterTexture {
+            texture: 0,
+            mapping: TextureMapping::Modulate,
+            flipbook: None,
+        }),
+        round: false,
+        blend,
+        translation: at,
+        lighting,
+        fog,
+    };
+    let emitters = vec![
+        puff("lamp_glow", Vec3::new(0.0, 0.5, 1.2), 0.5, lamp),
+        puff("near_lamp", Vec3::new(0.7, 0.7, 1.4), 0.6, smoke),
+        puff("in_shadow", Vec3::new(2.4, 0.6, -0.9), 0.5, smoke),
+        puff("in_sun", Vec3::new(2.4, 1.9, -0.9), 0.5, smoke),
+        puff("glossy", Vec3::new(-2.4, 1.7, 1.0), 0.5, glossy),
+        puff("unfogged", Vec3::new(-0.6, 1.9, -2.5), 0.7, unfogged),
+        puff("fogged", Vec3::new(0.6, 1.9, -2.5), 0.7, smoke),
+        puff("far", Vec3::new(-1.2, 1.3, -7.0), 1.2, smoke),
+        puff("far_glow", Vec3::new(1.6, 1.6, -9.0), 1.0, lamp),
+        puff("hanabi", Vec3::new(-2.4, 0.7, 2.0), 0.5, hanabi),
+    ];
+    ParticleScenario {
+        name: "particles_lit_fog",
+        capability: "lit + fogged particles vs StandardMaterial quads",
+        width: 1280,
+        height: 720,
+        scene,
+        objects,
+        assets,
+        seed: 0x5eed_0500,
+        emitters,
+        captures: vec![
+            Capture {
+                frame: 32,
+                tier: Tier::Exact,
+            },
+            Capture {
+                frame: 160,
+                tier: Tier::Exact,
+            },
+        ],
+        // Every capture is exact (the FLIP gate); there is no statistical capture.
+        stat_max: StatThresholds {
+            coverage: 0.0,
+            spatial: 0.0,
+            colour: 0.0,
+        },
+        reference: Reference::StandardQuads,
+    }
+}
+
+/// One particle of a [`Reference::StandardQuads`] scenario after a simulation frame.
+#[derive(Clone, Copy, Debug)]
+pub struct QuadState {
+    /// Index into the scenario's emitters.
+    pub emitter: usize,
+    pub position: Vec3,
+    pub size: Vec2,
+    /// Linear HDR colour and alpha, before the texture.
+    pub color: Vec4,
+}
+
+/// The alive particles of `emitters` after simulation frame `frame` (1 = the first spawn), for a
+/// [`Reference::StandardQuads`] scenario, with every gravity scaled by `gravity_scale`
+/// (`--calibrate`). Each emitter's burst spawns on frame 1 at its translation with its base
+/// velocity, without random draws (radius 0, no spread), so the states follow from render-engine's
+/// update pass alone, step by step as it computes them: `age += dt`, `v += a·dt`, `p += v·dt`,
+/// then size and colour over the normalised age; a particle dies when its age reaches its
+/// lifetime.
+pub fn quad_states(emitters: &[Emitter], frame: u32, gravity_scale: f32) -> Vec<QuadState> {
+    let mut out = Vec::new();
+    for (i, e) in emitters.iter().enumerate() {
+        let (Spawn::Burst { count }, Velocity::Jitter { base, spread }) = (e.spawn, e.velocity)
+        else {
+            panic!(
+                "{}: a quad reference needs a burst and a jitter velocity",
+                e.name
+            );
+        };
+        assert!(
+            e.radius == 0.0 && spread == Vec3::ZERO && e.orient == Orient::CameraPlane && !e.round,
+            "{}: a quad reference needs fixed camera-facing particles without a round mask",
+            e.name
+        );
+        let (mut age, mut v, mut p) = (0.0f32, base, e.translation + e.position);
+        let gravity = e.gravity * gravity_scale;
+        for _ in 0..frame {
+            age += DT;
+            v += gravity * DT;
+            p += v * DT;
+        }
+        if age >= e.lifetime {
+            continue;
+        }
+        let t = age / e.lifetime;
+        let state = QuadState {
+            emitter: i,
+            position: p,
+            size: Gradient::new(e.size.clone()).sample(t).unwrap_or(Vec2::ONE),
+            color: Gradient::new(e.color.clone())
+                .sample(t)
+                .unwrap_or(Vec4::ONE),
+        };
+        out.extend(std::iter::repeat_n(state, count.min(e.capacity) as usize));
+    }
+    out
+}
+
+/// The spawn counts of a [`Reference::StandardQuads`] scenario per emitter and frame up to the
+/// last capture: each burst on frame 1.
+pub fn quad_spawns(s: &ParticleScenario) -> Vec<Vec<u32>> {
+    let last = s.captures.iter().map(|c| c.frame).max().unwrap_or(0) as usize;
+    s.emitters
+        .iter()
+        .map(|e| {
+            let Spawn::Burst { count } = e.spawn else {
+                panic!("{}: a quad reference needs a burst", e.name);
+            };
+            (0..last).map(|k| if k == 0 { count } else { 0 }).collect()
+        })
+        .collect()
 }
 
 /// `particles_fountain`: a one-off burst of sparks plus a continuous fountain, both under
@@ -582,6 +814,8 @@ fn fountain() -> ParticleScenario {
                 round: true,
                 blend: ParticleBlend::Add,
                 translation: Vec3::ZERO,
+                lighting: None,
+                fog: false,
             },
             Emitter {
                 name: "fountain",
@@ -606,6 +840,8 @@ fn fountain() -> ParticleScenario {
                 round: true,
                 blend: ParticleBlend::Add,
                 translation: Vec3::ZERO,
+                lighting: None,
+                fog: false,
             },
         ],
         captures: vec![
@@ -620,6 +856,7 @@ fn fountain() -> ParticleScenario {
         ],
         // Seed noise at 2.0 s over eight seeds (RTX 3060 Ti): coverage ≤ 0.107, spatial ≤ 0.104,
         // colour ≤ 0.083. Gravity ×1.25 scores spatial 0.203.
+        reference: Reference::Hanabi,
         stat_max: StatThresholds {
             coverage: 0.16,
             spatial: 0.15,
@@ -659,6 +896,8 @@ fn hundred_k() -> ParticleScenario {
         round: true,
         blend: ParticleBlend::Add,
         translation: Vec3::ZERO,
+        lighting: None,
+        fog: false,
     }];
     for i in 0..50 {
         let angle = i as f32 / 50.0 * std::f32::consts::TAU;
@@ -684,6 +923,8 @@ fn hundred_k() -> ParticleScenario {
             round: true,
             blend: ParticleBlend::Add,
             translation: Vec3::ZERO,
+            lighting: None,
+            fog: false,
         });
     }
     ParticleScenario {
@@ -720,6 +961,7 @@ fn hundred_k() -> ParticleScenario {
         // Seed noise at 3.0 s over eight seeds (RTX 3060 Ti): coverage ≤ 0.0041, spatial ≤ 0.0146,
         // colour ≤ 0.0119. Gravity ×1.25 scores 0.072 / 0.173 / 0.134, which fail on all three.
         // In the exact tier every other seed scores FLIP mean ≥ 0.045 and p99 ≥ 0.85.
+        reference: Reference::Hanabi,
         stat_max: StatThresholds {
             coverage: 0.006,
             spatial: 0.022,
@@ -754,6 +996,8 @@ fn alpha() -> ParticleScenario {
         round: true,
         blend: ParticleBlend::Alpha,
         translation,
+        lighting: None,
+        fog: false,
     };
     ParticleScenario {
         name: "particles_alpha",
@@ -801,6 +1045,7 @@ fn alpha() -> ParticleScenario {
         // ≤ 0.046, colour ≤ 0.064; a Bevy rerun alone scores colour 0.007 (the atomics reorder
         // each emitter). Buoyancy ×1.25 scores coverage 0.087 at 1.0 s, 0.139 / spatial 0.087 at
         // 3.0 s, which fail.
+        reference: Reference::Hanabi,
         stat_max: StatThresholds {
             coverage: 0.065,
             spatial: 0.07,

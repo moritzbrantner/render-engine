@@ -403,6 +403,8 @@ fn gpu_particles_spawn_age_die_and_draw() {
         roundness: 0.0,
         depth_fade: 0.0,
         blend: ParticleBlend::Add,
+        lighting: None,
+        fog: false,
         active: true,
     };
     let gpu = Headless::new().expect("a wgpu adapter");
@@ -543,6 +545,8 @@ fn soft_particles_fade_in_front_of_geometry_only() {
         roundness: 0.0,
         depth_fade,
         blend: ParticleBlend::Add,
+        lighting: None,
+        fog: false,
         active: true,
     };
     let (w, h) = (160, 90);
@@ -614,4 +618,87 @@ fn soft_particles_fade_in_front_of_geometry_only() {
     // Hard emitters drawn in the particle pass look as they do in the main pass.
     assert_eq!(red(&mixed, quads[1]), red(&hard, quads[1]));
     assert_eq!(red(&mixed, quads[2]), red(&hard, quads[2]));
+}
+
+/// Lit and fogged particles (`Emitter::lighting`, `Emitter::fog`): a lit quad goes dark without
+/// light and follows the exposure, a fogged one takes the fog's colour, and an unlit, unfogged one
+/// (hanabi's) ignores all three.
+#[test]
+fn lit_and_fogged_particles_follow_the_scene() {
+    use render_engine::particles::*;
+    let gpu = Headless::new().expect("a wgpu adapter");
+    let mut base = scene(false, Tonemapping::AcesFitted);
+    base.clear_color = Vec3::ZERO;
+    base.camera.eye = Vec3::new(0.0, 0.0, 10.0);
+    base.camera.target = Vec3::ZERO;
+    // From behind the camera onto the quad's front.
+    base.sun.as_mut().unwrap().direction = Vec3::new(0.0, -0.2, -1.0).normalize();
+    let (w, h) = (64, 36);
+    let centre = |scene: &Scene, lighting: Option<ParticleLighting>, fog: bool, depth_fade: f32| {
+        let mut world = World::new(gpu.renderer());
+        world.add_emitter(&Emitter {
+            capacity: 1,
+            spawner: Spawner::once(1.0),
+            seed: 5,
+            init: vec![
+                InitModifier::Position(Value::Const(Vec3::ZERO)),
+                InitModifier::Lifetime(Value::Const(100.0)),
+                InitModifier::Size(Value::Const(3.0)),
+                InitModifier::Color(Value::Const(Vec4::new(0.6, 0.6, 0.6, 1.0))),
+            ],
+            accel: Vec3::ZERO,
+            size_over_life: None,
+            color_over_life: None,
+            orient: Orient::CameraPlane,
+            texture: None,
+            roundness: 0.0,
+            depth_fade,
+            lighting,
+            fog,
+            blend: ParticleBlend::Alpha,
+            active: true,
+        });
+        let mut encoder = gpu.device.create_command_encoder(&Default::default());
+        world.step_particles(&mut encoder, 1.0 / 64.0, None);
+        gpu.queue.submit([encoder.finish()]);
+        let mut viewport = Viewport::new(gpu.renderer(), w, h);
+        let frame = gpu.render(&mut viewport, &world, scene, &[]).unwrap();
+        pixel(&frame, w / 2, h / 2)
+    };
+    let lit = Some(ParticleLighting::diffuse());
+    let mut dark = base.clone();
+    dark.sun = None;
+    let mut brighter = base.clone();
+    brighter.camera.ev100 -= 1.0;
+    let mut foggy = base.clone();
+    foggy.fog = Some(Fog {
+        color: Vec4::new(0.0, 1.0, 0.0, 1.0),
+        falloff: FogFalloff::Exponential { density: 1.0 },
+        ..Fog::default()
+    });
+
+    let unlit = centre(&base, None, false, 0.0);
+    for s in [&dark, &brighter, &foggy] {
+        assert_eq!(
+            centre(s, None, false, 0.0),
+            unlit,
+            "hanabi's particles ignore the scene"
+        );
+    }
+    let sunlit = centre(&base, lit, false, 0.0);
+    assert!(sunlit[0] > 20, "the sun lights the quad: {sunlit:?}");
+    assert_eq!(centre(&dark, lit, false, 0.0)[0], 0, "no light, no colour");
+    // Soft and lit: nothing behind the quad, so the fade leaves it as it is.
+    assert_eq!(centre(&base, lit, false, 1.0), sunlit, "soft, lit quad");
+    let exposed = centre(&brighter, lit, false, 0.0);
+    assert!(
+        exposed[0] > sunlit[0],
+        "one stop more exposure brightens it: {exposed:?} vs {sunlit:?}"
+    );
+    let fogged = centre(&foggy, None, true, 0.0);
+    assert!(
+        u32::from(fogged[1]) > 2 * u32::from(fogged[0])
+            && u32::from(unlit[1]) < 2 * u32::from(unlit[0]),
+        "10 m into dense fog the quad takes the fog's colour: {fogged:?}"
+    );
 }

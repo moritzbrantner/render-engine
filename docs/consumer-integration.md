@@ -342,6 +342,8 @@ let sparks = world.add_emitter(&Emitter {
     }),
     roundness: 0.0,                          // 0 = square quads, 1 = discs
     depth_fade: 0.0,                         // metres of soft edge against geometry; 0 = hard
+    lighting: None,                          // Some(ParticleLighting::diffuse()): lit like a StandardMaterial quad
+    fog: false,                              // true: the scene's distance fog applies
     blend: ParticleBlend::Add,               // or ParticleBlend::Alpha (emitters back to front)
     active: true,
 });
@@ -352,7 +354,8 @@ world.step_particles(&mut encoder, dt, None);
 ```
 
 - **Units.** Positions in metres, velocities in m/s, lifetimes in seconds. Colours are linear
-  HDR and are written as they are, without the camera's exposure (like hanabi's).
+  HDR and are written as they are, without the camera's exposure (like hanabi's), unless the
+  emitter is lit.
 - **Stopping.** `set_emitter(id, &Emitter { active: false, ..desc })` stops spawning and lets
   alive particles finish; `remove_emitter` drops them at once.
 - **Stepping.** `step_particles` ticks the spawners on the CPU and records one compute pass
@@ -368,9 +371,18 @@ world.step_particles(&mut encoder, dt, None);
 - **Draw order.** Emitters are drawn back to front by their transform's position, additive and
   alpha-blended alike (as Bevy sorts hanabi effects); inside an emitter the order is the GPU's
   alive-list order, as in hanabi.
-- **Unlit and unfogged.** Particles are not lit by the scene's lights and fog does not apply to
-  them: bevy_hanabi renders them this way, and it is the oracle (technical decisions D9). Tint
-  an emitter's colours yourself for the time of day.
+- **Lit and fogged (opt-in).** By default particles are not lit by the scene's lights, the
+  camera's exposure does not scale them and fog does not apply to them: bevy_hanabi renders
+  them this way, and it is the oracle (technical decisions D9). `lighting:
+  Some(ParticleLighting::diffuse())` shades each particle as a Bevy `StandardMaterial` quad
+  facing the camera, its colour the base colour: the sun with its shadows, the moon, point and
+  spot lights, ambient and environment light and the exposure apply, so smoke darkens at night
+  and dust inside a shadow. `ParticleLighting::default()` is Bevy's default material (roughness
+  0.5, reflectance 0.5); `diffuse()` drops the specular light, for smoke, dust, mist and spray.
+  Give a lit emitter albedo-like colours (≤ 1). `fog: true` blends the scene's distance fog
+  into the particle's colour, lit or not (keep fire and sparks unlit and fogged). Lit and
+  fogged emitters bind the lit pass's lights and shadow maps and loop over every point and spot
+  light (not the clustered lookup).
 - **Soft edges (opt-in).** By default a particle is cut hard where it meets geometry (depth
   tested, as in hanabi). `depth_fade: 0.3` fades it out over the last 0.3 m in front of the
   opaque scene, for smoke, fire, mist and spray against the ground. A frame with a soft emitter

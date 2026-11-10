@@ -8,6 +8,11 @@
 //! frame with one draws every particle in a pass of its own that binds the depth target
 //! read-only and also reads it as a texture (`fragment_soft`). Without one the particles stay in
 //! the main pass, as before.
+//!
+//! Lit and fogged emitters ([`Emitter::lighting`], [`Emitter::fog`]) draw with pipelines compiled
+//! from `lit.wgsl`, `particles.wgsl` and `particles_shaded.wgsl` together: they bind the lit
+//! pass's frame and lighting groups (0 and 1) and their own at 2 and 3. Unlit, unfogged emitters
+//! keep hanabi's shader alone.
 
 use crate::{
     particle_sim::{COUNTER_BYTES, QUAD_BYTES},
@@ -29,6 +34,10 @@ struct ViewUniform {
     params: Vec4,
 }
 
+/// `EMITTER_LIT` and `EMITTER_FOG` in `particles.wgsl`.
+const EMITTER_LIT: u32 = 1;
+const EMITTER_FOG: u32 = 2;
+
 /// Per drawn emitter, at a dynamic offset of `EMITTER_STRIDE` (`Emitter` in `particles.wgsl`).
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -39,12 +48,15 @@ struct EmitterUniform {
     flipbook_columns: u32,
     flipbook_scale: Vec2,
     depth_fade: f32,
-    _pad: f32,
+    flags: u32,
+    /// Lit particles: perceptual roughness, metallic, reflectance.
+    surface: Vec4,
 }
 
 impl EmitterUniform {
     fn new(e: &Emitter) -> Self {
         let flipbook = e.texture.and_then(|t| t.flipbook);
+        let lighting = e.lighting.unwrap_or_default();
         Self {
             roundness: e.roundness,
             orient: match e.orient {
@@ -63,7 +75,14 @@ impl EmitterUniform {
                 Vec2::new(1.0 / f.grid.x as f32, 1.0 / f.grid.y as f32)
             }),
             depth_fade: e.depth_fade,
-            _pad: 0.0,
+            flags: if e.lighting.is_some() { EMITTER_LIT } else { 0 }
+                | if e.fog { EMITTER_FOG } else { 0 },
+            surface: Vec4::new(
+                lighting.perceptual_roughness,
+                lighting.metallic,
+                lighting.reflectance,
+                0.0,
+            ),
         }
     }
 }
@@ -71,15 +90,31 @@ impl EmitterUniform {
 /// `min_uniform_buffer_offset_alignment`'s largest allowed value.
 const EMITTER_STRIDE: u64 = 256;
 
-/// Indexed by [`blend_index`]; `soft` reads the scene depth (group 2) and draws in the
-/// particle pass, whose depth attachment is read-only.
+/// A particle pipeline's variant: whether it reads the scene depth (soft: the particle pass,
+/// whose depth attachment is read-only) and whether it is lit or fogged (shaded).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Variant {
+    soft: bool,
+    shaded: bool,
+    blend: usize,
+}
+
+impl Variant {
+    fn index(self) -> usize {
+        usize::from(self.soft) * 4 + usize::from(self.shaded) * 2 + self.blend
+    }
+}
+
+/// Every [`Variant`]'s pipeline, by [`Variant::index`].
 pub(crate) struct ParticlePipelines {
+    /// The view and emitter uniforms (group 0 unshaded, 2 shaded).
     layout: wgpu::BindGroupLayout,
-    /// Each world texture's particle bind group is built with this layout (`World`).
+    /// `layout` plus the scene depth, for soft emitters.
+    soft_layout: wgpu::BindGroupLayout,
+    /// Each world texture's particle bind group is built with this layout (`World`); group 1
+    /// unshaded, 3 shaded.
     pub texture_layout: wgpu::BindGroupLayout,
-    depth_layout: wgpu::BindGroupLayout,
-    pipelines: [wgpu::RenderPipeline; 2],
-    soft: [wgpu::RenderPipeline; 2],
+    pipelines: Vec<wgpu::RenderPipeline>,
 }
 
 fn blend_index(b: ParticleBlend) -> usize {
@@ -89,9 +124,33 @@ fn blend_index(b: ParticleBlend) -> usize {
     }
 }
 
+/// The shaded particles' module: `lit.wgsl`, then `particles.wgsl` with its groups moved from 0
+/// and 1 to 2 and 3, then `particles_shaded.wgsl`.
+fn shaded_source() -> String {
+    let particles = include_str!("shaders/particles.wgsl")
+        .replace("@group(0)", "@group(2)")
+        .replace("@group(1)", "@group(3)");
+    [
+        include_str!("shaders/lit.wgsl"),
+        &particles,
+        include_str!("shaders/particles_shaded.wgsl"),
+    ]
+    .join("\n")
+}
+
 impl ParticlePipelines {
-    pub fn new(device: &wgpu::Device) -> Self {
+    /// `frame_layout` and `lighting_layout` are the lit pass's groups 0 and 1, which shaded
+    /// particles bind too.
+    pub fn new(
+        device: &wgpu::Device,
+        frame_layout: &wgpu::BindGroupLayout,
+        lighting_layout: &wgpu::BindGroupLayout,
+    ) -> Self {
         let shader = device.create_shader_module(wgpu::include_wgsl!("shaders/particles.wgsl"));
+        let shaded_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("shaded particles"),
+            source: wgpu::ShaderSource::Wgsl(shaded_source().into()),
+        });
         let uniform = |binding, has_dynamic_offset, visibility| wgpu::BindGroupLayoutEntry {
             binding,
             visibility,
@@ -102,11 +161,29 @@ impl ParticlePipelines {
             },
             count: None,
         };
+        let view_entries = [
+            uniform(0, false, wgpu::ShaderStages::VERTEX_FRAGMENT),
+            uniform(1, true, wgpu::ShaderStages::VERTEX_FRAGMENT),
+        ];
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("particle view"),
+            entries: &view_entries,
+        });
+        let soft_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("soft particle view"),
             entries: &[
-                uniform(0, false, wgpu::ShaderStages::VERTEX_FRAGMENT),
-                uniform(1, true, wgpu::ShaderStages::VERTEX_FRAGMENT),
+                view_entries[0],
+                view_entries[1],
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Depth,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: true,
+                    },
+                    count: None,
+                },
             ],
         });
         let texture_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -129,29 +206,6 @@ impl ParticlePipelines {
                     count: None,
                 },
             ],
-        });
-        let depth_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("particle scene depth"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Texture {
-                    sample_type: wgpu::TextureSampleType::Depth,
-                    view_dimension: wgpu::TextureViewDimension::D2,
-                    multisampled: true,
-                },
-                count: None,
-            }],
-        });
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("particles"),
-            bind_group_layouts: &[Some(&layout), Some(&texture_layout)],
-            immediate_size: 0,
-        });
-        let soft_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("soft particles"),
-            bind_group_layouts: &[Some(&layout), Some(&texture_layout), Some(&depth_layout)],
-            immediate_size: 0,
         });
         // `Quad` in `particle_sim.wgsl`.
         let attributes = [
@@ -181,47 +235,6 @@ impl ParticlePipelines {
                 shader_location: 4,
             },
         ];
-        let pipeline = |blend: wgpu::BlendState, soft: bool| {
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some(if soft { "soft particles" } else { "particles" }),
-                layout: Some(if soft { &soft_layout } else { &pipeline_layout }),
-                vertex: wgpu::VertexState {
-                    module: &shader,
-                    entry_point: Some("vertex"),
-                    compilation_options: Default::default(),
-                    buffers: &[Some(wgpu::VertexBufferLayout {
-                        array_stride: QUAD_BYTES,
-                        step_mode: wgpu::VertexStepMode::Instance,
-                        attributes: &attributes,
-                    })],
-                },
-                primitive: wgpu::PrimitiveState::default(),
-                // Like hanabi's transparent particles: test depth, never write it.
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: DEPTH_FORMAT,
-                    depth_write_enabled: Some(false),
-                    depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
-                    stencil: wgpu::StencilState::default(),
-                    bias: wgpu::DepthBiasState::default(),
-                }),
-                multisample: wgpu::MultisampleState {
-                    count: SAMPLE_COUNT,
-                    ..Default::default()
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &shader,
-                    entry_point: Some(if soft { "fragment_soft" } else { "fragment" }),
-                    compilation_options: Default::default(),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: HDR_FORMAT,
-                        blend: Some(blend),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                }),
-                multiview_mask: None,
-                cache: None,
-            })
-        };
         // hanabi `AlphaMode::Add`: colour scaled by alpha onto the target, alpha kept.
         let add = wgpu::BlendState {
             color: wgpu::BlendComponent {
@@ -235,13 +248,83 @@ impl ParticlePipelines {
                 operation: wgpu::BlendOperation::Add,
             },
         };
-        let alpha = wgpu::BlendState::ALPHA_BLENDING;
+        let blends = [add, wgpu::BlendState::ALPHA_BLENDING];
+        let mut pipelines = Vec::with_capacity(8);
+        for soft in [false, true] {
+            let view = if soft { &soft_layout } else { &layout };
+            for shaded in [false, true] {
+                let pipeline_layout =
+                    device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                        label: Some("particles"),
+                        bind_group_layouts: &if shaded {
+                            vec![
+                                Some(frame_layout),
+                                Some(lighting_layout),
+                                Some(view),
+                                Some(&texture_layout),
+                            ]
+                        } else {
+                            vec![Some(view), Some(&texture_layout)]
+                        },
+                        immediate_size: 0,
+                    });
+                let module = if shaded { &shaded_shader } else { &shader };
+                let fragment = match (shaded, soft) {
+                    (false, false) => "fragment",
+                    (false, true) => "fragment_soft",
+                    (true, false) => "fragment_shaded",
+                    (true, true) => "fragment_shaded_soft",
+                };
+                for blend in blends {
+                    pipelines.push(device.create_render_pipeline(
+                        &wgpu::RenderPipelineDescriptor {
+                            label: Some(fragment),
+                            layout: Some(&pipeline_layout),
+                            vertex: wgpu::VertexState {
+                                module,
+                                entry_point: Some("vertex"),
+                                compilation_options: Default::default(),
+                                buffers: &[Some(wgpu::VertexBufferLayout {
+                                    array_stride: QUAD_BYTES,
+                                    step_mode: wgpu::VertexStepMode::Instance,
+                                    attributes: &attributes,
+                                })],
+                            },
+                            primitive: wgpu::PrimitiveState::default(),
+                            // Like hanabi's transparent particles: test depth, never write it.
+                            depth_stencil: Some(wgpu::DepthStencilState {
+                                format: DEPTH_FORMAT,
+                                depth_write_enabled: Some(false),
+                                depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
+                                stencil: wgpu::StencilState::default(),
+                                bias: wgpu::DepthBiasState::default(),
+                            }),
+                            multisample: wgpu::MultisampleState {
+                                count: SAMPLE_COUNT,
+                                ..Default::default()
+                            },
+                            fragment: Some(wgpu::FragmentState {
+                                module,
+                                entry_point: Some(fragment),
+                                compilation_options: Default::default(),
+                                targets: &[Some(wgpu::ColorTargetState {
+                                    format: HDR_FORMAT,
+                                    blend: Some(blend),
+                                    write_mask: wgpu::ColorWrites::ALL,
+                                })],
+                            }),
+                            multiview_mask: None,
+                            cache: None,
+                        },
+                    ));
+                }
+            }
+        }
         Self {
-            pipelines: [pipeline(add, false), pipeline(alpha, false)],
-            soft: [pipeline(add, true), pipeline(alpha, true)],
             layout,
+            soft_layout,
             texture_layout,
-            depth_layout,
+            pipelines,
         }
     }
 }
@@ -249,8 +332,7 @@ impl ParticlePipelines {
 /// One drawn emitter: its pipeline, its id (draw arguments), its slot range (quads) and its
 /// texture (its bind group lives with the texture in the world).
 struct EmitterDraw {
-    blend: usize,
-    soft: bool,
+    variant: Variant,
     id: u32,
     base: u32,
     capacity: u32,
@@ -262,8 +344,9 @@ pub(crate) struct ParticleFrame {
     view_buffer: wgpu::Buffer,
     emitter_buffer: Growable,
     group: Option<wgpu::BindGroup>,
-    /// The scene depth for soft emitters; rebuilt after the depth target changes.
-    depth_group: Option<wgpu::BindGroup>,
+    /// `group` plus the scene depth, for soft emitters; rebuilt after the depth target or the
+    /// emitter buffer changes.
+    soft_group: Option<wgpu::BindGroup>,
     draws: Vec<EmitterDraw>,
 }
 
@@ -278,7 +361,7 @@ impl ParticleFrame {
             }),
             emitter_buffer: Growable::new(device, "particle emitters", wgpu::BufferUsages::UNIFORM),
             group: None,
-            depth_group: None,
+            soft_group: None,
             draws: Vec::new(),
         }
     }
@@ -286,12 +369,12 @@ impl ParticleFrame {
     /// Whether this frame draws a soft emitter, and so draws its particles in their own pass
     /// (`Renderer::encode`).
     pub fn soft(&self) -> bool {
-        self.draws.iter().any(|d| d.soft)
+        self.draws.iter().any(|d| d.variant.soft)
     }
 
     /// Drops the bind group that reads the old depth target (after a resize).
     pub fn depth_changed(&mut self) {
-        self.depth_group = None;
+        self.soft_group = None;
     }
 
     /// Orders this frame's emitters of `world` as seen through `clip_from_world` from a camera
@@ -318,8 +401,11 @@ impl ParticleFrame {
             .filter_map(|(id, e)| {
                 let depth = (e.transform.w_axis.truncate() - eye).dot(forward);
                 let draw = EmitterDraw {
-                    blend: blend_index(e.desc.blend),
-                    soft: e.desc.depth_fade > 0.0,
+                    variant: Variant {
+                        soft: e.desc.depth_fade > 0.0,
+                        shaded: e.desc.lighting.is_some() || e.desc.fog,
+                        blend: blend_index(e.desc.blend),
+                    },
                     id,
                     base: e.base?,
                     capacity: e.desc.capacity,
@@ -353,47 +439,59 @@ impl ParticleFrame {
                 params: Vec4::new(near, 0.0, 0.0, 0.0),
             }),
         );
-        if self.soft() && self.depth_group.is_none() {
-            self.depth_group = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("particle scene depth"),
-                layout: &pipelines.depth_layout,
-                entries: &[wgpu::BindGroupEntry {
+        if replaced {
+            self.group = None;
+            self.soft_group = None;
+        }
+        let entries = |soft: bool| {
+            let mut entries = vec![
+                wgpu::BindGroupEntry {
                     binding: 0,
+                    resource: self.view_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &self.emitter_buffer.buffer,
+                        offset: 0,
+                        size: wgpu::BufferSize::new(std::mem::size_of::<EmitterUniform>() as u64),
+                    }),
+                },
+            ];
+            if soft {
+                entries.push(wgpu::BindGroupEntry {
+                    binding: 2,
                     resource: wgpu::BindingResource::TextureView(depth_view),
-                }],
+                });
+            }
+            entries
+        };
+        if self.soft() && self.soft_group.is_none() {
+            self.soft_group = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("soft particle view"),
+                layout: &pipelines.soft_layout,
+                entries: &entries(true),
             }));
         }
-        if self.group.is_none() || replaced {
+        if self.group.is_none() {
             self.group = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("particle view"),
                 layout: &pipelines.layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: self.view_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                            buffer: &self.emitter_buffer.buffer,
-                            offset: 0,
-                            size: wgpu::BufferSize::new(
-                                std::mem::size_of::<EmitterUniform>() as u64
-                            ),
-                        }),
-                    },
-                ],
+                entries: &entries(false),
             }));
         }
     }
 
     /// Draws the prepared emitters' particles into the main pass (MSAA HDR colour and depth), or,
-    /// with a soft emitter, into the particle pass (depth read-only).
+    /// with a soft emitter, into the particle pass (depth read-only). Shaded emitters bind the
+    /// lit pass's `frame` and `lighting` groups.
     pub fn draw(
         &self,
         pass: &mut wgpu::RenderPass<'_>,
         pipelines: &ParticlePipelines,
         world: &World,
+        frame: &wgpu::BindGroup,
+        lighting: Option<&wgpu::BindGroup>,
     ) {
         let (quads, args) = world.particle_pool().draw_buffers();
         // Emitters are drawn in depth order; consecutive ones often share a pipeline and a
@@ -401,22 +499,28 @@ impl ParticleFrame {
         let mut pipeline = None;
         let mut texture = None;
         for (i, d) in self.draws.iter().enumerate() {
-            if pipeline != Some((d.soft, d.blend)) {
-                if d.soft {
-                    pass.set_pipeline(&pipelines.soft[d.blend]);
-                    pass.set_bind_group(2, self.depth_group.as_ref(), &[]);
-                } else {
-                    pass.set_pipeline(&pipelines.pipelines[d.blend]);
+            let v = d.variant;
+            // Shaded pipelines put the particle groups after the lit pass's two.
+            let first = if v.shaded { 2 } else { 0 };
+            if pipeline != Some(v) {
+                pass.set_pipeline(&pipelines.pipelines[v.index()]);
+                if v.shaded {
+                    pass.set_bind_group(0, frame, &[]);
+                    pass.set_bind_group(1, lighting, &[]);
                 }
-                pipeline = Some((d.soft, d.blend));
+                if pipeline.is_none_or(|p: Variant| p.shaded != v.shaded) {
+                    texture = None;
+                }
+                pipeline = Some(v);
             }
-            pass.set_bind_group(
-                0,
-                self.group.as_ref(),
-                &[(i as u64 * EMITTER_STRIDE) as u32],
-            );
+            let view = if v.soft {
+                &self.soft_group
+            } else {
+                &self.group
+            };
+            pass.set_bind_group(first, view.as_ref(), &[(i as u64 * EMITTER_STRIDE) as u32]);
             if texture != Some(d.texture) {
-                pass.set_bind_group(1, world.particle_texture(d.texture), &[]);
+                pass.set_bind_group(first + 1, world.particle_texture(d.texture), &[]);
                 texture = Some(d.texture);
             }
             let start = u64::from(d.base) * QUAD_BYTES;

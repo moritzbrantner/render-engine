@@ -11,7 +11,8 @@
 //!
 //! Particles are unlit and unfogged, and their edges are hard against the scene's depth: that is
 //! what bevy_hanabi renders (technical decisions D9, "Lighting, fog and soft particles").
-//! [`Emitter::depth_fade`] opts an emitter into soft edges.
+//! [`Emitter::depth_fade`] opts an emitter into soft edges, [`Emitter::lighting`] into the
+//! scene's lights, shadows and exposure, and [`Emitter::fog`] into its distance fog.
 //!
 //! The simulation replays hanabi's. On the CPU: the spawner's per-frame count
 //! (`EffectSpawner::tick`) and the effect's per-frame seed chain
@@ -224,6 +225,41 @@ pub struct Flipbook {
     pub frames: u32,
 }
 
+/// How a lit particle reflects light (opt-in, not in bevy_hanabi): the particle's quad is shaded
+/// as a Bevy `StandardMaterial` whose base colour is the particle's colour (after its texture),
+/// with the quad's normal facing the camera. Lights, shadows, ambient and environment light and
+/// the camera's exposure apply as they do to lit geometry (`lit.wgsl`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ParticleLighting {
+    pub perceptual_roughness: f32,
+    pub metallic: f32,
+    /// Dielectric specular reflectance (`F0 = 0.16 · reflectance²`). 0 removes the specular
+    /// light entirely, which suits smoke, dust and mist.
+    pub reflectance: f32,
+}
+
+impl Default for ParticleLighting {
+    /// Bevy's `StandardMaterial` defaults: roughness 0.5, dielectric, reflectance 0.5.
+    fn default() -> Self {
+        Self {
+            perceptual_roughness: 0.5,
+            metallic: 0.0,
+            reflectance: 0.5,
+        }
+    }
+}
+
+impl ParticleLighting {
+    /// Diffuse only (fully rough, no specular reflectance): smoke, dust, mist.
+    pub fn diffuse() -> Self {
+        Self {
+            perceptual_roughness: 1.0,
+            metallic: 0.0,
+            reflectance: 0.0,
+        }
+    }
+}
+
 /// An effect: what spawns, how each particle starts, moves and looks.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Emitter {
@@ -249,6 +285,14 @@ pub struct Emitter {
     /// a wall. 0 keeps hanabi's hard edge. Emitters with a fade draw in their own pass after the
     /// blended instances, which reads the scene's depth (technical decisions D9).
     pub depth_fade: f32,
+    /// Lit particles (opt-in, not in bevy_hanabi): `Some` shades each particle as a
+    /// `StandardMaterial` quad ([`ParticleLighting`]), so smoke darkens at night and dust inside
+    /// a shadow. `None` keeps hanabi's unlit colour, which the camera's exposure does not scale.
+    pub lighting: Option<ParticleLighting>,
+    /// Fogged particles (opt-in, not in bevy_hanabi): the scene's distance fog blends into the
+    /// particle's colour as into lit geometry's (Bevy `DistanceFog` on a `StandardMaterial`),
+    /// lit or not, alpha kept. `false` keeps hanabi's unfogged colour.
+    pub fog: bool,
     pub blend: ParticleBlend,
     /// Whether the spawner runs; an inactive emitter keeps simulating its particles.
     pub active: bool,
