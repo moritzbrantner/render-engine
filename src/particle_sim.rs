@@ -10,7 +10,7 @@
 use crate::{
     particles::{
         ColorBlend, EmitterState, InitModifier, MAX_GRADIENT_KEYS, MAX_INIT_MODIFIERS,
-        ShapeDimension, Value,
+        ParticleState, ShapeDimension, Value, render_attributes,
     },
     renderer::FrameTimestamps,
 };
@@ -49,7 +49,10 @@ struct GpuEmitterStep {
     n_size: u32,
     /// Flipbook frames over life (0: no flipbook, the sprite index stays 0).
     sprite_frames: u32,
-    _pad: u32,
+    /// Spawns of earlier entries of the same emitter in this step (its triggered bursts, each an
+    /// entry right before its spawner's): this entry's spawns take the dead-stack rows after
+    /// theirs. Only an emitter's last entry ages and moves its particles.
+    row_offset: u32,
     mods: [GpuModifier; MAX_INIT_MODIFIERS],
 }
 
@@ -63,9 +66,34 @@ struct StepHeader {
 }
 
 /// `Particle` in `particle_sim.wgsl`.
-const PARTICLE_BYTES: u64 = 64;
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct GpuParticle {
+    position: Vec3,
+    age: f32,
+    velocity: Vec3,
+    lifetime: f32,
+    color: Vec4,
+    size: f32,
+    _pad: [f32; 3],
+}
+
+/// `Quad` in `particle_sim.wgsl`.
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct GpuQuad {
+    position: Vec3,
+    sprite: u32,
+    velocity: Vec3,
+    _pad0: u32,
+    size: Vec2,
+    _pad1: Vec2,
+    color: Vec4,
+}
+
+const PARTICLE_BYTES: u64 = std::mem::size_of::<GpuParticle>() as u64;
 /// `Quad`: what the render pass reads per instance (`particle_pass`).
-pub(crate) const QUAD_BYTES: u64 = 64;
+pub(crate) const QUAD_BYTES: u64 = std::mem::size_of::<GpuQuad>() as u64;
 /// `Counters`: draw arguments (`wgpu::util::DrawIndirectArgs`), alive count, padding.
 pub(crate) const COUNTER_BYTES: u64 = 32;
 
@@ -461,6 +489,109 @@ impl ParticlePool {
         self.buffers = new;
     }
 
+    /// Grows the buffers for every allocated range, `ids` emitter ids and `per_step` step
+    /// entries.
+    fn reserve_for(&mut self, encoder: &mut wgpu::CommandEncoder, ids: u32, per_step: u32) {
+        let slots = self.ranges.last().map_or(0, |r| r.0 + r.1);
+        self.reserve(encoder, slots, ids, per_step);
+    }
+
+    /// Empties emitter `id`'s range: no particles, the dead stack in slot order, nothing to draw.
+    fn reset(&mut self, encoder: &mut wgpu::CommandEncoder, id: u32, base: u32, capacity: u32) {
+        let b = &self.buffers;
+        encoder.clear_buffer(
+            &b.counters,
+            u64::from(id) * COUNTER_BYTES,
+            Some(COUNTER_BYTES),
+        );
+        let identity: Vec<u32> = (0..capacity).collect();
+        if let Some(size) = wgpu::BufferSize::new(u64::from(capacity) * 4) {
+            self.belt
+                .write_buffer(encoder, &b.dead, u64::from(base) * 4, size)
+                .copy_from_slice(bytemuck::cast_slice(&identity));
+        }
+    }
+
+    /// Records replacing emitter `id`'s particles with `states` (those still alive, at most its
+    /// capacity), in slots `0..n` of its range: their attributes for later steps, the alive list
+    /// the next step reads, the counters and the quads the render pass draws.
+    pub fn set_particles(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        id: u32,
+        e: &mut EmitterState,
+        states: &[ParticleState],
+    ) {
+        let capacity = e.desc.capacity;
+        let base = match e.base {
+            Some(base) => base,
+            None => *e.base.insert(self.allocate(capacity)),
+        };
+        self.reserve_for(encoder, id + 1, 0);
+        self.reset(encoder, id, base, capacity);
+        let states: Vec<&ParticleState> = states
+            .iter()
+            .filter(|p| p.age < p.lifetime)
+            .take(capacity as usize)
+            .collect();
+        let n = states.len() as u32;
+        let particles: Vec<GpuParticle> = states
+            .iter()
+            .map(|p| GpuParticle {
+                position: p.position,
+                age: p.age,
+                velocity: p.velocity,
+                lifetime: p.lifetime,
+                color: p.color,
+                size: p.size,
+                _pad: [0.0; 3],
+            })
+            .collect();
+        let quads: Vec<GpuQuad> = states
+            .iter()
+            .map(|p| {
+                let (size, color, sprite) = render_attributes(&e.desc, p);
+                GpuQuad {
+                    position: p.position,
+                    sprite,
+                    velocity: p.velocity,
+                    _pad0: 0,
+                    size,
+                    _pad1: Vec2::ZERO,
+                    color,
+                }
+            })
+            .collect();
+        let slots: Vec<u32> = (0..n).collect();
+        let counters: [u32; 8] = [6, n, 0, 0, n, 0, 0, 0];
+        let b = &self.buffers;
+        let base = u64::from(base);
+        let mut write = |buffer: &wgpu::Buffer, offset: u64, bytes: &[u8]| {
+            if let Some(size) = wgpu::BufferSize::new(bytes.len() as u64) {
+                self.belt
+                    .write_buffer(encoder, buffer, offset, size)
+                    .copy_from_slice(bytes);
+            }
+        };
+        write(
+            &b.particles,
+            base * PARTICLE_BYTES,
+            bytemuck::cast_slice(&particles),
+        );
+        write(&b.quads, base * QUAD_BYTES, bytemuck::cast_slice(&quads));
+        write(
+            &b.lists[self.current],
+            base * 4,
+            bytemuck::cast_slice(&slots),
+        );
+        write(
+            &b.counters,
+            u64::from(id) * COUNTER_BYTES,
+            bytemuck::cast_slice(&counters),
+        );
+        self.belt.finish_and_recall_on_submit(encoder);
+    }
+
     /// Records one step of `dt` seconds for `emitters` (`(id, state)`): allocates and resets the
     /// ranges of new emitters, ticks the spawners and the seed chains, uploads the step and
     /// runs init, prepare and update in one compute pass (timed by two queries at
@@ -480,33 +611,37 @@ impl ParticlePool {
                 fresh.push((*id, e.base.unwrap(), e.desc.capacity));
             }
         }
-        let slots = self.ranges.last().map_or(0, |r| r.0 + r.1);
         let ids = emitters.iter().map(|(id, _)| id + 1).max().unwrap_or(0);
-        self.reserve(encoder, slots, ids, emitters.len() as u32);
-
-        let b = &self.buffers;
+        let entries = emitters
+            .iter()
+            .map(|(_, e)| 1 + e.bursts.len())
+            .sum::<usize>();
+        self.reserve_for(encoder, ids, entries as u32);
         for &(id, base, capacity) in &fresh {
-            // An empty emitter: no particles, the dead stack in slot order, nothing to draw.
-            encoder.clear_buffer(
-                &b.counters,
-                u64::from(id) * COUNTER_BYTES,
-                Some(COUNTER_BYTES),
-            );
-            let identity: Vec<u32> = (0..capacity).collect();
-            if let Some(size) = wgpu::BufferSize::new(u64::from(capacity) * 4) {
-                self.belt
-                    .write_buffer(encoder, &b.dead, u64::from(base) * 4, size)
-                    .copy_from_slice(bytemuck::cast_slice(&identity));
-            }
+            self.reset(encoder, id, base, capacity);
         }
 
-        let mut steps = Vec::with_capacity(emitters.len());
+        // Per emitter, an entry per triggered burst (spawning at its transform), then the
+        // spawner's entry, which also ages and moves every particle of the emitter.
+        let mut steps = Vec::with_capacity(entries);
         let mut total_spawn = 0;
         for (id, e) in &mut emitters {
             let (spawn, seed) = e.tick(dt);
-            steps.push(emitter_step(*id, e, spawn, total_spawn, seed));
+            let mut row_offset = 0;
+            for (count, transform) in std::mem::take(&mut e.bursts) {
+                let mut s = emitter_step(*id, e, count, total_spawn, seed);
+                s.world_from_emitter = transform;
+                s.row_offset = row_offset;
+                steps.push(s);
+                total_spawn += count;
+                row_offset += count;
+            }
+            let mut s = emitter_step(*id, e, spawn, total_spawn, seed);
+            s.row_offset = row_offset;
+            steps.push(s);
             total_spawn += spawn;
         }
+        let b = &self.buffers;
         let header = StepHeader {
             count: steps.len() as u32,
             total_spawn,
