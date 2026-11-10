@@ -5,6 +5,7 @@ use super::{
     clustered::{ClusteredLightingUnsupported, ClusteredLights, LightAssignment},
     gpu::{FrameUniform, InstanceData},
     gpu_culling::GpuCulling,
+    retained::RetainedInstances,
 };
 use crate::{
     cull::Frustum,
@@ -60,10 +61,16 @@ pub struct Viewport {
     /// Every view's draws: the main pass's (`main_draws`), then each shadow pass's.
     pub(super) draws: Vec<Draw>,
     pub(super) main_draws: Range<usize>,
-    /// Scratch for sorting the frame's instances, kept between frames with its allocation.
+    /// Scratch for the frame's instances in draw order, kept between frames with its allocation.
     pub(super) draw_keys: Vec<DrawKey>,
-    /// Scratch for the instance buffer's contents, kept likewise.
+    /// Scratch for the keys sorted each frame (listed and retained blended instances), likewise.
+    pub(super) frame_keys: Vec<DrawKey>,
+    /// Scratch for the listed instances' rows of the instance buffer, likewise.
     pub(super) instance_data: Vec<InstanceData>,
+    /// The world's retained instances as this viewport last derived and uploaded them.
+    pub(super) retained: RetainedInstances,
+    /// Rows in the instance buffer this frame: the retained slots, then the listed instances.
+    pub(super) instance_rows: u32,
     pub(super) clear_color: wgpu::Color,
     pub(super) tonemapping: Tonemapping,
     pub(super) particles: ParticleFrame,
@@ -120,7 +127,7 @@ pub struct ViewportMemory {
     /// index list.
     pub clustered_lighting_bytes: u64,
     /// CPU scratch vectors kept between frames (draw keys, instance data, draws, shadow passes,
-    /// and the cluster assignment's).
+    /// the retained instances' copy and the cluster assignment's).
     pub cpu_scratch_bytes: u64,
 }
 
@@ -128,15 +135,19 @@ pub struct ViewportMemory {
 /// done. Deterministic for the same inputs, so tests hold `prepare` to the work contracts in
 /// `docs/consumer-integration.md` ("Work contracts").
 ///
-/// With `N` instances, `V` views (the camera plus every shadow view) and `L` shadowed point or
-/// spot lights, `prepare` is a full pass over the frame's instance list, not an incremental
-/// one: it tests `N · V` boxes plus `N · L` light spheres and uploads `N` instances, whatever
-/// changed since the last frame. What the views keep only drives the visible-index upload and
-/// the draws.
+/// With `N` instances (retained plus listed), `V` views (the camera plus every shadow view)
+/// and `L` shadowed point or spot lights, `prepare` tests `N · V` boxes plus `N · L` light
+/// spheres every frame. It writes every listed instance, but a retained instance only when it
+/// was added or changed since this viewport's last `prepare` (`instance_writes`). What the
+/// views keep only drives the visible-index upload and the draws.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PrepareWork {
-    /// Instances listed (`N`).
+    /// Instances drawn: the world's retained instances plus the listed ones (`N`).
     pub instances: u32,
+    /// Instances written to the instance buffer: every listed one, plus the retained ones
+    /// added, changed or removed since this viewport's last `prepare` (all of them after the
+    /// buffer grows or the viewport is given another world) and skinned ones, posed each frame.
+    pub instance_writes: u32,
     /// Views culled: the camera plus every sun cascade, spot map and point-light cube face.
     pub views: u32,
     /// Instance bounds tested on the CPU: one per instance and view, plus one sphere test per
@@ -219,6 +230,16 @@ impl Growable {
         })
     }
 
+    /// Replaces the buffer with an empty one of at least `size` bytes if it is smaller,
+    /// returning whether it did.
+    pub(crate) fn reserve(&mut self, device: &wgpu::Device, size: u64) -> bool {
+        let grown = size > self.buffer.size();
+        if grown {
+            self.buffer = Self::create(device, self.label, self.usage, size.next_power_of_two());
+        }
+        grown
+    }
+
     /// Writes `bytes` (never empty), returning whether the buffer was replaced.
     pub(crate) fn write(
         &mut self,
@@ -239,10 +260,7 @@ impl Growable {
         bytes: &[u8],
         size: u64,
     ) -> bool {
-        let grown = size > self.buffer.size();
-        if grown {
-            self.buffer = Self::create(device, self.label, self.usage, size.next_power_of_two());
-        }
+        let grown = self.reserve(device, size);
         if !bytes.is_empty() {
             queue.write_buffer(&self.buffer, offset, bytes);
         }
@@ -321,19 +339,58 @@ pub(super) struct ShadowPass {
     pub(super) draws: Range<usize>,
 }
 
-/// What places an instance in the frame's draw order, with what its draw and instance data
-/// need from the first pass over the instances.
+/// What places an instance in the frame's draw order, with what its draw needs.
+#[derive(Clone, Copy, Debug)]
 pub(super) struct DrawKey {
     pub(super) phase: Phase,
     pub(super) face: usize,
     pub(super) material: MaterialId,
     pub(super) mesh: MeshId,
+    /// Blended instances: the origin's view-space depth, set each frame.
     pub(super) view_z: f32,
     pub(super) skinned: bool,
-    /// The skin's first joint in the joint buffer.
-    pub(super) joint_offset: u32,
-    /// Index in the consumer's instance list.
+    /// The instance's row in the instance buffer: a retained instance's world slot, or the
+    /// retained slots' count plus its index in the frame's list. Ties sort by it, so the
+    /// consumer's order decides among otherwise equal instances.
     pub(super) index: u32,
+}
+
+impl DrawKey {
+    /// Bevy's phase order: opaque, then alpha-masked (each by face variant, material and mesh),
+    /// then blended from back to front by origin.
+    pub(super) fn draw_order(&self, other: &Self) -> std::cmp::Ordering {
+        self.phase
+            .cmp(&other.phase)
+            .then_with(|| {
+                if self.phase == Phase::Blend {
+                    self.view_z.total_cmp(&other.view_z)
+                } else {
+                    (self.face, self.material, self.mesh).cmp(&(
+                        other.face,
+                        other.material,
+                        other.mesh,
+                    ))
+                }
+            })
+            .then(self.index.cmp(&other.index))
+    }
+
+    /// Whether both draw with the same pipeline, material and mesh.
+    pub(super) fn same_draw(&self, other: &Self) -> bool {
+        (
+            self.phase,
+            self.face,
+            self.material,
+            self.mesh,
+            self.skinned,
+        ) == (
+            other.phase,
+            other.face,
+            other.material,
+            other.mesh,
+            other.skinned,
+        )
+    }
 }
 
 /// Consecutive instances sharing a pipeline, material and mesh: in the sorted instance list
@@ -382,7 +439,10 @@ impl Viewport {
             draws: Vec::new(),
             main_draws: 0..0,
             draw_keys: Vec::new(),
+            frame_keys: Vec::new(),
             instance_data: Vec::new(),
+            retained: RetainedInstances::default(),
+            instance_rows: 0,
             clear_color: wgpu::Color::BLACK,
             tonemapping: Tonemapping::default(),
             particles: ParticleFrame::new(device),
@@ -519,10 +579,12 @@ impl Viewport {
                 .map_or(0, GpuCulling::buffer_bytes),
             clustered_lighting_bytes: self.clustered.as_ref().map_or(0, ClusteredLights::memory),
             cpu_scratch_bytes: (self.draw_keys.capacity() * std::mem::size_of::<DrawKey>()
+                + self.frame_keys.capacity() * std::mem::size_of::<DrawKey>()
                 + self.instance_data.capacity() * std::mem::size_of::<InstanceData>()
                 + self.draws.capacity() * std::mem::size_of::<Draw>()
                 + self.shadow_passes.capacity() * std::mem::size_of::<ShadowPass>())
                 as u64
+                + self.retained.memory()
                 + self
                     .clustered
                     .as_ref()

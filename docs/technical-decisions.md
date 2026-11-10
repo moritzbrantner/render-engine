@@ -217,20 +217,22 @@ boundary:
 | Owner | Owns |
 | --- | --- |
 | render-engine | GPU resources, pipelines, materials, lighting (light evaluation, shadows, sky/fog/ambient), visibility (culling per view), drawing, tone mapping, particle simulation and rendering |
-| Game | Entities and ECS, scene composition (what exists and what is listed each frame), camera intent, world state, gameplay, the game loop, the day clock that drives the sun, runtime asset loading, UI, the wgpu device, queue and frame |
+| Game | Entities and ECS, scene composition (what exists, what is retained and what is listed each frame), camera intent, world state, gameplay, the game loop, the day clock that drives the sun, runtime asset loading, UI, the wgpu device, queue and frame |
 | [physics-engine](https://github.com/moritzbrantner/physics-engine) | Physics |
 | [asset-tooling](https://github.com/moritzbrantner/asset-tooling) | Asset source and processing |
 
 Scene data crosses this boundary from the game to the engine. The consumer uploads meshes, textures and
 materials once into a `World` (stable handles, incremental `set_*` updates), describes each frame
-as a `Scene` (camera and light values) plus a list of instances (mesh, material, transform), and
+as a `Scene` (camera and light values) plus its instances (mesh, material, transform): retained in
+the `World` under handles until it edits or removes them (#95), or listed for that frame alone. It
 has `Renderer::encode` record into its encoder and colour target. Its UI draws on top afterwards.
 The engine keeps its MSAA, HDR, depth and shadow targets in a `Viewport`. The headless path uses
 the same calls. See [consumer integration](consumer-integration.md), which has a small example of
 this data.
 
 Despite their names, `World` is a store of GPU resources and `Scene` a per-frame render
-description; neither is a game scene. Renderer-internal instance or visibility caches are
+description; neither is a game scene. Retained instances are render values the game set, like
+meshes, not game entities. Renderer-internal instance or visibility caches are
 allowed, but they are derived from what the game passed and are never the source of truth for
 game state. The engine reads no files and adds no asset or scene framework of its own. Its
 format helpers (`Cubemap::from_ktx2` on bytes the consumer passes, `MeshData::generate_tangents`)
@@ -577,6 +579,7 @@ stays rendering-only (D7), and D1–D9 stand as updated here: Bevy remains the o
 | --- | --- |
 | Forward pass, every point and spot light evaluated for every fragment | **Implemented**, the reference path |
 | CPU frustum culling per view, instanced draws from the per-frame instance list | **Implemented**, the reference path; contracts in [consumer integration](consumer-integration.md#work-contracts) |
+| Retained instances (Bevy's retained render world) | **Implemented** ([#95](https://github.com/moritzbrantner/render-engine/issues/95)): `World::add_instance` keeps instances across frames and each viewport writes only the changed ones, beside the listed path, with the same image. On Greyhaven it takes `prepare` from about 3.1 to 1.4 ms and the upload from 4.2 to 1.0 MB a frame; the game's adoption is [mmorpg#728](https://github.com/moenarch-games/mmorpg/issues/728). |
 | Compute simulation and indirect draws for particles | **Implemented**, for particles only |
 | three.js port for the web client | **Implemented** (D8) |
 | Two-phase Hi-Z occlusion culling | **Not adopted**: a negative result ([#59](https://github.com/moritzbrantner/render-engine/issues/59), [experiment](occlusion-experiment.md)) |

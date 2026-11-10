@@ -54,7 +54,7 @@ impl Aabb {
 }
 
 /// An instance's bounding box in world space: the mesh box under its model matrix.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Obb {
     center: Vec3,
     /// The model matrix's axes scaled by the box's half extents.

@@ -246,7 +246,7 @@ impl GpuCulling {
                 .collect();
         let view_count = views.len() as u32;
         let row_count = rows.len() as u32;
-        let instance_count = viewport.instance_data.len() as u32;
+        let instance_count = viewport.instance_rows;
         let per_view: u32 = rows.iter().map(|r| r.count).sum();
         let mut args = Vec::with_capacity(views.len() * rows.len());
         for view in 0..view_count {
