@@ -131,6 +131,14 @@ pub enum Velocity {
     Radial { speed: f32 },
     /// `base + (2 r - 1) * spread` per axis, `r` uniform in [0, 1)³ from the particle's stream.
     Jitter { base: Vec3, spread: Vec3 },
+    /// In a cone of half-angle `spread` around `direction`, uniform over its solid angle, at a
+    /// speed uniform in `speed.0..speed.1` (render-engine `InitModifier::VelocityCone`; hanabi
+    /// expressions on the Bevy side).
+    Cone {
+        direction: Vec3,
+        spread: f32,
+        speed: (f32, f32),
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -227,6 +235,18 @@ impl Emitter {
                 min: base - spread,
                 max: base + spread,
             }),
+            Velocity::Cone {
+                direction,
+                spread,
+                speed,
+            } => InitModifier::VelocityCone {
+                direction,
+                spread,
+                speed: Value::Uniform {
+                    min: speed.0,
+                    max: speed.1,
+                },
+            },
         };
         particles::Emitter {
             capacity: self.capacity,
@@ -301,6 +321,19 @@ impl Emitter {
                         let (min, max) = (base - spread, base + spread);
                         r.frand3() * (max - min) + min
                     }
+                    Velocity::Cone {
+                        direction,
+                        spread,
+                        speed,
+                    } => {
+                        let d = direction.normalize();
+                        let (t1, t2) = d.any_orthonormal_pair();
+                        let c = 1.0 - r.frand() * (1.0 - spread.cos());
+                        let phi = r.frand() * std::f32::consts::TAU;
+                        let speed = speed.0 + r.frand() * (speed.1 - speed.0);
+                        let s = (1.0 - c * c).max(0.0).sqrt();
+                        (t1 * (s * phi.cos()) + t2 * (s * phi.sin()) + d * c) * speed
+                    }
                 };
                 alive.push(particles::ParticleState {
                     position: position + self.translation,
@@ -350,6 +383,7 @@ pub fn all() -> Vec<ParticleScenario> {
         smoke_and_sparks(),
         lit_fog(),
         snapshot(),
+        cone_bursts(),
     ]
 }
 
@@ -991,6 +1025,127 @@ fn fountain() -> ParticleScenario {
             colour: 0.12,
         },
     }
+}
+
+/// An additive, round emitter thrown out in a cone (#87), like asset-tooling's burst presets
+/// (`direction`, `spread`, `speed`, `gravity`).
+#[allow(clippy::too_many_arguments)]
+fn cone(
+    name: &'static str,
+    spawn: Spawn,
+    position: Vec3,
+    direction: Vec3,
+    spread: f32,
+    speed: (f32, f32),
+    gravity: f32,
+    lifetime_frames: f32,
+    color: Vec4,
+) -> Emitter {
+    Emitter {
+        name,
+        capacity: 1024,
+        spawn,
+        position,
+        radius: 0.04,
+        velocity: Velocity::Cone {
+            direction,
+            spread,
+            speed,
+        },
+        lifetime: lifetime_frames * DT,
+        gravity: Vec3::new(0.0, -gravity, 0.0),
+        size: square(&[(0.0, 0.09), (1.0, 0.03)]),
+        color: vec![
+            (0.0, color),
+            (0.6, color * Vec4::new(0.6, 0.5, 0.5, 0.8)),
+            (1.0, color * Vec4::new(0.2, 0.1, 0.1, 0.0)),
+        ],
+        orient: Orient::CameraPlane,
+        texture: None,
+        round: true,
+        blend: ParticleBlend::Add,
+        translation: Vec3::ZERO,
+        lighting: None,
+        fog: false,
+        driver: Driver::Spawner,
+    }
+}
+
+/// `particles_cone` (#87): velocity cones (`InitModifier::VelocityCone`), built on the Bevy
+/// side from hanabi expressions. Three bursts shaped like asset-tooling's presets: sparks
+/// straight up (spread 1.1 rad), a guard-break glint thrown sideways and away from the camera
+/// (1.4 rad), a dust puff over more than a hemisphere (2.6 rad), and a narrow jet (0.35 rad,
+/// tilted back) spawning 512 a second. Captured at 0.5 s (no particle has died yet: exact tier)
+/// and 2.5 s (the bursts have died, the jet recycles slots: statistical tier).
+fn cone_bursts() -> ParticleScenario {
+    let mut s = fountain();
+    s.name = "particles_cone";
+    s.capability = "velocity cone";
+    s.seed = 0x5eed_0087;
+    s.emitters = vec![
+        cone(
+            "spark",
+            Spawn::Burst { count: 128 },
+            Vec3::new(-2.6, 1.0, 0.0),
+            Vec3::Y,
+            1.1,
+            (2.4, 4.5),
+            6.0,
+            80.0,
+            Vec4::new(6.0, 3.0, 0.8, 1.0),
+        ),
+        cone(
+            "guard_break",
+            Spawn::Burst { count: 128 },
+            Vec3::new(-0.6, 2.6, 0.0),
+            Vec3::new(1.0, 0.4, -0.6),
+            1.4,
+            (2.4, 5.0),
+            5.0,
+            80.0,
+            Vec4::new(1.5, 2.5, 5.0, 1.0),
+        ),
+        cone(
+            "dust",
+            Spawn::Burst { count: 128 },
+            Vec3::new(2.6, 3.0, 0.0),
+            Vec3::Y,
+            2.6,
+            (0.8, 2.0),
+            0.4,
+            80.0,
+            Vec4::new(3.0, 2.6, 2.0, 1.0),
+        ),
+        cone(
+            "jet",
+            Spawn::Rate { per_second: 512.0 },
+            Vec3::new(-1.0, 0.2, 0.5),
+            Vec3::new(0.3, 1.0, -0.5),
+            0.35,
+            (5.0, 6.0),
+            9.81,
+            96.0,
+            Vec4::new(1.0, 4.0, 2.0, 1.0),
+        ),
+    ];
+    s.captures = vec![
+        Capture {
+            frame: 32,
+            tier: Tier::Exact,
+        },
+        Capture {
+            frame: 160,
+            tier: Tier::Statistical,
+        },
+    ];
+    // Seed noise at 2.5 s over eight seeds (RTX 3060 Ti): coverage ≤ 0.0152, spatial ≤ 0.0555,
+    // colour ≤ 0.0395. Gravity ×1.25 scores 0.082 / 0.202 / 0.066.
+    s.stat_max = StatThresholds {
+        coverage: 0.023,
+        spatial: 0.083,
+        colour: 0.06,
+    };
+    s
 }
 
 /// `particles_100k`: a fountain sustaining about 100k particles (51 200 a second, living 2 s)

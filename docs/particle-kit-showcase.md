@@ -78,8 +78,10 @@ These are visible in the images above. Each is a follow-up slice.
    per frame, so 1000 burst emitters cost 25 ms. Each emitter is a draw, a 768-byte step
    upload and a texture bind group created every frame (`ParticleFrame::prepare`).
 5. **No velocity cone.** asset-tooling's presets emit in a cone (`direction`, `spread`), and
-   hanabi's init modifiers have none, so the showcase approximates it with a box of velocities.
-   The `trail` preset's segment `instances` are not modelled either.
+   hanabi's init modifiers have none, so the showcase approximated it with a box of
+   velocities. Since #87 the presets use `InitModifier::VelocityCone` (oracle
+   `particles_cone`); `combat_bursts` and `zoo_bursts` above are rendered with it. The `trail`
+   preset's segment `instances` are not modelled.
 6. **Alpha emitters are not sorted inside.** Dense alpha effects (smoke, spray) draw in GPU
    alive-list order, as hanabi does. At the densities here no artefact is visible yet.
 

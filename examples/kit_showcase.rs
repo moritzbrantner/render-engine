@@ -410,10 +410,9 @@ fn v3(v: &Json) -> Vec3 {
     Vec3::new(f(&v[0]), f(&v[1]), f(&v[2]))
 }
 
-/// An asset-tooling burst preset (`count`, `direction` (+Y in both kits), `spread`, `speed`,
-/// `gravity`, `lifetime`, `endScale`, `fadeOut`, `emitDuration`) as an emitter repeating every
-/// `period` s. The preset's cone of half-angle `spread` around +Y is approximated by a box of
-/// velocities (render-engine has hanabi's init modifiers, which have no velocity cone).
+/// An asset-tooling burst preset (`count`, `direction`, `spread`, `speed`, `gravity`,
+/// `lifetime`, `endScale`, `fadeOut`, `emitDuration`) as an emitter repeating every `period` s.
+/// The preset's cone of half-angle `spread` around `direction` is `InitModifier::VelocityCone`.
 fn burst(
     fx: &FlipbookEffect,
     preset: &str,
@@ -423,9 +422,6 @@ fn burst(
 ) -> Emitter {
     let p = &fx.presets[preset];
     let (count, lifetime) = (f(&p["count"]), f(&p["lifetime"]));
-    let (s0, s1) = (f(&p["speed"][0]), f(&p["speed"][1]));
-    let spread = f(&p["spread"]).min(std::f32::consts::FRAC_PI_2);
-    let side = s1 * spread.sin();
     let emit = f(&p["emitDuration"]);
     let fade = p["fadeOut"].as_bool().unwrap();
     Emitter {
@@ -443,10 +439,14 @@ fn burst(
                 radius: 0.04,
                 dimension: ShapeDimension::Volume,
             },
-            InitModifier::Velocity(Value::Uniform {
-                min: Vec3::new(-side, s0 * spread.cos(), -side),
-                max: Vec3::new(side, s1, side),
-            }),
+            InitModifier::VelocityCone {
+                direction: v3(&p["direction"]),
+                spread: f(&p["spread"]),
+                speed: Value::Uniform {
+                    min: f(&p["speed"][0]),
+                    max: f(&p["speed"][1]),
+                },
+            },
             InitModifier::Lifetime(Value::Const(lifetime)),
             InitModifier::Color(Value::Const(Vec4::ONE)),
         ],

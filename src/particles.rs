@@ -122,6 +122,17 @@ pub enum InitModifier {
     VelocitySphere { center: Vec3, speed: Value<f32> },
     /// Sets the velocity (hanabi `SetAttributeModifier(VELOCITY)`).
     Velocity(Value<Vec3>),
+    /// In a cone around `direction` at `speed` (not a hanabi modifier; the oracle builds it
+    /// from hanabi expressions): the velocity's direction is uniform over the cone's solid
+    /// angle, every direction at most `spread` radians from `direction` (a half-angle; π is
+    /// the whole sphere). Draws `frand()` for the polar angle's cosine, uniform in
+    /// `[cos spread, 1]`, then `frand()` for the azimuth around `direction`, then the speed's.
+    /// asset-tooling's burst presets (`direction`, `spread`, `speed`) map onto it directly.
+    VelocityCone {
+        direction: Vec3,
+        spread: f32,
+        speed: Value<f32>,
+    },
     /// Seconds (hanabi `SetAttributeModifier(LIFETIME)`); without one a particle lives 1 s.
     Lifetime(Value<f32>),
     /// Starting age, seconds.

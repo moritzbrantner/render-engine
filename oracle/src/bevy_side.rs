@@ -1145,7 +1145,7 @@ fn effect_asset(e: &Emitter, seed: u32, gravity_scale: f32) -> hanabi::EffectAss
     };
     enum InitVelocity {
         Radial(hanabi::SetVelocitySphereModifier),
-        Jitter(SetAttributeModifier),
+        Set(SetAttributeModifier),
     }
     let init_velocity = match e.velocity {
         ParticleVelocity::Radial { speed } => {
@@ -1157,7 +1157,32 @@ fn effect_asset(e: &Emitter, seed: u32, gravity_scale: f32) -> hanabi::EffectAss
         ParticleVelocity::Jitter { base, spread } => {
             let r = w.rand(hanabi::VectorType::VEC3F);
             let v = r * w.lit(v3(spread * 2.0)) + w.lit(v3(base - spread));
-            InitVelocity::Jitter(SetAttributeModifier::new(Attribute::VELOCITY, v.expr()))
+            InitVelocity::Set(SetAttributeModifier::new(Attribute::VELOCITY, v.expr()))
+        }
+        // render-engine's `InitModifier::VelocityCone` from hanabi expressions (hanabi has no
+        // cone modifier): the cosine, the azimuth and the speed drawn in that order (hanabi
+        // evaluates a binary expression's left operand first and caches each `rand`).
+        ParticleVelocity::Cone {
+            direction,
+            spread,
+            speed,
+        } => {
+            let d = direction.normalize();
+            let (t1, t2) = d.any_orthonormal_pair();
+            let c = w.lit(1.0f32) - w.rand(hanabi::ScalarType::Float) * w.lit(1.0 - spread.cos());
+            let phi = w.rand(hanabi::ScalarType::Float) * w.lit(std::f32::consts::TAU);
+            let s = (w.lit(1.0f32) - c.clone() * c.clone())
+                .max(w.lit(0.0f32))
+                .sqrt();
+            let speed =
+                w.lit(speed.0) + w.rand(hanabi::ScalarType::Float) * w.lit(speed.1 - speed.0);
+            let dir = w.lit(v3(t1)) * (s.clone() * phi.clone().cos())
+                + w.lit(v3(t2)) * (s * phi.sin())
+                + w.lit(v3(d)) * c;
+            InitVelocity::Set(SetAttributeModifier::new(
+                Attribute::VELOCITY,
+                (dir * speed).expr(),
+            ))
         }
     };
     let init_age = SetAttributeModifier::new(Attribute::AGE, w.lit(0.0f32).expr());
@@ -1203,7 +1228,7 @@ fn effect_asset(e: &Emitter, seed: u32, gravity_scale: f32) -> hanabi::EffectAss
         .init(init_position);
     asset = match init_velocity {
         InitVelocity::Radial(m) => asset.init(m),
-        InitVelocity::Jitter(m) => asset.init(m),
+        InitVelocity::Set(m) => asset.init(m),
     };
     asset.prng_seed = seed;
     asset = asset.init(init_age).init(init_lifetime).update(gravity);

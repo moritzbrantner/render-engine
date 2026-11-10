@@ -366,6 +366,11 @@ world.step_particles(&mut encoder, dt, None);
   `world.read_alive_particles()` reads every emitter's alive count back from the GPU and waits,
   for tests and tools.
 - **Limits.** At most 8 init modifiers per emitter and 8 keys per gradient.
+- **Velocity cones.** `InitModifier::VelocityCone { direction, spread, speed }` throws each
+  particle in a direction uniform over a cone of half-angle `spread` radians around
+  `direction` (up to π, the whole sphere) at `speed`. asset-tooling's burst presets
+  (`direction`, `spread`, `speed: [min, max]`) map onto it field for field, with
+  `speed: Value::Uniform { min, max }`.
 - **Simulation space.** Particles live in world space: moving the emitter moves where new ones
   spawn, not the ones already alive.
 - **Draw order.** Emitters are drawn back to front by their transform's position, additive and
