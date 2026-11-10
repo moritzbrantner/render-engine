@@ -126,6 +126,7 @@ const KIND_LIFETIME: u32 = 4u;
 const KIND_AGE: u32 = 5u;
 const KIND_SIZE: u32 = 6u;
 const KIND_COLOR: u32 = 7u;
+const KIND_VELOCITY_CONE: u32 = 8u;
 
 const MODE_CONST: u32 = 0u;
 // PositionSphere: volume = const mode, surface = this.
@@ -278,6 +279,25 @@ fn init(@builtin(global_invocation_id) gid: vec3<u32>) {
             }
             case KIND_VELOCITY: {
                 p.velocity = vector3(m);
+            }
+            case KIND_VELOCITY_CONE: {
+                // Uniform over the cone's solid angle around the unit axis `a.xyz`, half-angle
+                // cosine `a.w`; the speed is in `b`.
+                let c = 1. - frand() * (1. - m.a.w);
+                let phi = frand() * TAU;
+                var speed = m.b.x;
+                if (m.mode == MODE_UNIFORM) {
+                    speed = m.b.x + frand() * (m.b.y - m.b.x);
+                }
+                let s = sqrt(max(1. - c * c, 0.));
+                // glam's `Vec3::any_orthonormal_pair` (Duff et al. 2017) around the axis.
+                let d = m.a.xyz;
+                let sign = select(-1., 1., d.z >= 0.);
+                let k = -1. / (sign + d.z);
+                let b = d.x * d.y * k;
+                let t1 = vec3<f32>(1. + sign * d.x * d.x * k, sign * b, -sign * d.x);
+                let t2 = vec3<f32>(b, sign + d.y * d.y * k, -d.y);
+                p.velocity = (t1 * (s * cos(phi)) + t2 * (s * sin(phi)) + d * c) * speed;
             }
             case KIND_LIFETIME: {
                 p.lifetime = scalar(m);

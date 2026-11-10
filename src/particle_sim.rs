@@ -106,6 +106,7 @@ mod kind {
     pub const AGE: u32 = 5;
     pub const SIZE: u32 = 6;
     pub const COLOR: u32 = 7;
+    pub const VELOCITY_CONE: u32 = 8;
 }
 
 /// `(mode, a, b)` of a vector: constant in `a`, or uniform between `a` and `b`.
@@ -149,6 +150,16 @@ fn modifier(m: &InitModifier) -> GpuModifier {
             (kind::VELOCITY_SPHERE, (mode, center.extend(0.0), speed))
         }
         InitModifier::Velocity(v) => (kind::VELOCITY, value(v, |v: Vec3| v.extend(0.0))),
+        InitModifier::VelocityCone {
+            direction,
+            spread,
+            speed,
+        } => {
+            // The unit axis and the cosine of the half-angle in `a`, the speed in `b`.
+            let (mode, speed, _) = scalar(speed);
+            let axis = direction.normalize().extend(spread.cos());
+            (kind::VELOCITY_CONE, (mode, axis, speed))
+        }
         InitModifier::Lifetime(v) => (kind::LIFETIME, scalar(v)),
         InitModifier::Age(v) => (kind::AGE, scalar(v)),
         InitModifier::Size(v) => (kind::SIZE, scalar(v)),

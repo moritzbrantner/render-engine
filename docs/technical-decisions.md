@@ -526,6 +526,21 @@ Each capture is judged by one of two tiers:
   before the first death) are in the exact tier and score FLIP mean 0.0000 and p99 0.0000 on the
   RTX 3060 Ti and on lavapipe. A replay seeded one bit off scores mean 0.0058 and 0.0091, p99
   0.031 and 0.40, which fails. GPU time is 0.067 ms against Bevy's 0.164 ms.
+- **Velocity cones** (#87). asset-tooling's burst presets throw particles in a cone
+  (`direction`, half-angle `spread` in radians, `speed: [min, max]`); hanabi has no cone
+  modifier. `InitModifier::VelocityCone` draws, from the particle's stream in this order, the
+  polar angle's cosine `c = 1 − frand()·(1 − cos spread)` (uniform over the cone's solid
+  angle), the azimuth `φ = frand()·τ` and the speed, and sets `v = (t₁·sin θ cos φ + t₂·sin θ
+  sin φ + d·c)·speed`, with `(t₁, t₂)` glam's `any_orthonormal_pair` around the unit axis `d`.
+  **Oracle:** `particles_cone` gives hanabi the same velocity as a `SetAttributeModifier
+  (VELOCITY)` expression (three `rand(Float)`, the basis as literals; hanabi evaluates a binary
+  expression's left operand first and stores each `rand` once, so it draws in the same order).
+  Three bursts (spread 1.1 straight up, 1.4 sideways and away from the camera, 2.6 over more
+  than a hemisphere) and a narrow jet (0.35, 512 a second). At 0.5 s (exact tier) both sides
+  score FLIP mean 0.0000 and p99 0.0000 on the RTX 3060 Ti; every other seed scores mean ≥
+  0.062 and p99 ≥ 0.979, gravity × 1.25 mean 0.054 and p99 0.978. At 2.5 s seed noise reaches
+  coverage 0.0152, spatial 0.0555 and colour 0.0395, so the gate is 0.023 / 0.083 / 0.06;
+  gravity × 1.25 scores 0.082 / 0.202 / 0.066. GPU time is 0.080 ms against Bevy's 0.173 ms.
 - **Recycling in practice.** On the RTX 3060 Ti and on lavapipe, both sides' atomics happen to
   recycle slots in the same order for `particles_fountain` and `particles_100k`, so their late
   captures also match nearly exactly (FLIP mean ≤ 0.0002, statistics 0.000). The statistical
