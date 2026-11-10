@@ -389,6 +389,35 @@ world.step_particles(&mut encoder, dt, None);
   draws all particles in one extra pass (`"particles"` in `Viewport::pass_labels`) that reads
   the depth target; nothing changes for frames without one. Keep it 0 for sparks and other
   small, fast particles, where the edge is not visible.
+- **Triggered bursts.** `world.burst(id, count, world_from_emitter)` spawns `count` particles on
+  the next step at that transform, through the emitter's init modifiers, on top of its spawner
+  (usually inactive for impact effects). Several bursts in one step each spawn where they were
+  triggered, so one emitter serves every impact of its kind; `spawn_count` includes them.
+- **Consumer-fed particles.** For particles whose state the game owns (physics debris,
+  server-authoritative projectiles), `world.set_particles(&mut encoder, id, &states)` replaces
+  the emitter's particles with `ParticleState`s (world-space position and velocity, age,
+  lifetime, size, linear colour; `..Default::default()` gives an infinite lifetime). The next
+  frame draws them through the emitter's size and colour over life, flipbook, orientation,
+  texture, lighting and fog. Steps after it age, accelerate and move them like spawned
+  particles until the next snapshot, which smooths between server updates; for states that
+  must stay put, give no velocity or acceleration. States past their lifetime and beyond the
+  capacity are left out. To feed every frame, keep the emitter inactive and call
+  `set_particles` after `step_particles` in the same encoder. render-engine never sees the
+  physics or network types: convert to `ParticleState` in the game.
+
+```rust
+// An impact: sparks at the hit point, 24 of them, on the next step.
+world.burst(impact_sparks, 24, Mat4::from_translation(hit.position));
+
+// Debris from the physics engine, every frame after the step.
+world.step_particles(&mut encoder, dt, None);
+let states: Vec<ParticleState> = debris
+    .iter()
+    .map(|d| ParticleState { position: d.position, velocity: d.velocity, size: 0.1, ..Default::default() })
+    .collect();
+world.set_particles(&mut encoder, debris_emitter, &states);
+```
+
 - **Many emitters.** Each emitter is one indirect draw and 768 bytes of step upload per step,
   live particles or not; its texture's bind group is built once with the texture.
   `examples/emitter_cost.rs` measures about 1.7 µs of CPU per emitter and frame at 1000 to 2000

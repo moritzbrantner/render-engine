@@ -310,11 +310,16 @@ struct EngineParticles {
 /// Runs a particle scenario on render-engine at `particles::DT`. The emitters are added before
 /// the first step, like hanabi compiling them on update 1, and stepped inactive until Bevy's
 /// first spawn update, so both sides' seed chains are at the same link when spawning starts.
+/// Triggered and consumer-fed emitters ([`particles::Driver`]) stay inactive: a trigger bursts
+/// on frame 1, a snapshot is set after every step from the replay of `spawns` (Bevy's counts).
 fn run_engine_particles(
     gpu: &Headless,
     s: &particles::ParticleScenario,
     first_spawn_update: u32,
+    spawns: &[Vec<u32>],
 ) -> Result<EngineParticles, String> {
+    use particles::Driver;
+    use render_engine::glam::Mat4;
     let (mut world, instances, textures) = content::upload(gpu.renderer(), &s.assets, &s.objects);
     let emitters: Vec<_> = s
         .emitters
@@ -323,10 +328,7 @@ fn run_engine_particles(
         .map(|(i, e)| {
             let desc = e.engine(s.seed.wrapping_add(i as u32), &textures);
             let id = world.add_emitter(&desc);
-            world.set_emitter_transform(
-                id,
-                render_engine::glam::Mat4::from_translation(e.translation),
-            );
+            world.set_emitter_transform(id, Mat4::from_translation(e.translation));
             (id, desc)
         })
         .collect();
@@ -344,11 +346,21 @@ fn run_engine_particles(
     for _ in 1..first_spawn_update {
         step(&mut world);
     }
-    for (id, desc) in &emitters {
+    // The effect seed of frame 1, where a snapshot's replay starts.
+    let mut first_seeds: Vec<u32> = (0..emitters.len())
+        .map(|i| s.seed.wrapping_add(i as u32))
+        .collect();
+    for _ in 1..first_spawn_update {
+        first_seeds = first_seeds
+            .into_iter()
+            .map(render_engine::particles::next_seed)
+            .collect();
+    }
+    for ((id, desc), e) in emitters.iter().zip(&s.emitters) {
         world.set_emitter(
             *id,
             &render_engine::particles::Emitter {
-                active: true,
+                active: e.driver == Driver::Spawner,
                 ..desc.clone()
             },
         );
@@ -364,10 +376,30 @@ fn run_engine_particles(
         viewport,
     };
     for frame in 1..=last {
+        for ((id, _), e) in emitters.iter().zip(&s.emitters) {
+            if let (Driver::Trigger, particles::Spawn::Burst { count }, 1) =
+                (e.driver, e.spawn, frame)
+            {
+                out.world
+                    .burst(*id, count, Mat4::from_translation(e.translation));
+            }
+        }
         step(&mut out.world);
+        let mut encoder = gpu.device.create_command_encoder(&Default::default());
+        for (i, ((id, _), e)) in emitters.iter().zip(&s.emitters).enumerate() {
+            if e.driver == Driver::Snapshot {
+                let states = e.replay(first_seeds[i], &spawns[i], frame);
+                out.world.set_particles(&mut encoder, *id, &states);
+            }
+        }
+        gpu.queue.submit([encoder.finish()]);
         let alive = out.world.read_alive_particles();
-        for (i, (id, _)) in emitters.iter().enumerate() {
-            out.spawn_counts[i].push(out.world.spawn_count(*id));
+        for (i, ((id, _), e)) in emitters.iter().zip(&s.emitters).enumerate() {
+            out.spawn_counts[i].push(if e.driver == Driver::Snapshot {
+                spawns[i][frame as usize - 1]
+            } else {
+                out.world.spawn_count(*id)
+            });
             let n = alive.iter().find(|a| a.0 == *id).map_or(0, |a| a.1);
             out.alive[i].push(n);
         }
@@ -404,7 +436,7 @@ fn particle_scenarios(
                 continue;
             }
         };
-        let mut ours = match run_engine_particles(gpu, s, run.first_spawn_update) {
+        let mut ours = match run_engine_particles(gpu, s, run.first_spawn_update, &run.spawns) {
             Ok(r) => r,
             Err(e) => {
                 println!(

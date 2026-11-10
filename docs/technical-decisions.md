@@ -505,6 +505,27 @@ Each capture is judged by one of two tiers:
     `--calibrate` gives 0 for a rerun and for every other seed, since there are no random
     draws. Gravity × 1.25 moves the puffs by 1.6 mm at 0.5 s, which passes (p99 0.022). At
     2.5 s it fails with p99 0.20. GPU time is 0.151 ms against Bevy's 0.274 ms.
+- **Consumer-fed particles and triggered bursts** (#86). Particles whose state comes from the
+  game (physics debris, server-authoritative projectiles) or whose timing does (impacts) go
+  through two `World` calls, so render-engine never depends on a physics engine or a network
+  layer. `World::set_particles` replaces an emitter's particles with plain `ParticleState`s in
+  world space (position, velocity, age, lifetime, size, colour). It writes them into the
+  emitter's slots `0..n` with the dead stack, the alive list the next step reads, the counters
+  and the quads, so the next frame draws them through the emitter's render modifiers, and later
+  steps animate them cosmetically like spawned particles. `World::burst(id, count,
+  world_from_emitter)` queues a burst for the next step. Each burst is an extra entry of the
+  step, with its own transform, right before the emitter's spawner entry; only that last entry
+  ages and moves the emitter's particles. A burst's spawns take the dead-stack rows after the
+  earlier entries' (`row_offset`) and use the step's seed, so a burst on an inactive emitter
+  draws hanabi's `SpawnerSettings::once` stream exactly.
+  **Oracle:** `particles_snapshot` is `particles_fountain` under another seed, with Bevy
+  running hanabi as there. render-engine triggers the burst on frame 1 (`Driver::Trigger`). It
+  draws the fountain from snapshots (`Driver::Snapshot`): the oracle replays hanabi's effect on
+  the CPU (`particles::Emitter::replay`, from Bevy's spawn counts and the seed chain) as a game
+  would hand its states over, and sets them after every step. Both captures (0.5 s and 1.0 s,
+  before the first death) are in the exact tier and score FLIP mean 0.0000 and p99 0.0000 on the
+  RTX 3060 Ti and on lavapipe. A replay seeded one bit off scores mean 0.0058 and 0.0091, p99
+  0.031 and 0.40, which fails. GPU time is 0.067 ms against Bevy's 0.164 ms.
 - **Recycling in practice.** On the RTX 3060 Ti and on lavapipe, both sides' atomics happen to
   recycle slots in the same order for `particles_fountain` and `particles_100k`, so their late
   captures also match nearly exactly (FLIP mean ≤ 0.0002, statistics 0.000). The statistical

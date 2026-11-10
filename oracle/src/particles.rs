@@ -162,9 +162,45 @@ pub struct Emitter {
     pub lighting: Option<ParticleLighting>,
     /// Fogged particles (opt-in beyond hanabi, #84): [`Reference::StandardQuads`] scenarios only.
     pub fog: bool,
+    /// How render-engine's side fills the emitter; Bevy's runs hanabi's spawner either way.
+    pub driver: Driver,
 }
 
-/// An emitter's texture: [`Assets::textures`] index, mapping and flipbook.
+/// How render-engine's side of a [`Reference::Hanabi`] scenario fills an emitter (#86).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Driver {
+    /// Its own spawner, simulated on the GPU.
+    Spawner,
+    /// A [`Spawn::Burst`] triggered with `World::burst` on frame 1, the spawner inactive.
+    Trigger,
+    /// Consumer-fed: after every step, `World::set_particles` replaces the particles with
+    /// [`Emitter::replay`]'s states, the spawner inactive. Only until the first particle dies.
+    Snapshot,
+}
+
+/// hanabi's `to_float01` (`vfx_common.wesl`).
+fn to_float01(u: u32) -> f32 {
+    f32::from_bits((u & 0x007f_ffff) | 0x3f80_0000) - 1.0
+}
+
+/// hanabi's per-particle stream (`frand`, `frand3`), seeded with `pcg_hash(slot ^ seed)`.
+struct Stream(u32);
+
+impl Stream {
+    fn frand(&mut self) -> f32 {
+        self.0 = particles::pcg_hash(self.0);
+        to_float01(particles::pcg_hash(self.0))
+    }
+
+    fn frand3(&mut self) -> Vec3 {
+        let mut next = || {
+            self.0 = particles::pcg_hash(self.0);
+            to_float01(self.0)
+        };
+        let (x, y, z) = (next(), next(), next());
+        Vec3::new(x, y, z)
+    }
+}
 #[derive(Clone, Copy, Debug)]
 pub struct EmitterTexture {
     pub texture: usize,
@@ -231,6 +267,60 @@ impl Emitter {
     }
 }
 
+impl Emitter {
+    /// The particles hanabi holds after simulation frame `frame` (1 = the first spawn), as a
+    /// game outside the engine would hand them over: a CPU replay of the emitter's hanabi
+    /// effect, from `spawns` (the count per frame, Bevy's run) and `seed` (the effect seed of
+    /// frame 1). Spawn `i` of a frame takes slot `alive + i` and draws from `pcg_hash(slot ^
+    /// seed)` in the init modifiers' order ([`Emitter::engine`]); every frame then ages,
+    /// accelerates and moves every particle. Valid while no particle has died, so slots are not
+    /// recycled yet.
+    pub fn replay(&self, seed: u32, spawns: &[u32], frame: u32) -> Vec<particles::ParticleState> {
+        assert!(
+            (frame as f32) * DT < self.lifetime,
+            "{}: a replay ends before the first particle dies",
+            self.name
+        );
+        let center = self.position;
+        let mut alive: Vec<particles::ParticleState> = Vec::new();
+        let mut seed = seed;
+        for &count in &spawns[..frame as usize] {
+            let first = alive.len() as u32;
+            for slot in first..(first + count).min(self.capacity) {
+                let mut r = Stream(particles::pcg_hash(slot ^ seed));
+                // `SetPositionSphereModifier`, volume.
+                let radius = r.frand().powf(1.0 / 3.0) * self.radius;
+                let theta = r.frand() * std::f32::consts::TAU;
+                let z = r.frand() * 2.0 - 1.0;
+                let sinphi = z.acos().sin();
+                let dir = Vec3::new(sinphi * theta.cos(), sinphi * theta.sin(), z);
+                let position = center + radius * dir;
+                let velocity = match self.velocity {
+                    Velocity::Radial { speed } => (position - center).normalize() * speed,
+                    Velocity::Jitter { base, spread } => {
+                        let (min, max) = (base - spread, base + spread);
+                        r.frand3() * (max - min) + min
+                    }
+                };
+                alive.push(particles::ParticleState {
+                    position: position + self.translation,
+                    velocity,
+                    age: 0.0,
+                    lifetime: self.lifetime,
+                    ..Default::default()
+                });
+            }
+            for p in &mut alive {
+                p.age += DT;
+                p.velocity += self.gravity * DT;
+                p.position += p.velocity * DT;
+            }
+            seed = particles::next_seed(seed);
+        }
+        alive
+    }
+}
+
 /// A camera over a clear colour, nothing lit.
 fn unlit(camera: Camera, clear_color: Vec3) -> Scene {
     Scene {
@@ -259,6 +349,7 @@ pub fn all() -> Vec<ParticleScenario> {
         particles_textured(),
         smoke_and_sparks(),
         lit_fog(),
+        snapshot(),
     ]
 }
 
@@ -409,6 +500,7 @@ fn sparks(translation: Vec3) -> Emitter {
         translation,
         lighting: None,
         fog: false,
+        driver: Driver::Spawner,
     }
 }
 
@@ -463,6 +555,7 @@ fn particles_textured() -> ParticleScenario {
                 translation: Vec3::new(-0.7, 0.05, 0.3),
                 lighting: None,
                 fog: false,
+                driver: Driver::Spawner,
             },
             sparks(Vec3::new(0.6, 0.3, 0.5)),
         ],
@@ -540,6 +633,7 @@ fn smoke_and_sparks() -> ParticleScenario {
                 translation: Vec3::new(-0.75, 0.1, -0.2),
                 lighting: None,
                 fog: false,
+                driver: Driver::Spawner,
             },
             sparks(Vec3::new(0.3, 0.3, 0.9)),
         ],
@@ -652,6 +746,7 @@ fn lit_fog() -> ParticleScenario {
         translation: at,
         lighting,
         fog,
+        driver: Driver::Spawner,
     };
     let emitters = vec![
         puff("lamp_glow", Vec3::new(0.0, 0.5, 1.2), 0.5, lamp),
@@ -767,6 +862,37 @@ pub fn quad_spawns(s: &ParticleScenario) -> Vec<Vec<u32>> {
         .collect()
 }
 
+/// `particles_snapshot` (#86): [`fountain`]'s effects under another seed, Bevy running hanabi
+/// as there. render-engine triggers the burst with `World::burst` ([`Driver::Trigger`]) and
+/// draws the fountain from consumer-fed states, a CPU replay of hanabi's ([`Driver::Snapshot`],
+/// [`Emitter::replay`]), handed over with `World::set_particles` after every step. Captured at
+/// 0.5 s and 1.0 s, before the first particle dies: both exact.
+fn snapshot() -> ParticleScenario {
+    let mut s = fountain();
+    s.name = "particles_snapshot";
+    s.capability = "consumer-fed particle states + triggered bursts";
+    s.seed = 0x5eed_0086;
+    s.emitters[0].driver = Driver::Trigger;
+    s.emitters[1].driver = Driver::Snapshot;
+    s.captures = vec![
+        Capture {
+            frame: 32,
+            tier: Tier::Exact,
+        },
+        Capture {
+            frame: 64,
+            tier: Tier::Exact,
+        },
+    ];
+    // Every capture is exact (the FLIP gate); there is no statistical capture.
+    s.stat_max = StatThresholds {
+        coverage: 0.0,
+        spatial: 0.0,
+        colour: 0.0,
+    };
+    s
+}
+
 /// `particles_fountain`: a one-off burst of sparks plus a continuous fountain, both under
 /// gravity, shrinking and fading over their life, additively blended over a dark background.
 /// Captured at 0.5 s (no particle has died yet: exact tier) and 2.0 s (the burst has died, the
@@ -816,6 +942,7 @@ fn fountain() -> ParticleScenario {
                 translation: Vec3::ZERO,
                 lighting: None,
                 fog: false,
+                driver: Driver::Spawner,
             },
             Emitter {
                 name: "fountain",
@@ -842,6 +969,7 @@ fn fountain() -> ParticleScenario {
                 translation: Vec3::ZERO,
                 lighting: None,
                 fog: false,
+                driver: Driver::Spawner,
             },
         ],
         captures: vec![
@@ -898,6 +1026,7 @@ fn hundred_k() -> ParticleScenario {
         translation: Vec3::ZERO,
         lighting: None,
         fog: false,
+        driver: Driver::Spawner,
     }];
     for i in 0..50 {
         let angle = i as f32 / 50.0 * std::f32::consts::TAU;
@@ -925,6 +1054,7 @@ fn hundred_k() -> ParticleScenario {
             translation: Vec3::ZERO,
             lighting: None,
             fog: false,
+            driver: Driver::Spawner,
         });
     }
     ParticleScenario {
@@ -998,6 +1128,7 @@ fn alpha() -> ParticleScenario {
         translation,
         lighting: None,
         fog: false,
+        driver: Driver::Spawner,
     };
     ParticleScenario {
         name: "particles_alpha",

@@ -22,6 +22,18 @@
 //! stack in slot order) and the update pass (age, reap, `v += a·dt`, `p += v·dt`). A particle
 //! spawned in a step is aged and moved in that step too.
 //!
+//! Two more ways to fill an emitter, for particles whose state or timing comes from the game
+//! (physics debris, server-authoritative projectiles, impacts), without the engine knowing where
+//! it comes from:
+//!
+//! - [`World::burst`](crate::world::World::burst) triggers a burst: `count` particles spawned on
+//!   the next step at a given transform, through the emitter's init modifiers, on top of what its
+//!   spawner spawns. Several bursts in one step each spawn at their own transform.
+//! - [`World::set_particles`](crate::world::World::set_particles) replaces the emitter's
+//!   particles with plain [`ParticleState`]s, drawn as they are (through the emitter's size and
+//!   colour over life and its flipbook). Later steps animate them cosmetically like spawned ones
+//!   (age, acceleration, velocity), until the next snapshot replaces them.
+//!
 //! An emitter takes at most [`MAX_INIT_MODIFIERS`] init modifiers and gradients of at most
 //! [`MAX_GRADIENT_KEYS`] keys.
 
@@ -298,6 +310,67 @@ pub struct Emitter {
     pub active: bool,
 }
 
+/// One particle as the consumer sets it
+/// ([`World::set_particles`](crate::world::World::set_particles)), in world space: the
+/// attributes a spawned particle has after its init modifiers. The emitter's render modifiers
+/// apply to it as to a spawned particle: [`Emitter::size_over_life`] replaces `size`,
+/// [`Emitter::color_over_life`] combines with `color` and the flipbook runs over `age /
+/// lifetime`. A step ages it, accelerates it by [`Emitter::accel`], moves it and reaps it once
+/// its age reaches its lifetime.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ParticleState {
+    pub position: Vec3,
+    /// m/s: what a step moves the particle by, and the axis of [`Orient::AlongVelocity`].
+    pub velocity: Vec3,
+    /// Seconds.
+    pub age: f32,
+    /// Seconds; infinite (the default) keeps the particle until the next snapshot.
+    pub lifetime: f32,
+    /// Quad size, metres.
+    pub size: f32,
+    /// Linear HDR colour and alpha.
+    pub color: Vec4,
+}
+
+impl Default for ParticleState {
+    fn default() -> Self {
+        Self {
+            position: Vec3::ZERO,
+            velocity: Vec3::ZERO,
+            age: 0.0,
+            lifetime: f32::INFINITY,
+            size: 1.0,
+            color: Vec4::ONE,
+        }
+    }
+}
+
+/// What the update pass draws for a particle in `state` (`update` in `particle_sim.wgsl`):
+/// `(size, colour, flipbook sprite)` after the emitter's render modifiers.
+pub(crate) fn render_attributes(desc: &Emitter, state: &ParticleState) -> (Vec2, Vec4, u32) {
+    let t = state.age / state.lifetime;
+    let size = desc
+        .size_over_life
+        .as_ref()
+        .and_then(|g| g.sample(t))
+        .unwrap_or(Vec2::splat(state.size));
+    let color = match desc
+        .color_over_life
+        .as_ref()
+        .and_then(|c| Some((c.blend, c.gradient.sample(t)?)))
+    {
+        None => state.color,
+        Some((ColorBlend::Overwrite, g)) => g,
+        Some((ColorBlend::Multiply, g)) => state.color * g,
+        Some((ColorBlend::Add, g)) => state.color + g,
+    };
+    let sprite = desc
+        .texture
+        .and_then(|t| t.flipbook)
+        .map_or(0, |f| (t * f.frames as f32) as i32 as u32);
+    (size, color, sprite)
+}
+
 /// Most init modifiers per emitter.
 pub const MAX_INIT_MODIFIERS: usize = 8;
 /// Most keys per size or colour gradient.
@@ -388,8 +461,10 @@ pub(crate) struct EmitterState {
     spawner: SpawnerState,
     /// The effect seed the next step uses.
     seed: u32,
-    /// Particles the spawner asked for in the last step.
+    /// Particles the spawner and the triggered bursts asked for in the last step.
     pub spawn_count: u32,
+    /// Bursts triggered since the last step: `(count, world_from_emitter)`.
+    pub bursts: Vec<(u32, Mat4)>,
     /// First slot of the emitter's range in the pool, once a step has allocated it.
     pub base: Option<u32>,
 }
@@ -402,21 +477,24 @@ impl EmitterState {
             transform: Mat4::IDENTITY,
             spawner: SpawnerState::default(),
             spawn_count: 0,
+            bursts: Vec::new(),
             base: None,
         }
     }
 
-    /// The CPU half of a step of `dt` seconds: the spawn count and the seed the GPU step uses,
-    /// after which the seed chain moves on (active or not, as hanabi's).
+    /// The CPU half of a step of `dt` seconds: the spawner's count and the seed the GPU step
+    /// uses, after which the seed chain moves on (active or not, as hanabi's). The triggered
+    /// bursts count towards [`EmitterState::spawn_count`]; the caller takes them.
     pub fn tick(&mut self, dt: f32) -> (u32, u32) {
-        self.spawn_count = if self.desc.active {
+        let spawn = if self.desc.active {
             self.spawner.tick(&self.desc.spawner, dt)
         } else {
             0
         };
+        self.spawn_count = spawn + self.bursts.iter().map(|b| b.0).sum::<u32>();
         let seed = self.seed;
         self.seed = next_seed(seed);
-        (self.spawn_count, seed)
+        (spawn, seed)
     }
 }
 

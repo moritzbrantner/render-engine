@@ -9,7 +9,7 @@ use crate::{
     material::{AlphaMode, StandardMaterial, TextureData},
     mesh::MeshData,
     particle_sim::ParticlePool,
-    particles::{Emitter, EmitterState},
+    particles::{Emitter, EmitterState, ParticleState},
     renderer::{FrameTimestamps, Renderer},
 };
 use bytemuck::{Pod, Zeroable};
@@ -472,7 +472,41 @@ impl World {
         }
     }
 
-    /// Particles the emitter's spawner asked for in the last step (hanabi
+    /// Triggers a burst (an impact, a muzzle flash): the next [`World::step_particles`] spawns
+    /// `count` particles at `world_from_emitter` through the emitter's init modifiers, on top of
+    /// what its spawner spawns, active or not. Each burst of a step spawns at its own transform;
+    /// the emitter's own transform is left alone. Spawns beyond the capacity are dropped.
+    pub fn burst(&mut self, id: EmitterId, count: u32, world_from_emitter: Mat4) {
+        if count > 0 {
+            self.emitters_mut(id)
+                .bursts
+                .push((count, world_from_emitter));
+        }
+    }
+
+    /// Records into `encoder` replacing the emitter's particles with `particles`, world-space
+    /// states from outside the engine (physics debris, server-authoritative projectiles): the
+    /// frame encoded next draws them through the emitter's render modifiers
+    /// ([`ParticleState`]). Those whose age has reached their lifetime are left out, and those
+    /// beyond the emitter's capacity. Later steps age, accelerate and move them like spawned
+    /// particles, and the spawner keeps spawning beside them; a consumer that feeds every frame
+    /// usually sets the emitter inactive and calls this after its step.
+    pub fn set_particles(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        id: EmitterId,
+        particles: &[ParticleState],
+    ) {
+        let e = self
+            .emitters
+            .items
+            .get_mut(id.0 as usize)
+            .and_then(Option::as_mut)
+            .expect("emitter is removed");
+        self.particles.set_particles(encoder, id.0, e, particles);
+    }
+
+    /// Particles the emitter's spawner and triggered bursts asked for in the last step (hanabi
     /// `EffectSpawner::spawn_count`); spawns beyond its capacity are dropped on the GPU.
     pub fn spawn_count(&self, id: EmitterId) -> u32 {
         self.emitters

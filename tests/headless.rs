@@ -435,6 +435,87 @@ fn gpu_particles_spawn_age_die_and_draw() {
     assert_eq!(alive, [(1, 8), (2, 0), (2, 0), (2, 0), (2, 0)]);
 }
 
+/// Consumer-fed particles: a snapshot is drawn as set (dead and excess states left out), later
+/// steps age and reap it; triggered bursts add to an inactive spawner, each at its own
+/// transform, capped by the capacity.
+#[test]
+fn particle_snapshots_and_triggered_bursts() {
+    use render_engine::particles::*;
+    const DT: f32 = 1.0 / 64.0;
+    let gpu = Headless::new().expect("a wgpu adapter");
+    let mut world = World::new(gpu.renderer());
+    let emitter = Emitter {
+        capacity: 4,
+        spawner: Spawner::rate(64.0),
+        seed: 3,
+        init: vec![
+            InitModifier::Lifetime(Value::Const(1.0)),
+            InitModifier::Size(Value::Const(0.2)),
+        ],
+        accel: Vec3::ZERO,
+        size_over_life: None,
+        color_over_life: None,
+        orient: Orient::CameraPlane,
+        texture: None,
+        roundness: 0.0,
+        depth_fade: 0.0,
+        blend: ParticleBlend::Add,
+        lighting: None,
+        fog: false,
+        active: false,
+    };
+    let fed = world.add_emitter(&emitter);
+    let bursts = world.add_emitter(&emitter);
+    let red = |x: f32, age: f32| ParticleState {
+        position: Vec3::new(x, 0.0, 0.0),
+        age,
+        lifetime: 2.0 * DT,
+        size: 0.3,
+        color: Vec4::new(4.0, 0.0, 0.0, 1.0),
+        ..Default::default()
+    };
+    let mut encoder = gpu.device.create_command_encoder(&Default::default());
+    world.set_particles(
+        &mut encoder,
+        fed,
+        &[
+            red(-0.5, 0.0),
+            red(0.0, 2.0 * DT),
+            red(0.5, DT),
+            red(0.2, 0.0),
+        ],
+    );
+    world.burst(bursts, 3, Mat4::from_translation(Vec3::X));
+    world.burst(bursts, 2, Mat4::from_translation(-Vec3::X));
+    gpu.queue.submit([encoder.finish()]);
+    let alive = |world: &World| {
+        let counts = world.read_alive_particles();
+        [fed, bursts].map(|id| counts.iter().find(|c| c.0 == id).unwrap().1)
+    };
+    assert_eq!(alive(&world), [3, 0], "the dead state is left out");
+    let mut s = scene(false, Tonemapping::TonyMcMapface);
+    s.sun = None;
+    s.clear_color = Vec3::ZERO;
+    let mut viewport = Viewport::new(gpu.renderer(), 64, 64);
+    let frame = gpu.render(&mut viewport, &world, &s, &[]).unwrap();
+    let lit = frame.rgba.chunks(4).filter(|p| p[0] > 50).count();
+    assert!(lit > 20, "the snapshot lights {lit} pixels");
+
+    let step = |world: &mut World| {
+        let mut encoder = gpu.device.create_command_encoder(&Default::default());
+        world.step_particles(&mut encoder, DT, None);
+        gpu.queue.submit([encoder.finish()]);
+    };
+    step(&mut world);
+    assert_eq!(world.spawn_count(bursts), 5);
+    assert_eq!(world.spawn_count(fed), 0);
+    // The particle set at age DT is reaped; both bursts spawn, capped at the capacity.
+    assert_eq!(alive(&world), [2, 4]);
+    step(&mut world);
+    assert_eq!(world.spawn_count(bursts), 0);
+    assert_eq!(alive(&world), [0, 4]);
+}
+
 /// Water can receive light without painting an opaque silhouette below it. The
 /// shadow threshold must not discard the visible blended surface in the main pass.
 #[test]

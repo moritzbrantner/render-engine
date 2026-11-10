@@ -13,6 +13,10 @@
 //   on the dead stack at the decremented alive count, a survivor is appended to the next alive
 //   list (through the draw arguments' instance count) along with its quad for the render pass.
 //
+// An emitter has one entry in the step per triggered burst (at the burst's transform) right
+// before its spawner's entry; each entry's spawns take the dead-stack rows after the earlier
+// entries' (`row_offset`), and only the last entry runs `update` over the emitter's particles.
+//
 // The alive lists ping-pong between two buffers from step to step.
 
 struct Modifier {
@@ -44,7 +48,8 @@ struct EmitterStep {
     n_color: u32,
     n_size: u32,
     sprite_frames: u32,
-    _pad0: u32,
+    // Spawns of earlier entries of the same emitter in this step.
+    row_offset: u32,
     mods: array<Modifier, 8>,
 }
 
@@ -232,7 +237,7 @@ fn init(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     let k = find_spawn_emitter(thread);
     let e = &step.emitters[k];
-    let row = atomicLoad(&counters[(*e).id].alive) + (thread - (*e).spawn_first);
+    let row = atomicLoad(&counters[(*e).id].alive) + (*e).row_offset + (thread - (*e).spawn_first);
     if (row >= (*e).capacity) {
         return;
     }
@@ -303,7 +308,11 @@ fn prepare() {
         let n = min(atomicLoad(&counters[(*e).id].alive) + (*e).spawn, (*e).capacity);
         atomicStore(&counters[(*e).id].alive, n);
         update_args.first[k] = total;
-        total += n;
+        // A triggered burst's entry (followed by its emitter's next entry) only spawns.
+        let spawn_only = k + 1u < step.count && step.emitters[k + 1u].id == (*e).id;
+        if (!spawn_only) {
+            total += n;
+        }
         counters[(*e).id].vertex_count = 6u;
         atomicStore(&counters[(*e).id].instance_count, 0u);
         counters[(*e).id].first_vertex = 0u;
