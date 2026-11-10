@@ -377,6 +377,10 @@ world.step_particles(&mut encoder, dt, None);
   draws all particles in one extra pass (`"particles"` in `Viewport::pass_labels`) that reads
   the depth target; nothing changes for frames without one. Keep it 0 for sparks and other
   small, fast particles, where the edge is not visible.
+- **Many emitters.** Each emitter is one indirect draw and 768 bytes of step upload per step,
+  live particles or not; its texture's bind group is built once with the texture.
+  `examples/emitter_cost.rs` measures about 1.7 µs of CPU per emitter and frame at 1000 to 2000
+  emitters (#85). Remove emitters a game no longer needs rather than leaving them inactive.
 - **Cost.** `particles_100k` (about 100k alive in one fountain plus 50 small effects) runs on
   the GPU; see the oracle report for its timings against hanabi.
 

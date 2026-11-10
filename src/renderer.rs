@@ -89,6 +89,10 @@ impl Renderer {
         &self.material_layout
     }
 
+    pub(crate) fn particle_texture_layout(&self) -> &wgpu::BindGroupLayout {
+        &self.particles.texture_layout
+    }
+
     pub(crate) fn sim_pipelines(&self) -> &SimPipelines {
         &self.sim
     }

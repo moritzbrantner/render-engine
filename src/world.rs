@@ -126,6 +126,9 @@ pub(crate) struct GpuMesh {
 struct GpuTexture {
     view: wgpu::TextureView,
     sampler: wgpu::Sampler,
+    /// The texture and its sampler for the particle pass, built once with the texture rather
+    /// than per emitter and frame (#85).
+    particle: wgpu::BindGroup,
 }
 
 pub(crate) struct GpuMaterial {
@@ -176,6 +179,7 @@ pub struct World {
     device: wgpu::Device,
     queue: wgpu::Queue,
     material_layout: wgpu::BindGroupLayout,
+    particle_layout: wgpu::BindGroupLayout,
     /// Bound for every texture slot a material leaves empty (the shader skips it).
     white: GpuTexture,
     meshes: Slots<GpuMesh>,
@@ -227,9 +231,11 @@ impl World {
     pub fn new(renderer: &Renderer) -> Self {
         let device = renderer.device().clone();
         let queue = renderer.queue().clone();
+        let particle_layout = renderer.particle_texture_layout().clone();
         let white = upload_texture(
             &device,
             &queue,
+            &particle_layout,
             &TextureData {
                 width: 1,
                 height: 1,
@@ -240,6 +246,7 @@ impl World {
         );
         Self {
             material_layout: renderer.material_layout().clone(),
+            particle_layout,
             device,
             queue,
             white,
@@ -399,10 +406,12 @@ impl World {
     pub fn add_texture(&mut self, texture: &TextureData) -> TextureId {
         self.work.texture_uploads += 1;
         self.work.upload_bytes += texture.levels.iter().map(|l| l.len() as u64).sum::<u64>();
-        TextureId(
-            self.textures
-                .insert(upload_texture(&self.device, &self.queue, texture)),
-        )
+        TextureId(self.textures.insert(upload_texture(
+            &self.device,
+            &self.queue,
+            &self.particle_layout,
+            texture,
+        )))
     }
     pub fn remove_texture(&mut self, texture: TextureId) {
         self.textures.remove(texture.0);
@@ -527,11 +536,8 @@ impl World {
         &self.particles
     }
 
-    /// A particle texture's view and sampler; white for none.
-    pub(crate) fn particle_texture(
-        &self,
-        id: Option<TextureId>,
-    ) -> (&wgpu::TextureView, &wgpu::Sampler) {
+    /// A particle texture's bind group (texture and sampler); white for none.
+    pub(crate) fn particle_texture(&self, id: Option<TextureId>) -> &wgpu::BindGroup {
         let t = match id {
             Some(id) => self
                 .textures
@@ -539,7 +545,7 @@ impl World {
                 .expect("emitter uses a removed texture"),
             None => &self.white,
         };
-        (&t.view, &t.sampler)
+        &t.particle
     }
 
     pub(crate) fn mesh(&self, id: MeshId) -> &GpuMesh {
@@ -645,7 +651,12 @@ impl World {
     }
 }
 
-fn upload_texture(device: &wgpu::Device, queue: &wgpu::Queue, t: &TextureData) -> GpuTexture {
+fn upload_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    particle_layout: &wgpu::BindGroupLayout,
+    t: &TextureData,
+) -> GpuTexture {
     let texture = device.create_texture_with_data(
         queue,
         &wgpu::TextureDescriptor {
@@ -666,17 +677,34 @@ fn upload_texture(device: &wgpu::Device, queue: &wgpu::Queue, t: &TextureData) -
         &t.levels.concat(),
     );
     let s = t.sampler;
+    let view = texture.create_view(&Default::default());
+    let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        label: Some("material texture"),
+        address_mode_u: s.address_mode_u,
+        address_mode_v: s.address_mode_v,
+        mag_filter: s.mag_filter,
+        min_filter: s.min_filter,
+        mipmap_filter: s.mipmap_filter,
+        ..Default::default()
+    });
+    let particle = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("particle texture"),
+        layout: particle_layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(&sampler),
+            },
+        ],
+    });
     GpuTexture {
-        view: texture.create_view(&Default::default()),
-        sampler: device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("material texture"),
-            address_mode_u: s.address_mode_u,
-            address_mode_v: s.address_mode_v,
-            mag_filter: s.mag_filter,
-            min_filter: s.min_filter,
-            mipmap_filter: s.mipmap_filter,
-            ..Default::default()
-        }),
+        view,
+        sampler,
+        particle,
     }
 }
 
