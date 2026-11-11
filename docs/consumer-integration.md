@@ -251,15 +251,19 @@ frame.present();
   `set_culling` returns `GpuCullingUnsupported` and the viewport stays on `Culling::Cpu`. See the
   [experiment](gpu-driven-experiment.md) before turning it on: it saves CPU work on instance-heavy
   scenes and costs it on draw-heavy ones.
-- **Clustered lighting (experimental, off by default).** `viewport.set_light_assignment(&renderer,
-  LightAssignment::Clustered(ClusterConfig::default()))` has each fragment loop over its
-  view-space cluster's lights instead of every point and spot light, with the same image. The
-  lists are built on the CPU in `prepare`, with no extra pass. It needs four bind groups and four
-  storage buffers per fragment stage; where they are missing it returns
-  `ClusteredLightingUnsupported` and the viewport stays on `LightAssignment::PerFragment`. A
-  cluster over `max_lights_per_cluster` falls back to every light, with the same output. See the
+- **Clustered lighting (the default, #94).** `Viewport::new` assigns lights with
+  `LightAssignment::Clustered(ClusterConfig::default())`: each fragment loops over its view-space
+  cluster's lights instead of every point and spot light, with the same image. The lists are
+  built on the CPU in `prepare`, with no extra pass. It needs four bind groups and four storage
+  buffers per fragment stage; on a device without them `Viewport::new` falls back to
+  `LightAssignment::PerFragment` (`viewport.light_assignment()` says which path is active, and
+  `set_light_assignment` with `Clustered` returns `ClusteredLightingUnsupported`). A cluster over
+  `max_lights_per_cluster` falls back to every light, with the same output.
+  `viewport.set_light_assignment(&renderer, LightAssignment::PerFragment)` selects the reference
+  loop, and `Clustered` with another `ClusterConfig` another grid or limit. The clustered
+  pipelines compile once per `Renderer`, on the first viewport. See the
   [experiment](forward-plus-experiment.md): it costs CPU in `prepare` and saves GPU time, more as
-  lights are added.
+  lights are added (2.7–6.4 ms of GPU per frame on Greyhaven's 13 point lights).
 - **Resize.** Call `viewport.resize(&renderer, width, height)` together with
   `surface.configure`.
 - **Units.** `Scene` uses Bevy's physical units: illuminance in lux, light power in lumens,
@@ -347,7 +351,7 @@ shadowed point or spot lights:
 | `set_mesh`, `set_mesh_positions_normals`, `set_material` | That mesh's or material's bytes alone, independent of what else the world holds. `prepare` never re-uploads content; it derives and writes again the retained instances that use the edited mesh or material. |
 | Mutation, removal, mesh bounds, camera cut | Nothing culled is kept between frames, so each shows in the next `prepare`, for retained and listed instances alike. |
 | `prepare` with `Culling::GpuIndirect` (opt-in) | The CPU tests only blended and skinned instances; the rest cost `gpu_bounds_tests` (`N · V`) on the GPU, with no sphere tests on the CPU. `visible` and `shadow_visible` count CPU-culled instances only (`read_gpu_culled` has the rest). One indirect draw per eligible run and view, emptied by culling or not. Upload drops the visible indices and adds the group and view tables and the indirect arguments. |
-| `prepare` with `LightAssignment::Clustered` (opt-in) | The instance work above, plus one assignment pass over the lights each frame, whatever changed: `light_cluster_tests` box tests over the clusters each light's bounds reach, `light_cluster_entries` list entries, `cluster_overflows` clusters past the limit. Upload adds the cluster table (12 bytes per cluster) and the index list (4 bytes per entry plus the all-lights run). The counters are zero on the default path. |
+| `prepare` with `LightAssignment::Clustered` (the default) | The instance work above, plus one assignment pass over the lights each frame, whatever changed: `light_cluster_tests` box tests over the clusters each light's bounds reach, `light_cluster_entries` list entries, `cluster_overflows` clusters past the limit. Upload adds the cluster table (12 bytes per cluster) and the index list (4 bytes per entry plus the all-lights run). The counters are zero with `LightAssignment::PerFragment`. |
 
 Culling has no spatial hierarchy: `O(N · V)` is the adopted class, and the Hi-Z experiment
 (`docs/occlusion-experiment.md`) did not pay off. Retained instances (#95) make the instance
@@ -498,7 +502,7 @@ not change the web client. "Ran in Chromium" below means that smoke, on that ada
 | `draw_indirect` | Particle draws | available | core; ran in Chromium | none in WebGL 2 |
 | A read-only depth attachment also bound as a multisampled depth texture | Soft particles (`Emitter::depth_fade`), opt-in | available | core; not run in a browser yet | not applicable (no particle port) |
 | Indirect draws with a non-zero `first_instance` | Required by the opt-in `Culling::GpuIndirect`; it stays on the CPU path without it. Measured on the RTX 3060 Ti ([experiment](gpu-driven-experiment.md)) | `INDIRECT_FIRST_INSTANCE` | optional `indirect-first-instance`, present in Chromium on both adapters; the path has not run in a browser | none in WebGL 2 |
-| A fourth bind group and 4 fragment-stage storage buffers | Required by the opt-in `LightAssignment::Clustered`; it stays per-fragment without them. Measured on the RTX 3060 Ti ([experiment](forward-plus-experiment.md)) | adapter/limits-dependent | within the WebGPU defaults, 16 on NVIDIA and 10 on SwiftShader in Chromium; the path has not run in a browser | none in WebGL 2 (no fragment storage buffers) |
+| A fourth bind group and 4 fragment-stage storage buffers | Required by the default `LightAssignment::Clustered`; the viewport falls back to per-fragment without them. Measured on the RTX 3060 Ti ([experiment](forward-plus-experiment.md)) | adapter/limits-dependent | within the WebGPU defaults, 16 on NVIDIA and 10 on SwiftShader in Chromium; the path has not run in a browser | none in WebGL 2 (no fragment storage buffers) |
 | `multi_draw_*_indirect_count` | Not used by the experiment: with one mesh per run it could only remove empty draws. The RTX 3060 Ti reports it; it would need a shared vertex and index buffer to batch runs | `MULTI_DRAW_INDIRECT_COUNT`, Vulkan 1.2+ and DX12 | none: native-only in wgpu | none in WebGL 2 |
 
 Without `MULTI_DRAW_INDIRECT_COUNT`, wgpu may emulate multi-draw as a series of `draw_indirect`
@@ -657,10 +661,8 @@ leaves at the far plane.
 
 - Stars, clouds and moon phases: the sky is Bevy's clear atmosphere; the moon is a full disc.
 - Morph targets, and more than four joint influences per vertex (`JOINTS_1`).
-- Clustered lights (Forward+) as the default. By default every point and spot light is
-  evaluated for every fragment; an opt-in experiment ([results](forward-plus-experiment.md), #72)
-  reproduces that path and is the preferred direction, but needs consumer evidence (D10). The
-  three.js port keeps its own per-fragment loop.
+- Clustered lights in the three.js port: it keeps its own per-fragment loop (WebGL 2 has no
+  fragment storage buffers); assignment changes no shading term, so the ports still match.
 - GPU-driven visibility and indirect mesh draws as the default: an opt-in experiment
   ([results](gpu-driven-experiment.md), #71) reproduces the reference path but is not adopted (D10).
   Multi-draw batching is not implemented.

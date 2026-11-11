@@ -110,10 +110,22 @@ pub fn all() -> Vec<Scenario> {
     all.extend(ibl_materials());
     all.extend(fog_modes());
     all.extend(point_spot());
+    all.push(many_lights());
     all.push(textured_props());
     all.push(skinned_figure());
     all.extend(sky_day_cycle());
     all
+}
+
+/// `many_lights` (#94): the Forward+ bench's underground hall (`dungeon_64_shadowed`) under the
+/// default clustered light assignment. 64 overlapping point and spot lights (8–14 m ranges, two
+/// point and two spot shadow casters) over 121 pillars and 400 props, viewed down the hall, so
+/// the cluster lists differ across the screen and through the depth slices and many lights end
+/// in plain view.
+fn many_lights() -> Scenario {
+    let mut s = crate::forward_plus_bench::dungeon("many_lights", 64, 4, 1280, 720);
+    s.capability = "64 point + spot lights, clustered assignment (Forward+)";
+    s
 }
 
 /// `skinned_figure`: Quaternius' CC0 base character (one 7281-vertex primitive on a 65-joint

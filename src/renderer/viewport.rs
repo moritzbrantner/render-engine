@@ -2,7 +2,7 @@
 
 use super::{
     DEPTH_FORMAT, HDR_FORMAT, Renderer, SAMPLE_COUNT,
-    clustered::{ClusteredLightingUnsupported, ClusteredLights, LightAssignment},
+    clustered::{ClusterConfig, ClusteredLightingUnsupported, ClusteredLights, LightAssignment},
     gpu::{FrameUniform, InstanceData},
     gpu_culling::GpuCulling,
     retained::RetainedInstances,
@@ -78,7 +78,7 @@ pub struct Viewport {
     pub(super) work: PrepareWork,
     /// The opt-in GPU compaction path's state; `None` is the reference CPU path.
     pub(super) gpu_culling: Option<GpuCulling>,
-    /// The opt-in clustered light assignment's state; `None` is the per-fragment loop.
+    /// The clustered light assignment's state (the default); `None` is the per-fragment loop.
     pub(super) clustered: Option<ClusteredLights>,
     /// A pipeline-statistics query set the main pass writes (`FRAGMENT_SHADER_INVOCATIONS`,
     /// one query per lit pass part: the opaque part, then the transparent one with a sky). For
@@ -410,6 +410,8 @@ pub(super) struct Draw {
 
 impl Viewport {
     /// Targets for a `width`×`height` output; call [`Renderer::prepare`] before each frame.
+    /// Lights are assigned with [`LightAssignment::default`] (clustered) where the device supports
+    /// it, else per fragment ([`Viewport::light_assignment`] says which).
     pub fn new(renderer: &Renderer, width: u32, height: u32) -> Self {
         let device = &renderer.device;
         Self {
@@ -448,7 +450,8 @@ impl Viewport {
             particles: ParticleFrame::new(device),
             work: PrepareWork::default(),
             gpu_culling: None,
-            clustered: None,
+            // The default: clustered where the device supports it, else the reference loop.
+            clustered: ClusteredLights::new(renderer, ClusterConfig::default()).ok(),
             fragment_statistics: None,
         }
     }

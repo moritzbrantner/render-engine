@@ -131,13 +131,16 @@ upgrade that changes a default shows up as a deliberate scenario change:
   radius, cone angles and Bevy's shadow biases (point 0.08 m / 0.6 texels, spot 0.02 m /
   1.8 texels, near plane 0.1 m), `DirectionalLightShadowMap` 2048 (spot maps share its array,
   after the sun cascades) and `PointLightShadowMap` 1024, and the `experimental_pbr_pcss`
-  feature so `point_spot_soft` can switch on soft shadows. Bevy assigns lights to clusters;
-  render-engine loops over the whole list in Bevy's order (point lights, then spot lights, each
+  feature so `point_spot_soft` can switch on soft shadows. Both sides assign lights to
+  clusters (Bevy's default `ClusterConfig`; render-engine's default
+  `LightAssignment::Clustered` on the same 16 × 9 × 24 grid shape, [#94](https://github.com/moritzbrantner/render-engine/issues/94))
+  and loop over each cluster's lights in Bevy's order (point lights, then spot lights, each
   with the shadow casters first, then the sun). Outside its range a light contributes exactly
-  zero in both, so the sums agree. Clustering is the preferred direction: an opt-in
-  `LightAssignment::Clustered` path exists ([experiment](forward-plus-experiment.md),
-  [#72](https://github.com/moritzbrantner/render-engine/issues/72)) and reproduces the
-  per-fragment path byte for byte, but the default stays the loop over the whole list (D10). The
+  zero, so the sums equal render-engine's per-fragment reference loop over the whole list,
+  which stays available (`LightAssignment::PerFragment`) and renders byte-identical frames
+  ([experiment](forward-plus-experiment.md)). `many_lights` (the Forward+ bench's
+  `dungeon_64_shadowed` hall: 64 overlapping point and spot lights, four of them shadowed)
+  gates the clustered default on many local lights with the same Bevy configuration. The
   temporal shadow filter (it needs TAA) and light textures are out of scope;
 - consumer meshes and textured materials: `textured_props` reads CC0 glTF props
   (`assets/props/`) once in the oracle (`content.rs`, following Bevy's glTF loader: base
@@ -577,13 +580,13 @@ stays rendering-only (D7), and D1–D9 stand as updated here: Bevy remains the o
 
 | Item | Status |
 | --- | --- |
-| Forward pass, every point and spot light evaluated for every fragment | **Implemented**, the reference path |
+| Forward pass, every point and spot light evaluated for every fragment | **Implemented**, the reference path for light assignment (`LightAssignment::PerFragment`) and the fallback where clustering is unsupported |
 | CPU frustum culling per view, instanced draws from the per-frame instance list | **Implemented**, the reference path; contracts in [consumer integration](consumer-integration.md#work-contracts) |
 | Retained instances (Bevy's retained render world) | **Implemented** ([#95](https://github.com/moritzbrantner/render-engine/issues/95)): `World::add_instance` keeps instances across frames and each viewport writes only the changed ones, beside the listed path, with the same image. On Greyhaven it takes `prepare` from about 3.1 to 1.4 ms and the upload from 4.2 to 1.0 MB a frame; the game's adoption is [mmorpg#728](https://github.com/moenarch-games/mmorpg/issues/728). |
 | Compute simulation and indirect draws for particles | **Implemented**, for particles only |
 | three.js port for the web client | **Implemented** (D8) |
 | Two-phase Hi-Z occlusion culling | **Not adopted**: a negative result ([#59](https://github.com/moritzbrantner/render-engine/issues/59), [experiment](occlusion-experiment.md)) |
-| Forward+ clustered lighting | **Agreed preference; opt-in experiment, not the default** ([experiment](forward-plus-experiment.md), [#72](https://github.com/moritzbrantner/render-engine/issues/72)): `LightAssignment::Clustered` is byte-identical to the reference on every tested scene and at 256 lights takes the GPU pass sum from 11.97 to 1.08 ms for 0.91 ms more `prepare` on an RTX 3060 Ti. Stage 1 result on synthetic scenes; needs consumer evidence to go further. |
+| Forward+ clustered lighting | **Implemented, the default** (stage 4; owner decision 2026-11-11, [#94](https://github.com/moritzbrantner/render-engine/issues/94)): `LightAssignment::Clustered` is byte-identical to the per-fragment reference on every tested scene ([experiment](forward-plus-experiment.md), [#72](https://github.com/moritzbrantner/render-engine/issues/72)), and on the mmorpg's Greyhaven frames (13 point lights, [baseline](greyhaven-baseline.md)) it cut 2.7–6.4 ms of GPU time per frame on an RTX 3060 Ti with no measurable `prepare` change. Every oracle lighting scenario now gates the clustered path, `many_lights` with 64 local lights; `LightAssignment::PerFragment` stays the reference and the fallback where a device lacks the fourth bind group or storage buffers. |
 | GPU-driven visibility and indirect draws for meshes | **Not adopted as default** ([experiment](gpu-driven-experiment.md), [#71](https://github.com/moritzbrantner/render-engine/issues/71)): an opt-in, experimental `Culling::GpuIndirect` path reproduces the reference path's images on the tested scenes (byte-identical) and saves `prepare` CPU (0.44–0.64 ms at 22.4k instances) but makes draw-bound scenes slower. Stage 1 result; needs consumer evidence to go further. |
 | render-engine in the browser (WASM/WebGPU) | **Feasibility assessed, no build shipped** ([assessment](webgpu-browser-assessment.md), [#75](https://github.com/moritzbrantner/render-engine/issues/75)): the crate compiles for `wasm32` with one WebGPU validation fix, and 14 oracle captures rendered in Chromium WebGPU on the RTX 3060 Ti are within D3's gates against Bevy (FLIP p99 ≤ 0.0143). Evidence is the Playwright headless shell on one machine; other browsers, skinned drawing and the opt-in GPU paths are unverified. The result is GO for a *separate* prototype issue, not adoption. |
 | Deferred or hybrid rendering | **Not planned**; kept possible, needs its own evidence and issue |
