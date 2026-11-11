@@ -98,7 +98,7 @@ impl Feature {
             Feature::Sky => &[26],
             Feature::Culling => &[30],
             Feature::Skinning => &[36],
-            Feature::Overlay => &[101],
+            Feature::Overlay => &[103],
         }
     }
 
