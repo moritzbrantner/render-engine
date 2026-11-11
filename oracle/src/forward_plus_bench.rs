@@ -169,6 +169,7 @@ fn outdoor(name: &'static str, lights: usize) -> Scenario {
         shadow_maps: ShadowMapSizes::default(),
         environment: None,
         fog: None,
+        overlay: Vec::new(),
     };
     Scenario {
         name,
@@ -310,6 +311,7 @@ pub(crate) fn dungeon(
         shadow_maps: ShadowMapSizes::default(),
         environment: None,
         fog: None,
+        overlay: Vec::new(),
     };
     Scenario {
         name,

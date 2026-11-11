@@ -1,7 +1,8 @@
 //! The wgpu renderer: one shadow pass per sun cascade, spot light and point-light cube face, one
 //! forward PBR pass with 4× MSAA into an HDR target (opaque, then alpha-masked, then blended
-//! instances back to front, then particles), a tone-mapping pass into an Rgba16Float target and
-//! a blit into the consumer's colour target (Bevy's tonemapping and upscaling nodes).
+//! instances back to front, then particles), a tone-mapping pass into an Rgba16Float target that
+//! then draws the scene's screen-space overlay quads (Bevy UI), and a blit into the consumer's
+//! colour target (Bevy's tonemapping, UI and upscaling nodes).
 //!
 //! [`Renderer`] holds the pipelines, a [`World`] the consumer's meshes, textures and materials,
 //! and a [`Viewport`] the per-size targets and per-frame buffers. Each frame:
@@ -49,6 +50,8 @@ pub struct Renderer {
     blit_layout: wgpu::BindGroupLayout,
     /// Copies the tone-mapped Rgba16Float frame into the output (Bevy's upscaling blit).
     blit_pipeline: wgpu::RenderPipeline,
+    /// Draws the scene's overlay quads over the tone-mapped frame, before the blit.
+    overlay_pipeline: wgpu::RenderPipeline,
     /// Indexed by [`pipelines::shadow_pipeline_index`]: sun cascades (orthographic, unclipped depth)
     /// and spot/point views (perspective, clipped depth, as in Bevy), per face variant, opaque
     /// or cut out by alpha.

@@ -9,19 +9,19 @@ use super::{
     projection::{Cascade, look_at, looking_to, perspective_infinite_reverse},
     textures::upload_cube,
     viewport::{
-        Draw, DrawKey, Phase, PrepareWork, SHADOW_VIEW_STRIDE, ShadowArray, ShadowPass,
-        UploadedEnvironment, Viewport,
+        Draw, DrawKey, OverlayVertex, Phase, PrepareWork, SHADOW_VIEW_STRIDE, ShadowArray,
+        ShadowPass, UploadedEnvironment, Viewport,
     },
 };
 use crate::{
     cull::{Frustum, Obb},
     material::AlphaMode,
-    scene::{FogFalloff, MAX_CASCADES, Scene, ShadowFilter, Tonemapping},
+    scene::{FogFalloff, MAX_CASCADES, OverlayQuad, Scene, ShadowFilter, Tonemapping},
     sky::SkyTargets,
     world::{Instance, SkinId, World},
 };
 use bytemuck::Zeroable;
-use glam::{Mat3, Mat4, UVec4, Vec3, Vec4};
+use glam::{Mat3, Mat4, UVec4, Vec2, Vec3, Vec4};
 use std::{collections::HashMap, sync::Arc};
 
 impl Renderer {
@@ -267,6 +267,7 @@ impl Renderer {
             cam.near,
             &viewport.targets.depth_view,
         );
+        prepare_overlay(viewport, device, queue, &scene.overlay);
         let c = scene.clear_color;
         viewport.clear_color = wgpu::Color {
             r: c.x.into(),
@@ -780,6 +781,50 @@ fn write_shadow_views(
     ) {
         viewport.shadow_view_group = None;
     }
+}
+
+/// Turns the scene's overlay quads (pixels from the top-left corner) into two clip-space
+/// triangles each and uploads them.
+fn prepare_overlay(
+    viewport: &mut Viewport,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    quads: &[OverlayQuad],
+) {
+    let size = Vec2::new(viewport.width as f32, viewport.height as f32);
+    let clip = |p: Vec2| {
+        let ndc = p / size * 2.0 - 1.0;
+        [ndc.x, -ndc.y]
+    };
+    let mut data = std::mem::take(&mut viewport.overlay_data);
+    data.clear();
+    for q in quads {
+        let (min, max) = (clip(q.position), clip(q.position + q.size));
+        let color = q.color.to_array();
+        let v = |x: f32, y: f32| OverlayVertex {
+            position: [x, y],
+            color,
+        };
+        data.extend([
+            v(min[0], min[1]),
+            v(min[0], max[1]),
+            v(max[0], min[1]),
+            v(max[0], min[1]),
+            v(min[0], max[1]),
+            v(max[0], max[1]),
+        ]);
+    }
+    viewport.overlay_vertices = data.len() as u32;
+    if !data.is_empty() {
+        write_growable(
+            &mut viewport.overlay_buffer,
+            &mut viewport.work,
+            device,
+            queue,
+            bytemuck::cast_slice(&data),
+        );
+    }
+    viewport.overlay_data = data;
 }
 
 /// Writes a per-frame buffer, counting the bytes and a replacement. Returns whether the buffer

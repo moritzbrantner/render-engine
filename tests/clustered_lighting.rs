@@ -73,6 +73,7 @@ fn scene() -> Scene {
         },
         environment: None,
         fog: None,
+        overlay: Vec::new(),
     }
 }
 

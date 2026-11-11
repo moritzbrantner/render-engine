@@ -371,6 +371,7 @@ fn unlit(camera: Camera, clear_color: Vec3) -> Scene {
         shadow_maps: ShadowMapSizes::default(),
         environment: None,
         fog: None,
+        overlay: Vec::new(),
     }
 }
 
@@ -490,6 +491,7 @@ fn lit_set(camera: Camera) -> (Scene, Vec<MeshInstance>) {
         shadow_maps: ShadowMapSizes::default(),
         environment: None,
         fog: None,
+        overlay: Vec::new(),
     };
     (scene, objects)
 }

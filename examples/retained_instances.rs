@@ -131,6 +131,7 @@ fn main() {
         shadow_maps: ShadowMapSizes::default(),
         environment: None,
         fog: None,
+        overlay: Vec::new(),
     };
 
     let wait = || {

@@ -201,7 +201,17 @@ upgrade that changes a default shows up as a deliberate scenario change:
   `SkinnedMeshBounds`; Bevy only does that with `DynamicSkinnedMeshBounds`, so its figures get
   `NoFrustumCulling` (they are always in view). Mesh streams are split (positions, normals,
   surface attributes, joints and weights) so a CPU-side pose can rewrite positions and normals
-  alone; Bevy interleaves, which does not change the image.
+  alone; Bevy interleaves, which does not change the image;
+- HUD overlay (#101): `hud_overlay` draws `sun_shadows` with `Scene::overlay` as Bevy UI
+  `Node`s (`PositionType::Absolute`, `Val::Px` position and size, a linear `BackgroundColor`,
+  `UiTargetCamera` on the scenario's camera, `GlobalZIndex` in list order) with
+  `UiAntiAlias::Off` on the camera, from the `bevy_ui_render` feature. Bevy draws UI into its
+  `Rgba16Float` main texture after tone mapping, before its upscaling blit, with straight-alpha
+  source-over blending; render-engine draws the same quads with the same blend at the end of
+  its tone-mapping pass, into its `Rgba16Float` target before the blit. Blending into the
+  `Rgba8UnormSrgb` output instead (after the blit) rounds the frame to 8 bits under the
+  translucent quads first and scored FLIP mean 0.0039 against 0.0000 now. The three.js side
+  does not port it: the web client draws its HUD in CSS.
 
 Later scenarios lift these one at a time (temporal filtering).
 

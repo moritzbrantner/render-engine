@@ -7,8 +7,8 @@ use render_engine::material::AlphaMode;
 use render_engine::mesh::Shape;
 use render_engine::scene::{
     Ambient, Camera, Cubemap, DayCycle, EnvironmentMap, Fog, FogFalloff, LightShadows, Moon,
-    PointLight, RAW_SUNLIGHT, Scene, ShadowFilter, ShadowMapSizes, Sky, SpotLight, Sun, SunShadows,
-    Tonemapping,
+    OverlayQuad, PointLight, RAW_SUNLIGHT, Scene, ShadowFilter, ShadowMapSizes, Sky, SpotLight,
+    Sun, SunShadows, Tonemapping,
 };
 use std::{path::Path, sync::Arc};
 
@@ -39,10 +39,11 @@ pub enum Feature {
     Sky,
     Culling,
     Skinning,
+    Overlay,
 }
 
 impl Feature {
-    pub const ALL: [Feature; 9] = [
+    pub const ALL: [Feature; 10] = [
         Feature::Shadows,
         Feature::Tonemap,
         Feature::Ibl,
@@ -52,6 +53,7 @@ impl Feature {
         Feature::Sky,
         Feature::Culling,
         Feature::Skinning,
+        Feature::Overlay,
     ];
 
     pub fn id(self) -> &'static str {
@@ -65,6 +67,7 @@ impl Feature {
             Feature::Sky => "sky",
             Feature::Culling => "culling",
             Feature::Skinning => "skinning",
+            Feature::Overlay => "overlay",
         }
     }
 
@@ -79,6 +82,7 @@ impl Feature {
             Feature::Sky => "Sky",
             Feature::Culling => "Culling",
             Feature::Skinning => "Skinning",
+            Feature::Overlay => "HUD overlay",
         }
     }
 
@@ -94,6 +98,7 @@ impl Feature {
             Feature::Sky => &[26],
             Feature::Culling => &[30],
             Feature::Skinning => &[36],
+            Feature::Overlay => &[101],
         }
     }
 
@@ -114,6 +119,7 @@ pub fn all() -> Vec<Scenario> {
     all.push(textured_props());
     all.push(skinned_figure());
     all.extend(sky_day_cycle());
+    all.push(hud_overlay());
     all
 }
 
@@ -296,6 +302,7 @@ pub fn sky_day_cycle() -> [Scenario; 4] {
             shadow_maps: ShadowMapSizes::default(),
             environment: None,
             fog: None,
+            overlay: Vec::new(),
         },
     })
 }
@@ -412,6 +419,7 @@ fn textured_props() -> Scenario {
         shadow_maps: ShadowMapSizes::default(),
         environment: Some(tiergarten(IBL_INTENSITY)),
         fog: None,
+        overlay: Vec::new(),
         moon: None,
         sky: None,
     };
@@ -567,6 +575,7 @@ pub fn point_spot() -> [Scenario; 3] {
         },
         environment: None,
         fog: None,
+        overlay: Vec::new(),
         moon: None,
         sky: None,
     };
@@ -687,6 +696,7 @@ pub fn fog_modes() -> Vec<Scenario> {
         shadow_maps: ShadowMapSizes::default(),
         environment: None,
         fog: None,
+        overlay: Vec::new(),
         moon: None,
         sky: None,
     };
@@ -823,6 +833,7 @@ pub fn ibl_materials() -> [Scenario; 2] {
         shadow_maps: ShadowMapSizes::default(),
         environment: Some(tiergarten(IBL_INTENSITY)),
         fog: None,
+        overlay: Vec::new(),
         moon: None,
         sky: None,
     };
@@ -880,6 +891,55 @@ pub fn tonemap_range() -> [Scenario; 4] {
         s.scene.camera.tonemapping = tonemapping;
         s
     })
+}
+
+/// `hud_overlay` (#101): `sun_shadows` with a HUD over it (Bevy UI nodes with a
+/// `BackgroundColor`): a white crosshair on the centre, a health bar (a half-transparent black
+/// frame, a red fill and a translucent white highlight on top), an opaque block at the bottom
+/// right and a translucent blue panel across the boxes and the sky. Pixels, linear RGBA.
+pub fn hud_overlay() -> Scenario {
+    let mut s = sun_shadows();
+    let (w, h) = (s.width as f32, s.height as f32);
+    let centre = Vec2::new(w, h) / 2.0;
+    let quad = |x: f32, y: f32, width: f32, height: f32, color: Vec4| OverlayQuad {
+        position: Vec2::new(x, y),
+        size: Vec2::new(width, height),
+        color,
+    };
+    let white = Vec4::new(1.0, 1.0, 1.0, 0.9);
+    s.scene.overlay = vec![
+        OverlayQuad::centered(centre, Vec2::new(24.0, 2.0), white),
+        OverlayQuad::centered(centre, Vec2::new(2.0, 24.0), white),
+        quad(40.0, h - 72.0, 320.0, 32.0, Vec4::new(0.0, 0.0, 0.0, 0.55)),
+        quad(
+            44.0,
+            h - 68.0,
+            220.0,
+            24.0,
+            Vec4::new(0.80, 0.04, 0.03, 1.0),
+        ),
+        quad(44.0, h - 68.0, 220.0, 8.0, Vec4::new(1.0, 1.0, 1.0, 0.25)),
+        quad(
+            w - 240.0,
+            h - 120.0,
+            200.0,
+            80.0,
+            Vec4::new(0.02, 0.6, 0.15, 1.0),
+        ),
+        quad(
+            w - 420.0,
+            60.0,
+            380.0,
+            220.0,
+            Vec4::new(0.05, 0.1, 0.6, 0.35),
+        ),
+    ];
+    Scenario {
+        name: "hud_overlay",
+        capability: "screen-space overlay quads (HUD)",
+        feature: Feature::Overlay,
+        ..s
+    }
 }
 
 fn rgb(r: f32, g: f32, b: f32) -> Vec3 {
@@ -961,6 +1021,7 @@ pub fn sun_shadows() -> Scenario {
             shadow_maps: ShadowMapSizes::default(),
             environment: None,
             fog: None,
+            overlay: Vec::new(),
             moon: None,
             sky: None,
         },
@@ -1176,6 +1237,7 @@ pub fn sun_cascades() -> Scenario {
             shadow_maps: ShadowMapSizes::default(),
             environment: None,
             fog: None,
+            overlay: Vec::new(),
             moon: None,
             sky: None,
         },

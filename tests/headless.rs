@@ -38,6 +38,7 @@ fn scene(shadows: bool, tonemapping: Tonemapping) -> Scene {
         shadow_maps: ShadowMapSizes::default(),
         environment: None,
         fog: None,
+        overlay: Vec::new(),
         moon: None,
         sky: None,
     }
@@ -782,4 +783,90 @@ fn lit_and_fogged_particles_follow_the_scene() {
             && u32::from(unlit[1]) < 2 * u32::from(unlit[0]),
         "10 m into dense fog the quad takes the fog's colour: {fogged:?}"
     );
+}
+
+/// `Scene::overlay`: solid quads over the finished frame, in pixels from the top-left corner,
+/// later quads on top, untouched by depth, exposure and tone mapping, and gone once the list is
+/// empty again.
+#[test]
+fn overlay_quads_cover_their_pixels_after_tone_mapping() {
+    let gpu = Headless::new().expect("a wgpu adapter");
+    let mut world = World::new(gpu.renderer());
+    let ground = world.add_mesh(&MeshData::shape(Shape::Plane(Vec2::splat(20.0))));
+    let white = world.add_material(&StandardMaterial::default());
+    let instances = [at(ground, white, Vec3::ZERO)];
+    let (w, h) = (64, 48);
+    let mut viewport = Viewport::new(gpu.renderer(), w, h);
+    let mut s = scene(false, Tonemapping::TonyMcMapface);
+    s.overlay = vec![
+        // Opaque red, 16 × 16 pixels from (8, 8).
+        OverlayQuad {
+            position: Vec2::new(8.0, 8.0),
+            size: Vec2::splat(16.0),
+            color: Vec4::new(1.0, 0.0, 0.0, 1.0),
+        },
+        // Half-transparent white over opaque black: linear 0.5, sRGB 188.
+        OverlayQuad {
+            position: Vec2::new(40.0, 8.0),
+            size: Vec2::splat(16.0),
+            color: Vec4::new(0.0, 0.0, 0.0, 1.0),
+        },
+        OverlayQuad {
+            position: Vec2::new(40.0, 8.0),
+            size: Vec2::splat(16.0),
+            color: Vec4::new(1.0, 1.0, 1.0, 0.5),
+        },
+        // A crosshair bar on the centre, over the lit ground.
+        OverlayQuad::centered(
+            Vec2::new(w as f32, h as f32) / 2.0,
+            Vec2::new(2.0, 10.0),
+            Vec4::new(0.0, 1.0, 0.0, 1.0),
+        ),
+    ];
+    let frame = gpu.render(&mut viewport, &world, &s, &instances).unwrap();
+    let red = [255, 0, 0, 255];
+    for (x, y) in [(8, 8), (23, 8), (8, 23), (23, 23), (16, 16)] {
+        assert_eq!(
+            pixel(&frame, x, y),
+            red,
+            "inside the red quad at ({x}, {y})"
+        );
+    }
+    for (x, y) in [(7, 8), (24, 8), (8, 7), (8, 24)] {
+        assert_ne!(
+            pixel(&frame, x, y),
+            red,
+            "outside the red quad at ({x}, {y})"
+        );
+    }
+    let blended = pixel(&frame, 47, 15);
+    assert!(
+        blended[..3].iter().all(|&c| c.abs_diff(188) <= 1),
+        "half white over black blends in linear light: {blended:?}"
+    );
+    let green = [0, 255, 0, 255];
+    assert_eq!(pixel(&frame, 31, 19), green, "crosshair top left");
+    assert_eq!(pixel(&frame, 32, 28), green, "crosshair bottom right");
+    assert_ne!(pixel(&frame, 33, 24), green, "crosshair is 2 pixels wide");
+
+    // Neither exposure nor the tone-mapping operator reaches the overlay.
+    s.camera.ev100 = 2.0;
+    s.camera.tonemapping = Tonemapping::AgX;
+    let bright = gpu.render(&mut viewport, &world, &s, &instances).unwrap();
+    assert_ne!(
+        pixel(&bright, 2, 40),
+        pixel(&frame, 2, 40),
+        "the frame changed"
+    );
+    for (x, y) in [(16, 16), (47, 15), (32, 24)] {
+        assert_eq!(
+            pixel(&bright, x, y),
+            pixel(&frame, x, y),
+            "overlay at ({x}, {y})"
+        );
+    }
+
+    s.overlay.clear();
+    let plain = gpu.render(&mut viewport, &world, &s, &instances).unwrap();
+    assert_ne!(pixel(&plain, 16, 16), red, "an empty overlay draws nothing");
 }

@@ -51,6 +51,7 @@ fn scene() -> Scene {
         shadow_maps: ShadowMapSizes::default(),
         environment: None,
         fog: None,
+        overlay: Vec::new(),
     }
 }
 
