@@ -36,6 +36,7 @@ use bevy::{
             screenshot::{Screenshot, ScreenshotCaptured},
         },
     },
+    ui_render::UiAntiAlias,
     window::ExitCondition,
 };
 use bevy::{
@@ -538,6 +539,11 @@ impl SceneSet<'_, '_> {
             }
             _ => {}
         }
+        let camera_id = camera.id();
+        if !scene.overlay.is_empty() {
+            // Hard-edged quads, as render-engine draws them.
+            camera.insert(UiAntiAlias::Off);
+        }
         if let Some(env) = &scene.environment {
             camera.insert(EnvironmentMapLight {
                 diffuse_map: images.add(cube_image(&env.diffuse)),
@@ -769,6 +775,25 @@ impl SceneSet<'_, '_> {
                     NoFrustumCulling,
                 ));
             }
+        }
+        // The overlay as absolutely positioned UI nodes on the camera, in list order (later
+        // ones on top), drawn after tone mapping into the main texture.
+        for (i, q) in scene.overlay.iter().enumerate() {
+            commands.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(q.position.x),
+                    top: Val::Px(q.position.y),
+                    width: Val::Px(q.size.x),
+                    height: Val::Px(q.size.y),
+                    ..default()
+                },
+                BackgroundColor(Color::linear_rgba(
+                    q.color.x, q.color.y, q.color.z, q.color.w,
+                )),
+                UiTargetCamera(camera_id),
+                GlobalZIndex(i as i32),
+            ));
         }
         image_handles
     }

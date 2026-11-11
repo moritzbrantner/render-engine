@@ -6,7 +6,7 @@
 //! Units follow Bevy's physical conventions: lengths in metres, directional illuminance in lux,
 //! point and spot light power in lumens, ambient and environment-map brightness in cd/m², exposure as EV100. Colours are linear RGB.
 
-use glam::{Vec3, Vec4};
+use glam::{Vec2, Vec3, Vec4};
 use std::sync::Arc;
 
 /// The camera and lighting of one frame: plain values, rebuilt or edited every frame at no
@@ -38,6 +38,42 @@ pub struct Scene {
     /// Distance fog over lit geometry (Bevy `DistanceFog` on the camera). The clear colour is not
     /// fogged, as in Bevy; set it to the fog colour for a fogged horizon.
     pub fog: Option<Fog>,
+    /// Screen-space quads drawn over the finished frame in list order (later on top): HUD
+    /// elements such as a crosshair or a health bar (Bevy UI `Node`s with a `BackgroundColor`).
+    /// Depth, exposure, fog and tone mapping do not touch them.
+    pub overlay: Vec<OverlayQuad>,
+}
+
+/// A solid rectangle of the [`Scene::overlay`] (Bevy UI: an absolutely positioned `Node` with a
+/// `BackgroundColor`).
+///
+/// Positions are in pixels of the viewport from its top-left corner, x right and y down, like
+/// CSS and Bevy UI's `Val::Px`. A pixel is covered when its centre lies inside the rectangle, so
+/// a whole-pixel rectangle covers exactly its pixels.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OverlayQuad {
+    /// Top-left corner in pixels.
+    pub position: Vec2,
+    /// Width and height in pixels.
+    pub size: Vec2,
+    /// Linear RGB, like every scene colour, with straight (not premultiplied) alpha. It is
+    /// written as is, without exposure or tone mapping, so an opaque quad shows exactly this
+    /// colour (an sRGB target encodes it). A CSS or sRGB colour converts with the sRGB transfer
+    /// function first (Bevy `Color::srgba(..).to_linear()`). Alpha blends over the frame in linear
+    /// light (source-over), as Bevy UI does.
+    pub color: Vec4,
+}
+
+impl OverlayQuad {
+    /// A `size` rectangle centred on `center` (pixels), e.g. a crosshair bar on the viewport's
+    /// centre.
+    pub fn centered(center: Vec2, size: Vec2, color: Vec4) -> Self {
+        Self {
+            position: center - size / 2.0,
+            size,
+            color,
+        }
+    }
 }
 
 /// Distance fog (Bevy `DistanceFog`), blended into the exposed HDR colour of every lit fragment

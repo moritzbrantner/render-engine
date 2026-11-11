@@ -54,8 +54,8 @@ impl<'a> Stamps<'a> {
 
 impl Renderer {
     /// Records the frame last prepared into `viewport`, ending in `target`: a view of the colour
-    /// format the renderer was created with, `viewport`-sized, fully overwritten. Draw the UI
-    /// into `target` afterwards (`LoadOp::Load`).
+    /// format the renderer was created with, `viewport`-sized, fully overwritten, overlay
+    /// quads included. Draw other UI into `target` afterwards (`LoadOp::Load`).
     pub fn encode(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -324,6 +324,13 @@ impl Renderer {
         pass.set_pipeline(&self.tonemap_pipelines[tonemap_index(viewport.tonemapping)]);
         pass.set_bind_group(0, viewport.tonemap.as_ref().map(|(_, g)| g), &[]);
         pass.draw(0..3, 0..1);
+        // The screen-space overlay over the tone-mapped frame, before the blit, like Bevy UI
+        // over its main texture: blended in Rgba16Float, unexposed and not tone mapped.
+        if viewport.overlay_vertices > 0 {
+            pass.set_pipeline(&self.overlay_pipeline);
+            pass.set_vertex_buffer(0, viewport.overlay_buffer.buffer.slice(..));
+            pass.draw(0..viewport.overlay_vertices, 0..1);
+        }
         drop(pass);
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

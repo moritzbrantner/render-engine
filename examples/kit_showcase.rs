@@ -941,6 +941,7 @@ fn daylight(eye: Vec3, target: Vec3, hour: f32) -> Scene {
         },
         environment: None,
         fog: None,
+        overlay: Vec::new(),
     }
 }
 

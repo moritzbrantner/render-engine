@@ -33,8 +33,11 @@ pub fn gap_issue(name: &str) -> Option<u32> {
 /// Why `s` cannot be exported yet, if anything is missing on the three.js side. The port covers
 /// every lighting capability today; a scenario with one it does not cover returns its reason
 /// here, with the follow-up issue in `UNPORTED_ISSUE`.
-pub fn unsupported(_s: &Scenario) -> Option<&'static str> {
-    None
+///
+/// The screen-space overlay (`Scene::overlay`) is not lighting and stays unported for good: the
+/// web client draws its HUD in CSS over the canvas, so it has no follow-up issue.
+pub fn unsupported(s: &Scenario) -> Option<&'static str> {
+    (!s.scene.overlay.is_empty()).then_some("HUD overlay: the web client draws it in CSS")
 }
 
 pub fn unported_issue(reason: &str) -> Option<u32> {

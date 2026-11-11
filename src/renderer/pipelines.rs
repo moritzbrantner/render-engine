@@ -3,7 +3,7 @@
 use super::{
     DEPTH_FORMAT, HDR_FORMAT, Renderer, SAMPLE_COUNT,
     textures::{load_lut, upload_cube},
-    viewport::Phase,
+    viewport::{OverlayVertex, Phase},
 };
 use crate::{
     particle_pass::ParticlePipelines,
@@ -549,6 +549,44 @@ impl Renderer {
             multiview_mask: None,
             cache: None,
         });
+        let overlay_shader =
+            device.create_shader_module(wgpu::include_wgsl!("../shaders/overlay.wgsl"));
+        let overlay_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("overlay"),
+            layout: Some(
+                &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("overlay"),
+                    bind_group_layouts: &[],
+                    immediate_size: 0,
+                }),
+            ),
+            vertex: wgpu::VertexState {
+                module: &overlay_shader,
+                entry_point: Some("overlay_vs"),
+                compilation_options: Default::default(),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<OverlayVertex>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x4],
+                })],
+            },
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &overlay_shader,
+                entry_point: Some("overlay_fs"),
+                compilation_options: Default::default(),
+                // Bevy UI's blending: straight alpha, source-over.
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: HDR_FORMAT,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
         // Bevy's tone-mapping LUT sampler: trilinear, clamped.
         let lut_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("tonemapping lut"),
@@ -607,6 +645,7 @@ impl Renderer {
             tonemap_layout,
             blit_layout,
             blit_pipeline,
+            overlay_pipeline,
             shadow_pipelines,
             lit_pipelines,
             tonemap_pipelines,

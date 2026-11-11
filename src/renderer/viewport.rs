@@ -17,6 +17,14 @@ use crate::{
 use glam::Vec3;
 use std::{ops::Range, sync::Arc};
 
+/// One corner of an overlay quad: clip-space position and linear RGBA (straight alpha).
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+#[repr(C)]
+pub(super) struct OverlayVertex {
+    pub(super) position: [f32; 2],
+    pub(super) color: [f32; 4],
+}
+
 /// Stride of the per-view shadow uniforms (dynamic-offset alignment).
 pub(super) const SHADOW_VIEW_STRIDE: u64 = 256;
 
@@ -74,6 +82,11 @@ pub struct Viewport {
     pub(super) clear_color: wgpu::Color,
     pub(super) tonemapping: Tonemapping,
     pub(super) particles: ParticleFrame,
+    /// The scene's overlay quads, six [`OverlayVertex`]es each, and how many vertices to draw.
+    pub(super) overlay_buffer: Growable,
+    pub(super) overlay_vertices: u32,
+    /// Scratch for the overlay's vertices, kept between frames with its allocation.
+    pub(super) overlay_data: Vec<OverlayVertex>,
     /// What the last `prepare` did (see [`PrepareWork`]).
     pub(super) work: PrepareWork,
     /// The opt-in GPU compaction path's state; `None` is the reference CPU path.
@@ -118,8 +131,8 @@ impl std::error::Error for GpuCullingUnsupported {}
 /// What a viewport's per-frame state retains, from [`Viewport::memory`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ViewportMemory {
-    /// Per-frame GPU buffers both paths have: frame, instances, joints, visible indices, lights
-    /// and shadow views (at their high-water size).
+    /// Per-frame GPU buffers both paths have: frame, instances, joints, visible indices, lights,
+    /// shadow views and overlay quads (at their high-water size).
     pub gpu_buffer_bytes: u64,
     /// GPU buffers only [`Culling::GpuIndirect`] adds: group and view tables, indirect arguments.
     pub gpu_culling_bytes: u64,
@@ -127,7 +140,7 @@ pub struct ViewportMemory {
     /// index list.
     pub clustered_lighting_bytes: u64,
     /// CPU scratch vectors kept between frames (draw keys, instance data, draws, shadow passes,
-    /// the retained instances' copy and the cluster assignment's).
+    /// overlay vertices, the retained instances' copy and the cluster assignment's).
     pub cpu_scratch_bytes: u64,
 }
 
@@ -448,6 +461,9 @@ impl Viewport {
             clear_color: wgpu::Color::BLACK,
             tonemapping: Tonemapping::default(),
             particles: ParticleFrame::new(device),
+            overlay_buffer: Growable::new(device, "overlay", wgpu::BufferUsages::VERTEX),
+            overlay_vertices: 0,
+            overlay_data: Vec::new(),
             work: PrepareWork::default(),
             gpu_culling: None,
             // The default: clustered where the device supports it, else the reference loop.
@@ -575,7 +591,8 @@ impl Viewport {
                 + self.joint_buffer.size()
                 + self.visible_buffer.size()
                 + self.light_buffer.size()
-                + self.shadow_view_buffer.size(),
+                + self.shadow_view_buffer.size()
+                + self.overlay_buffer.size(),
             gpu_culling_bytes: self
                 .gpu_culling
                 .as_ref()
@@ -585,7 +602,8 @@ impl Viewport {
                 + self.frame_keys.capacity() * std::mem::size_of::<DrawKey>()
                 + self.instance_data.capacity() * std::mem::size_of::<InstanceData>()
                 + self.draws.capacity() * std::mem::size_of::<Draw>()
-                + self.shadow_passes.capacity() * std::mem::size_of::<ShadowPass>())
+                + self.shadow_passes.capacity() * std::mem::size_of::<ShadowPass>()
+                + self.overlay_data.capacity() * std::mem::size_of::<OverlayVertex>())
                 as u64
                 + self.retained.memory()
                 + self

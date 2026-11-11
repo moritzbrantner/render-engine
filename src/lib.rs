@@ -28,6 +28,7 @@
 //!     shadow_maps: ShadowMapSizes::default(),
 //!     environment: None,
 //!     fog: None,
+//!     overlay: vec![],
 //! };
 //! let instances = [Instance {
 //!     mesh: ground,
