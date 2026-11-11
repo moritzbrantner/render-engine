@@ -33,7 +33,7 @@ all = { level = "warn", priority = -1 }
 # `examples/kit_showcase.rs` only: reads asset-tooling bundles (glTF with KTX2/Basis Universal
 # textures, PNG flipbooks) the way the mmorpg native client does. The engine itself reads no
 # files (D7).
-gltf = { version = "1.4.1", default-features = false, features = ["utils", "names", "allow_empty_texture"] }
+gltf = { version = "=1.4.1", default-features = false, features = ["utils", "names", "allow_empty_texture"] }
 basisu = "=0.1.0"
-image = { version = "0.25.10", default-features = false, features = ["png"] }
-serde_json = "1.0"
+image = { version = "=0.25.10", default-features = false, features = ["png"] }
+serde_json = "=1.0.154"
