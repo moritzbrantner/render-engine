@@ -24,7 +24,8 @@ Game-owned: a 2.8 s stall on the first frame
 crowd cameras ([mmorpg#724](https://github.com/moenarch-games/mmorpg/issues/724)), and browser GPU
 spikes that now hold two scenarios at 23 to 32 fps
 ([mmorpg#727](https://github.com/moenarch-games/mmorpg/issues/727)). Nothing is filed for
-asset-tooling. The numeric visual comparison still lacks an approved capture set (below).
+asset-tooling. Against the approved native reference captures the browser's FLIP mean is 0.030 to
+0.098 per view, recorded without a gate (below).
 
 The first slice ([#78](https://github.com/moritzbrantner/render-engine/pull/78), game `6ebc4c64`,
 render-engine `bd4708dd`, a heavily loaded machine) had only `render_ms` natively. This revision
@@ -292,14 +293,47 @@ GPU memory (718 MB of 8 GB), allocations (0 per steady frame).
 
 ## Visual comparison
 
-There is still no approved reference capture set. The closest are the merged review images in
-`docs/reviews/web-lighting/native-vs-web-{noon,dusk,night,woods-mid}.jpg` in the mmorpg repository
-(mmorpg#610). They are not formally approved, were taken from an older game and render-engine, and
-their camera poses no longer match the current shots (see #78's revision of this report). No
-numeric image comparison was run in this revision; it waits on the owner's choice of a reference
-set, asked on #74.
+The approved reference (owner decision on #74, 2026-11-11) is the native client's
+`greyhaven_lighting_shots` at mmorpg `05a1e3eb`, render-engine `df5597b5`, 1280×720: the Outpost
+at noon, dusk and night, a campfire and the lantern post by night, and the four
+`outpost_frame_time` views at the zone's starting hour, 08:00. The captures, their poses and
+hours (`views.json`) and native | browser | heat-map review images are in mmorpg
+`docs/reviews/greyhaven-reference/`
+([mmorpg#748](https://github.com/moenarch-games/mmorpg/pull/748)).
 
-The existing Bevy oracle gates are untouched: this change is docs only.
+The browser at the same revision was captured at each shot's eye, target and hour by
+`scripts/capture-browser-reference.py` (world canvas only, 1280×720, pixel ratio 1; Chromium
+158.0.8127.18 headless, Playwright 1.65.0, ANGLE on OpenGL ES 3.2, the same RTX 3060 Ti), and
+compared with the oracle's FLIP (`oracle --flip-images`, the gate's FLIP without its thresholds).
+Recorded, not gated:
+
+| Shot | Matched camera | Hour | FLIP mean | FLIP p99 |
+| --- | --- | --- | --- | --- |
+| `noon` | hub, orbit camera behind the player | 12.0 | 0.0594 | 0.3211 |
+| `dusk` | same | 17.8 | 0.0663 | 0.2657 |
+| `night` | same | 23.5 | 0.0984 | 0.2373 |
+| `torch-campfire` | near the first point light | 22.0 | 0.0771 | 0.2399 |
+| `torch-lantern` | near the last point light | 22.0 | 0.0955 | 0.2755 |
+| `frame-hub` | `hub` | 8.0 | 0.0601 | 0.3496 |
+| `frame-woods` | `woods` | 8.0 | 0.0537 | 0.5587 |
+| `frame-vale` | `vale` | 8.0 | 0.0295 | 0.2084 |
+| `frame-lake` | `lake` | 8.0 | 0.0697 | 0.6465 |
+
+For scale, the oracle's parity gate is a mean of 0.005 and a p99 of 0.05. The poses match to
+the pixel; what differs, from the heat maps:
+
+- **Content, not shading.** The browser draws the Outpost hall's masonry texture where native
+  draws it flat, and its default character wears different gear from the native test's. These dominate `noon` and `frame-hub`.
+- **Night and torch shots** carry the highest means: the browser's whole frame sits at a slightly
+  different level, and the warm point-light pool on the facades is weaker. The night lighting
+  paths differ (three-lighting's point lights were not measured, above).
+- **Foliage edges** in `frame-woods` and `frame-lake` give the highest p99s: alpha-masked
+  leaves, tree level of detail and its cross-fades differ per tree. The lake's water and shore
+  stones add to `frame-lake`.
+- **`frame-vale`**, mostly terrain and sky, is the closest at a mean of 0.030.
+
+No follow-up is filed from these numbers: no threshold was set, and the content differences
+are game-owned and visible in the review images. The existing Bevy oracle gates are untouched.
 
 ## Not measured, with the blocker
 
@@ -309,7 +343,6 @@ The existing Bevy oracle gates are untouched: this change is docs only.
 | Native display pacing | The path renders offscreen and waits each frame. A windowed run (`--frames`) prints no frame times. |
 | A dense-unit Greyhaven camera, a timed native starter-area view | Not in any existing path: [mmorpg#724](https://github.com/moenarch-games/mmorpg/issues/724). |
 | Images with clustered lights on Greyhaven | Not captured; part of [mmorpg#725](https://github.com/moenarch-games/mmorpg/issues/725). |
-| Numeric visual comparison | No approved reference capture set; owner question on #74. |
 | Browser GPU spike cause | Needs a trace or a bisection: [mmorpg#727](https://github.com/moenarch-games/mmorpg/issues/727). |
 | Native `perf`/CPU sampling | `kernel.perf_event_paranoid` is 4 on this machine. |
 
@@ -323,6 +356,13 @@ cargo test --release --locked -p mmorpg-client --lib outpost_frame_time -- --ign
 python scripts/profile-browser.py --out artifacts/profile/report.json   # needs Playwright
 ```
 
+The visual comparison: at `05a1e3eb` with mmorpg#748's test and script applied (their logic is
+unchanged on mmorpg `main`), `MMORPG_LIGHTING_SHOTS=<dir> cargo test --release --locked -p
+mmorpg-client --lib greyhaven_lighting_shots -- --ignored --nocapture`, then `python
+scripts/capture-browser-reference.py docs/reviews/greyhaven-reference/views.json --out <web>`,
+then per shot here `cargo run --release --locked --manifest-path oracle/Cargo.toml --
+--flip-images <dir>/re9-<shot>.png <web>/<shot>.web.png <shot>.flip.png`.
+
 Run the test binary (`target/release/deps/mmorpg_client-*`, arguments `outpost_frame_time --ignored
 --nocapture`) under `/usr/bin/time -v` with `nvidia-smi pmon -s um -d 1` beside it for the process
 figures; under `cargo test` they include cargo. The engine-option table needs, in
@@ -332,4 +372,4 @@ Culling::GpuIndirect)` (the latter with `INDIRECT_FIRST_INSTANCE` added to the c
 `required_features`).
 
 Scope of this report: no renderer, shader, default or gate changed, and no new profiler or timing
-ratchet was added.
+ratchet was added. The oracle's `--flip-images` compares two images without any threshold.
