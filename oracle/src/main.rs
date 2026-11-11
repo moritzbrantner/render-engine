@@ -23,6 +23,9 @@
 //! oracle --no-three              skip the three.js side (D8: headless Chromium, needs node + bun install)
 //! oracle --calibrate             particle scenarios only: Bevy against itself (rerun, other seed,
 //!                                gravity ×1.25), to calibrate the particle gates (D9)
+//! oracle --flip-images REF TEST HEATMAP
+//!                                FLIP of two same-sized images, no scenario and no gate: prints
+//!                                the mean and p99 and writes the heat map (Greyhaven, #74)
 //! ```
 //!
 //! Particle scenarios (`particles.rs`, D9) are judged per capture: exact captures by the FLIP
@@ -78,6 +81,8 @@ struct Options {
     gpu_driven_bench: bool,
     forward_plus_bench: bool,
     gpu_rounds: u32,
+    /// Reference, test and heat-map paths of a standalone image comparison.
+    flip_images: Option<[PathBuf; 3]>,
 }
 
 fn options() -> Result<Options, String> {
@@ -99,6 +104,7 @@ fn options() -> Result<Options, String> {
         gpu_driven_bench: false,
         forward_plus_bench: false,
         gpu_rounds: 2,
+        flip_images: None,
     };
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -132,6 +138,14 @@ fn options() -> Result<Options, String> {
             "--occlusion-bench" => o.occlusion_bench = true,
             "--gpu-driven-bench" => o.gpu_driven_bench = true,
             "--forward-plus-bench" => o.forward_plus_bench = true,
+            "--flip-images" => {
+                let mut path = || {
+                    args.next()
+                        .map(PathBuf::from)
+                        .ok_or("--flip-images needs a reference, a test and a heat-map path")
+                };
+                o.flip_images = Some([path()?, path()?, path()?]);
+            }
             "--gpu-rounds" => {
                 o.gpu_rounds = args
                     .next()
@@ -192,6 +206,28 @@ fn median(v: &[f64]) -> Option<f64> {
 
 fn save_png(path: &std::path::Path, w: u32, h: u32, rgba: &[u8]) -> Result<(), String> {
     image::save_buffer(path, rgba, w, h, image::ExtendedColorType::Rgba8).map_err(|e| e.to_string())
+}
+
+/// `--flip-images`: FLIP of two images of the same size, printed as one line. Records, never gates.
+fn flip_images([reference, test, heatmap]: &[PathBuf; 3]) -> Result<(), String> {
+    let open = |path: &PathBuf| {
+        image::open(path)
+            .map(|image| image.to_rgba8())
+            .map_err(|e| format!("{}: {e}", path.display()))
+    };
+    let (reference, test) = (open(reference)?, open(test)?);
+    if reference.dimensions() != test.dimensions() {
+        return Err(format!(
+            "sizes differ: {:?} and {:?}",
+            reference.dimensions(),
+            test.dimensions()
+        ));
+    }
+    let (w, h) = reference.dimensions();
+    let f = flip(w, h, reference.as_raw(), test.as_raw());
+    save_png(heatmap, w, h, &f.heatmap)?;
+    println!("flip_mean={:.4} flip_p99={:.4}", f.mean, f.p99);
+    Ok(())
 }
 
 /// Child process: render one scenario on Bevy, write `<name>.bevy.png` and `<name>.bevy.json`.
@@ -876,6 +912,15 @@ fn main() -> ExitCode {
     }
     if o.forward_plus_bench {
         return forward_plus_bench::run(&o);
+    }
+    if let Some(paths) = &o.flip_images {
+        return match flip_images(paths) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("flip images: {e}");
+                ExitCode::FAILURE
+            }
+        };
     }
     if let Some(name) = &o.bevy_side {
         return match bevy_child(name, &o) {
