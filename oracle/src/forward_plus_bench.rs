@@ -184,7 +184,13 @@ fn outdoor(name: &'static str, lights: usize) -> Scenario {
 
 /// A dense underground hall lit only by `lights` overlapping point and spot lights, some casting
 /// shadows. Intensity falls with the count so the frame stays comparably exposed.
-fn dungeon(name: &'static str, lights: usize, casters: usize, width: u32, height: u32) -> Scenario {
+pub(crate) fn dungeon(
+    name: &'static str,
+    lights: usize,
+    casters: usize,
+    width: u32,
+    height: u32,
+) -> Scenario {
     let stone = material(Vec3::new(0.50, 0.47, 0.42), 0.8);
     let mut objects = vec![
         MeshInstance::new(
@@ -527,6 +533,8 @@ fn compare_frame(
 ) -> Result<Value, String> {
     let renderer = gpu.renderer();
     let mut a = Viewport::new(renderer, width, height);
+    a.set_light_assignment(renderer, LightAssignment::PerFragment)
+        .map_err(|e| e.to_string())?;
     let mut b = Viewport::new(renderer, width, height);
     b.set_light_assignment(renderer, assignment)
         .map_err(|e| e.to_string())?;
@@ -725,6 +733,9 @@ fn compare_bevy(gpu: &Headless, out: &Path, scenario: &Scenario) -> Result<Value
         content::upload(gpu.renderer(), &scenario.assets, &scenario.objects);
     let renderer = gpu.renderer();
     let mut viewport = Viewport::new(renderer, scenario.width, scenario.height);
+    viewport
+        .set_light_assignment(renderer, LightAssignment::PerFragment)
+        .map_err(|e| e.to_string())?;
     let reference = gpu
         .render(&mut viewport, &world, &scenario.scene, &instances)
         .map_err(|e| e.to_string())?;

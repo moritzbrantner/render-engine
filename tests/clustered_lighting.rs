@@ -1,4 +1,4 @@
-//! The opt-in clustered light assignment (`LightAssignment::Clustered`, #72) against the
+//! The default clustered light assignment (`LightAssignment::Clustered`, #72, #94) against the
 //! per-fragment reference on one device: byte-identical images through shadowed point and spot
 //! lights, masked and blended materials, lights behind the camera or removed, camera cuts,
 //! near-plane crossings, forced cluster overflow and degenerate grids. The bench
@@ -248,4 +248,21 @@ fn the_work_counters_stay_zero_on_the_reference_path() {
         0,
         "a steady frame allocates nothing"
     );
+}
+
+#[test]
+fn a_new_viewport_assigns_lights_by_cluster_where_supported() {
+    let f = fixture();
+    let renderer = f.gpu.renderer();
+    let viewport = Viewport::new(renderer, SIZE, SIZE);
+    let expected = if renderer.supports_clustered_lighting() {
+        LightAssignment::default()
+    } else {
+        LightAssignment::PerFragment
+    };
+    assert_eq!(
+        LightAssignment::default(),
+        LightAssignment::Clustered(ClusterConfig::default())
+    );
+    assert_eq!(viewport.light_assignment(), expected);
 }

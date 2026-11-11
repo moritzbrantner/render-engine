@@ -1,6 +1,7 @@
-// Appended to `lit.wgsl` for the opt-in clustered light assignment (`LightAssignment::Clustered`,
+// Appended to `lit.wgsl` for the default clustered light assignment (`LightAssignment::Clustered`,
 // `renderer/clustered.rs`, `docs/forward-plus-experiment.md`). The light loop's text in `lit.wgsl`
-// is replaced by a call to `clustered_local_lights`. The default path compiles `lit.wgsl` as is.
+// is replaced by a call to `clustered_local_lights`. The per-fragment reference path compiles
+// `lit.wgsl` as is.
 
 struct ClusterParams {
     // x, y, z: tiles and depth slices; w: unused.

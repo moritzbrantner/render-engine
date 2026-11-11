@@ -1,4 +1,9 @@
-# Forward+ clustered lighting (#72)
+# Forward+ clustered lighting (#72, #94)
+
+**Status: the clustered path is the default since #94** (owner decision 2026-11-11, after the
+mmorpg's Greyhaven frames measured it; see [Stage 2 and the default](#stage-2-and-the-default)).
+The report below is the #72 bounded evaluation that preceded it, written while the path was
+opt-in.
 
 A *bounded evaluation*, not a renderer migration. It measures the reference path (every point and
 spot light evaluated for every fragment) on a small workload matrix, and, because those
@@ -7,12 +12,12 @@ clustered path the renderer can have, on identical content.
 
 | Path | What runs where |
 | --- | --- |
-| Reference (`LightAssignment::PerFragment`, default) | `lit.wgsl` loops over all `L` point and spot lights in every fragment. |
-| Clustered (`LightAssignment::Clustered`, opt-in) | `prepare` assigns the lights to a 16 × 9 × 24 grid of view-space clusters on the CPU (Bevy's grid shape: exponential depth slices, first slice 5 m). The lit pipelines are compiled from `lit.wgsl` with its light loop swapped for a loop over the fragment's cluster (`src/shaders/clustered_lights.wgsl`), with the cluster table and index list as a fourth bind group. |
+| Reference (`LightAssignment::PerFragment`; the default until #94, now opt-in and the fallback) | `lit.wgsl` loops over all `L` point and spot lights in every fragment. |
+| Clustered (`LightAssignment::Clustered`; opt-in in #72, the default since #94) | `prepare` assigns the lights to a 16 × 9 × 24 grid of view-space clusters on the CPU (Bevy's grid shape: exponential depth slices, first slice 5 m). The lit pipelines are compiled from `lit.wgsl` with its light loop swapped for a loop over the fragment's cluster (`src/shaders/clustered_lights.wgsl`), with the cluster table and index list as a fourth bind group. |
 
 Prototype only: no depth prepass, no compute light assignment, no change to shadow passes, the
 sky, tone mapping or the scene data (D7). `Viewport::set_light_assignment` selects the path per
-viewport. The default module's only change is two comments marking the light loop.
+viewport. The reference module's (`lit.wgsl`) only change is two comments marking the light loop.
 
 ## Reproducing
 
@@ -221,6 +226,29 @@ and none has been measured: the scenes here are synthetic, built to bracket the 
 take it to stage 2 (an opt-in renderer path, with its own issue) is the owner's decision, best
 made with the mmorpg's own light counts. Deferred or hybrid rendering stays unneeded by this
 evidence and out of scope.
+
+## Stage 2 and the default
+
+The consumer workload came with #74 ([Greyhaven baseline](greyhaven-baseline.md)): the mmorpg
+native client's Greyhaven Vale frame has 13 unshadowed point lights, and switching only the light
+assignment took its main pass from 5.2–9.8 to 2.5–3.4 ms and the GPU frame down by 2.7 to 6.4 ms
+(32 to 49 %) on the RTX 3060 Ti, with CPU `prepare` unchanged within noise (2.8 to 3.2 ms both
+ways, no overflows). **Owner decision 2026-11-11 (#94): `LightAssignment::Clustered` with
+`ClusterConfig::default()` is the default.**
+
+- `Viewport::new` starts clustered wherever the device has four bind groups and four fragment
+  storage buffers, and on the per-fragment loop otherwise (`Viewport::light_assignment` says
+  which). `LightAssignment::default()` is the clustered one.
+- `LightAssignment::PerFragment` stays available through `set_light_assignment` as the reference
+  this report, the bench and `tests/clustered_lighting.rs` compare against.
+- The clustered pipelines compile once per `Renderer`, on the first viewport that uses them,
+  instead of once per viewport.
+- **Oracle coverage.** Every lighting scenario of the oracle now renders through the clustered
+  path and is gated against Bevy under D3's thresholds, which Bevy's own clustering meets with the
+  same sums. `many_lights` adds the bench's `dungeon_64_shadowed` hall to the gate: 64
+  overlapping point and spot lights, four shadowed, over 527 instances. The bench
+  (`--forward-plus-bench`) still compares both paths byte for byte.
+- Shading is unchanged, so `packages/three-lighting` keeps its per-fragment loop.
 
 ## Limits
 

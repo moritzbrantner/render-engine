@@ -1,6 +1,7 @@
-//! The opt-in Forward+ light assignment ([`LightAssignment::Clustered`], issue #72; see
-//! `docs/forward-plus-experiment.md`). Off by default: the reference path evaluates every point
-//! and spot light for every fragment.
+//! The Forward+ light assignment ([`LightAssignment::Clustered`], issues #72 and #94; see
+//! `docs/forward-plus-experiment.md`), the default wherever the device supports it. The
+//! reference path, [`LightAssignment::PerFragment`], evaluates every point and spot light for
+//! every fragment and stays available as the reference and the fallback.
 //!
 //! Each frame `prepare` assigns the lights to a grid of view-space clusters on the CPU (tiles over
 //! the screen × exponential depth slices, Bevy's `assign_objects_to_clusters` shape: a sphere test
@@ -66,13 +67,20 @@ impl Default for ClusterConfig {
 }
 
 /// How a viewport's fragments find their point and spot lights.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LightAssignment {
-    /// Every light for every fragment: the reference path and the fallback.
-    #[default]
+    /// Every light for every fragment: the reference path, and the fallback where the device
+    /// lacks what [`LightAssignment::Clustered`] needs.
     PerFragment,
-    /// The fragment's cluster's list. Experimental; see the module docs.
+    /// The fragment's cluster's list: the default; see the module docs.
     Clustered(ClusterConfig),
+}
+
+impl Default for LightAssignment {
+    /// Clustered on Bevy's grid ([`ClusterConfig::default`]).
+    fn default() -> Self {
+        Self::Clustered(ClusterConfig::default())
+    }
 }
 
 /// [`Viewport::set_light_assignment`]: the device lacks what the clustered path needs and the
@@ -177,61 +185,14 @@ impl ClusteredLights {
             return Err(ClusteredLightingUnsupported);
         }
         let device = &renderer.device;
-        let storage =
-            |binding, read_only, ty_size: Option<wgpu::BufferSize>| wgpu::BindGroupLayoutEntry {
-                binding,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only },
-                    has_dynamic_offset: false,
-                    min_binding_size: ty_size,
-                },
-                count: None,
-            };
-        let mut entries = vec![
-            wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            storage(1, true, None),
-            storage(2, true, None),
-        ];
-        if config.diagnostic {
-            entries.push(storage(3, false, None));
-        }
-        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("clusters"),
-            entries: &entries,
-        });
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("lit clustered"),
-            source: wgpu::ShaderSource::Wgsl(
-                clustered_shader(
-                    config.diagnostic,
-                    device
-                        .features()
-                        .contains(wgpu::Features::SHADER_EARLY_DEPTH_TEST),
-                )
-                .into(),
-            ),
-        });
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("lit clustered"),
-            bind_group_layouts: &[
-                Some(&renderer.frame_layout),
-                Some(&renderer.lighting_layout),
-                Some(&renderer.material_layout),
-                Some(&layout),
-            ],
-            immediate_size: 0,
-        });
-        let pipelines = pipelines::lit_pipelines(device, &pipeline_layout, &shader);
+        let ClusteredPipelines { layout, pipelines } = if config.diagnostic {
+            ClusteredPipelines::new(renderer, true)
+        } else {
+            renderer
+                .clustered_pipelines
+                .get_or_init(|| ClusteredPipelines::new(renderer, false))
+                .clone()
+        };
         let diagnostic = config.diagnostic.then(|| {
             device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("cluster diagnostic"),
@@ -261,7 +222,79 @@ impl ClusteredLights {
             list: Vec::new(),
         })
     }
+}
 
+/// The clustered path's bind group layout and lit pipelines. The default (non-diagnostic) set is
+/// compiled once per [`Renderer`], by the first viewport that needs it, and shared.
+#[derive(Clone)]
+pub(super) struct ClusteredPipelines {
+    layout: wgpu::BindGroupLayout,
+    pipelines: Vec<wgpu::RenderPipeline>,
+}
+
+impl ClusteredPipelines {
+    fn new(renderer: &Renderer, diagnostic: bool) -> Self {
+        let device = &renderer.device;
+        let storage =
+            |binding, read_only, ty_size: Option<wgpu::BufferSize>| wgpu::BindGroupLayoutEntry {
+                binding,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only },
+                    has_dynamic_offset: false,
+                    min_binding_size: ty_size,
+                },
+                count: None,
+            };
+        let mut entries = vec![
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            storage(1, true, None),
+            storage(2, true, None),
+        ];
+        if diagnostic {
+            entries.push(storage(3, false, None));
+        }
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("clusters"),
+            entries: &entries,
+        });
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("lit clustered"),
+            source: wgpu::ShaderSource::Wgsl(
+                clustered_shader(
+                    diagnostic,
+                    device
+                        .features()
+                        .contains(wgpu::Features::SHADER_EARLY_DEPTH_TEST),
+                )
+                .into(),
+            ),
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("lit clustered"),
+            bind_group_layouts: &[
+                Some(&renderer.frame_layout),
+                Some(&renderer.lighting_layout),
+                Some(&renderer.material_layout),
+                Some(&layout),
+            ],
+            immediate_size: 0,
+        });
+        let pipelines = pipelines::lit_pipelines(device, &pipeline_layout, &shader);
+        Self { layout, pipelines }
+    }
+}
+
+impl ClusteredLights {
     pub(super) fn memory(&self) -> u64 {
         self.params.size() + self.table.size() + self.indices.size()
     }

@@ -620,6 +620,7 @@ impl Renderer {
             sky: SkyPipelines::new(device, queue),
             particles,
             sim: SimPipelines::new(device),
+            clustered_pipelines: std::sync::OnceLock::new(),
             no_transmittance: device
                 .create_texture_with_data(
                     queue,

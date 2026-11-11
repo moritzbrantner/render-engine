@@ -75,6 +75,8 @@ pub struct Renderer {
     particles: ParticlePipelines,
     /// The particle simulation's compute pipelines, shared by its worlds (`particle_sim`).
     sim: SimPipelines,
+    /// The clustered path's lit pipelines, compiled by the first viewport that uses them.
+    clustered_pipelines: std::sync::OnceLock<clustered::ClusteredPipelines>,
 }
 
 impl Renderer {

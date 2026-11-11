@@ -104,7 +104,7 @@ Evidence is what ran on the hardware adapter unless a row says otherwise.
 | Skinning | Skinned pipeline variants | Created without error. **No skinned draw was run**: the oracle's skinned and textured scenarios read glTF from disk. Unverified. |
 | Shadows | Cascades, spot, point cube, PCSS | Run; `depth-clip-control` present on both adapters. |
 | Fallbacks | `DEPTH_CLIP_CONTROL`, `DUAL_SOURCE_BLENDING` optional | SwiftShader has no `dual-source-blending`; the sky pipeline used its alpha fallback there. |
-| `Culling::GpuIndirect`, `LightAssignment::Clustered` | Opt-in | `indirect-first-instance` is present on both adapters, 4 fragment storage buffers fit, but **neither path ran in a browser**. Their diagnostic readbacks block (`gpu_culling.rs`, `clustered.rs`) and would need async versions. |
+| `Culling::GpuIndirect`, `LightAssignment::Clustered` | Opt-in at the time (clustered became the default later, #94; the captures here used the per-fragment loop) | `indirect-first-instance` is present on both adapters, 4 fragment storage buffers fit, but **neither path ran in a browser**. Their diagnostic readbacks block (`gpu_culling.rs`, `clustered.rs`) and would need async versions. |
 
 ## The smallest smoke
 

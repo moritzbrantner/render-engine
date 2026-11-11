@@ -8,8 +8,9 @@ render-engine provides the lighting and particle capabilities the owner's games 
 own wgpu API, and lighting comes before particles. First consumer: the mmorpg native client
 (wgpu 30, `three-d-*` crates from 3d-lab), starting with mmorpg#529. Long-term direction (D10):
 a Rust-first wgpu/WebGPU rendering library for native and browser targets, adopted by consumers
-on evidence, with no mandatory migration. Forward+ and GPU-driven paths are agreed strategy,
-present only as opt-in experiments; neither is the default.
+on evidence, with no mandatory migration. Forward+ clustered light assignment is the default
+(#94), with the per-fragment loop kept as the reference; the GPU-driven path is an opt-in
+experiment, not the default.
 
 render-engine owns GPU resources, pipelines, materials, lighting, visibility and drawing (D7).
 Keep ECS, entities, scene composition, camera intent, world state, asset loading, game loops,
@@ -41,7 +42,7 @@ processing in asset-tooling. The engine never depends on Bevy outside `oracle/`.
 | `examples/retained_instances.rs` | Microbenchmark: `prepare` on a Greyhaven-sized scene, every instance listed against the scenery retained (`World::add_instance`) |
 | `docs/consumer-integration.md` | How a consumer (the mmorpg native client) drives the engine |
 | `docs/gpu-driven-experiment.md`, `scripts/bench-gpu-driven.sh`, `oracle/src/gpu_driven_bench.rs`, `tests/gpu_culling.rs` | The #71 GPU culling experiment (`--gpu-driven-bench`, not a gate): the opt-in `Culling::GpuIndirect` path against the CPU reference, and its report |
-| `docs/forward-plus-experiment.md`, `scripts/bench-forward-plus.sh`, `oracle/src/forward_plus_bench.rs`, `src/renderer/clustered.rs`, `src/shaders/clustered_lights.wgsl`, `tests/clustered_lighting.rs` | The #72 Forward+ experiment (`--forward-plus-bench`, not a gate): the opt-in `LightAssignment::Clustered` path against the per-fragment reference, and its report. The clustered shader is `lit.wgsl` with the block between its `local-light-loop` markers replaced |
+| `docs/forward-plus-experiment.md`, `scripts/bench-forward-plus.sh`, `oracle/src/forward_plus_bench.rs`, `src/renderer/clustered.rs`, `src/shaders/clustered_lights.wgsl`, `tests/clustered_lighting.rs` | Forward+ clustered light assignment (#72, the default since #94; the `many_lights` scenario gates it on 64 local lights) and its bench (`--forward-plus-bench`, not a gate): `LightAssignment::Clustered` against the per-fragment reference (`LightAssignment::PerFragment`), and its report. The clustered shader is `lit.wgsl` with the block between its `local-light-loop` markers replaced |
 | `site/` | Report page over the last oracle run (`scripts/build-pages.sh` → `pages-dist/`) |
 | `packages/three-lighting/` | The web client's lighting on three.js (`@moritzbrantner/three-lighting`, root `package.json`): GLSL ports of `lit.wgsl`, `tonemap.wgsl` and the sky passes (`sky.js`, `sky-shaders.js`) and Bevy's cascade fitting (D8). A shading change in `lit.wgsl`, `tonemap.wgsl` or `src/shaders/sky/` makes the same change here |
 | `oracle/three/` | The oracle's three.js side: `render.mjs` renders exported scenarios in headless Chromium (Playwright, ANGLE on Vulkan); `oracle/src/three_side.rs` exports them and lists known gaps with their issues |
