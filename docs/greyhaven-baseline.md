@@ -25,7 +25,9 @@ crowd cameras ([mmorpg#724](https://github.com/moenarch-games/mmorpg/issues/724)
 spikes that now hold two scenarios at 23 to 32 fps
 ([mmorpg#727](https://github.com/moenarch-games/mmorpg/issues/727)). Nothing is filed for
 asset-tooling. Against the approved native reference captures the browser's FLIP mean is 0.030 to
-0.098 per view, recorded without a gate (below).
+0.098 per view, recorded without a gate (below); with the reference's night fog fixed
+([#102](https://github.com/moritzbrantner/render-engine/issues/102)) the night shots fall to
+0.021 to 0.076.
 
 The first slice ([#78](https://github.com/moritzbrantner/render-engine/pull/78), game `6ebc4c64`,
 render-engine `bd4708dd`, a heavily loaded machine) had only `render_ms` natively. This revision
@@ -325,8 +327,8 @@ the pixel; what differs, from the heat maps:
 - **Content, not shading.** The browser draws the Outpost hall's masonry texture where native
   draws it flat, and its default character wears different gear from the native test's. These dominate `noon` and `frame-hub`.
 - **Night and torch shots** carry the highest means: the browser's whole frame sits at a slightly
-  different level, and the warm point-light pool on the facades is weaker. The night lighting
-  paths differ (three-lighting's point lights were not measured, above).
+  different level, and the warm point-light pool on the facades is weaker. The cause was the
+  native reference's fog, not three-lighting (#102, below).
 - **Foliage edges** in `frame-woods` and `frame-lake` give the highest p99s: alpha-masked
   leaves, tree level of detail and its cross-fades differ per tree. The lake's water and shore
   stones add to `frame-lake`.
@@ -334,6 +336,38 @@ the pixel; what differs, from the heat maps:
 
 No follow-up is filed from these numbers: no threshold was set, and the content differences
 are game-owned and visible in the review images. The existing Bevy oracle gates are untouched.
+
+### Night and torch shots (#102)
+
+Both clients feed the renderer the same night: the EV100 curve (2 at the shots' hours), a 2 lx
+moon, the sky's environment light at 0.9, TonyMcMapface, and each point light's lumens, colour
+and range from `mmorpg_presentation::lights` (render-engine and three-lighting both divide by
+4π for candela). The native test did not: `greyhaven_lighting_shots` set the shot's hour but kept
+the fog colour of the zone's 08:00. Fog colour is added unexposed, so at night the daytime
+grey-blue lifted the whole native frame, 14 % in mean luminance and 40 % in the distant top of
+the frame, and the lamp pools looked brighter for it. The browser's `setPresentationTime` sets
+the hour's fog. Game-owned and fixed in the test
+([mmorpg#757](https://github.com/moenarch-games/mmorpg/issues/757),
+[mmorpg#758](https://github.com/moenarch-games/mmorpg/pull/758)), which captures `noon`, `dusk`,
+`night` and `torch-*` again at mmorpg `eb58c43b` (render-engine `df5597b5`, three-lighting
+`81752f2`, the same machine and browser). three-lighting is unchanged.
+
+| Shot | FLIP mean / p99, #74 | After mmorpg#757 |
+| --- | --- | --- |
+| `noon` | 0.0594 / 0.3211 | 0.0593 / 0.3211 |
+| `dusk` | 0.0663 / 0.2657 | 0.0482 / 0.2629 |
+| `night` | 0.0984 / 0.2373 | 0.0355 / 0.1994 |
+| `torch-campfire` | 0.0771 / 0.2399 | 0.021 to 0.036 / 0.091 to 0.163 |
+| `torch-lantern` | 0.0955 / 0.2755 | 0.037 to 0.076 / 0.078 to 0.202 |
+
+The torch ranges are five browser captures against one native reference: the campfire and the
+cave torches flicker, and the clients sample them at different moments (before the fix the same
+captures gave 0.068 to 0.078 and 0.071 to 0.109). With the flicker held steady on both sides
+(reduced motion) `torch-campfire` measures 0.0134 / 0.1066 and `torch-lantern` 0.0137 / 0.0422,
+with mean luminance within 0.2 %; on `night` the lantern's pool on the ground is within 1 %. What
+remains on `night` is the hall's masonry and the character's gear, which
+[mmorpg#753](https://github.com/moenarch-games/mmorpg/issues/753) removes along with the flicker.
+No oracle scenario is added: no shading difference was found.
 
 ## Not measured, with the blocker
 
