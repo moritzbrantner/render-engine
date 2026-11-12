@@ -4,8 +4,8 @@
 //!
 //! Each emitter owns a range of `capacity` slots in the pool, allocated on its first step. The
 //! per-emitter counters (alive count, draw arguments) are indexed by its id. A step uploads every
-//! emitter's spawn count, seed and modifiers through a staging belt into the encoder, so several
-//! steps can be recorded into one encoder.
+//! emitter's spawn count, seed and modifiers by copies from a staging buffer recorded into the
+//! encoder, so several steps can be recorded into one encoder.
 
 use crate::{
     particles::{
@@ -16,6 +16,10 @@ use crate::{
 };
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec2, Vec3, Vec4};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -407,6 +411,94 @@ impl Buffers {
     }
 }
 
+/// Uploads into the pool's buffers, recorded into the encoder: [`Uploads::write`] queues bytes for
+/// a target range, and [`Uploads::flush`] puts them in one staging buffer with
+/// `Queue::write_buffer` and records copies into the targets, so they land in order with the
+/// encoder's other commands. A staging buffer is reused once the work of the encoder that copied
+/// from it is done. Unlike `wgpu::util::StagingBelt` nothing is mapped: on the WebGPU backend the
+/// belt creates its chunks `mappedAtCreation` and old ones are only freed by the JS garbage
+/// collector, which ran SwiftShader out of mappable memory after about 200 frames (#108).
+struct Uploads {
+    device: wgpu::Device,
+    queue: wgpu::Queue,
+    /// Staging buffers, each with whether the GPU is done with it.
+    staging: Vec<(wgpu::Buffer, Arc<AtomicBool>)>,
+    bytes: Vec<u8>,
+    /// `(target, target offset, staging offset, size)`.
+    copies: Vec<(wgpu::Buffer, u64, u64, u64)>,
+}
+
+impl Uploads {
+    fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
+        Self {
+            device: device.clone(),
+            queue: queue.clone(),
+            staging: Vec::new(),
+            bytes: Vec::new(),
+            copies: Vec::new(),
+        }
+    }
+
+    /// Queues writing `bytes` (a multiple of 4 long) at `offset` of `target`.
+    fn write(&mut self, target: &wgpu::Buffer, offset: u64, bytes: &[u8]) {
+        if bytes.is_empty() {
+            return;
+        }
+        let at = self.bytes.len() as u64;
+        self.bytes.extend_from_slice(bytes);
+        self.copies
+            .push((target.clone(), offset, at, bytes.len() as u64));
+    }
+
+    /// Records the queued writes into `encoder`.
+    fn flush(&mut self, encoder: &mut wgpu::CommandEncoder) {
+        if self.copies.is_empty() {
+            return;
+        }
+        let size = self.bytes.len() as u64;
+        let free = self
+            .staging
+            .iter()
+            .position(|(_, free)| free.load(Ordering::Acquire));
+        let fits = self
+            .staging
+            .iter()
+            .position(|(b, free)| free.load(Ordering::Acquire) && b.size() >= size);
+        let i = match (fits, free) {
+            (Some(i), _) => i,
+            (None, free) => {
+                let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("particle uploads"),
+                    size: size.next_power_of_two().max(1 << 16),
+                    usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+                let entry = (buffer, Arc::new(AtomicBool::new(true)));
+                // A free buffer too small for this upload is replaced, not kept beside it.
+                match free {
+                    Some(i) => {
+                        self.staging[i] = entry;
+                        i
+                    }
+                    None => {
+                        self.staging.push(entry);
+                        self.staging.len() - 1
+                    }
+                }
+            }
+        };
+        let (buffer, free) = &self.staging[i];
+        free.store(false, Ordering::Release);
+        self.queue.write_buffer(buffer, 0, &self.bytes);
+        for (target, offset, at, len) in self.copies.drain(..) {
+            encoder.copy_buffer_to_buffer(buffer, at, &target, offset, len);
+        }
+        self.bytes.clear();
+        let free = free.clone();
+        encoder.on_submitted_work_done(move || free.store(true, Ordering::Release));
+    }
+}
+
 /// A world's particle slots and per-emitter counters on the GPU.
 pub(crate) struct ParticlePool {
     device: wgpu::Device,
@@ -414,19 +506,19 @@ pub(crate) struct ParticlePool {
     buffers: Buffers,
     /// Which alive list the next step reads.
     current: usize,
-    belt: wgpu::util::StagingBelt,
+    uploads: Uploads,
     /// Allocated slot ranges `(base, len)`, sorted by base.
     ranges: Vec<(u32, u32)>,
 }
 
 impl ParticlePool {
-    pub fn new(device: &wgpu::Device, pipelines: &SimPipelines) -> Self {
+    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, pipelines: &SimPipelines) -> Self {
         Self {
             buffers: Buffers::new(device, pipelines, 0, 0, 0),
             device: device.clone(),
             pipelines: pipelines.clone(),
             current: 0,
-            belt: wgpu::util::StagingBelt::new(device.clone(), 1 << 16),
+            uploads: Uploads::new(device, queue),
             ranges: Vec::new(),
         }
     }
@@ -516,11 +608,11 @@ impl ParticlePool {
             Some(COUNTER_BYTES),
         );
         let identity: Vec<u32> = (0..capacity).collect();
-        if let Some(size) = wgpu::BufferSize::new(u64::from(capacity) * 4) {
-            self.belt
-                .write_buffer(encoder, &b.dead, u64::from(base) * 4, size)
-                .copy_from_slice(bytemuck::cast_slice(&identity));
-        }
+        self.uploads.write(
+            &b.dead,
+            u64::from(base) * 4,
+            bytemuck::cast_slice(&identity),
+        );
     }
 
     /// Records replacing emitter `id`'s particles with `states` (those still alive, at most its
@@ -578,11 +670,7 @@ impl ParticlePool {
         let b = &self.buffers;
         let base = u64::from(base);
         let mut write = |buffer: &wgpu::Buffer, offset: u64, bytes: &[u8]| {
-            if let Some(size) = wgpu::BufferSize::new(bytes.len() as u64) {
-                self.belt
-                    .write_buffer(encoder, buffer, offset, size)
-                    .copy_from_slice(bytes);
-            }
+            self.uploads.write(buffer, offset, bytes);
         };
         write(
             &b.particles,
@@ -600,7 +688,7 @@ impl ParticlePool {
             u64::from(id) * COUNTER_BYTES,
             bytemuck::cast_slice(&counters),
         );
-        self.belt.finish_and_recall_on_submit(encoder);
+        self.uploads.flush(encoder);
     }
 
     /// Records one step of `dt` seconds for `emitters` (`(id, state)`): allocates and resets the
@@ -661,15 +749,8 @@ impl ParticlePool {
         };
         let mut bytes = bytemuck::bytes_of(&header).to_vec();
         bytes.extend_from_slice(bytemuck::cast_slice(&steps));
-        self.belt
-            .write_buffer(
-                encoder,
-                &b.step,
-                0,
-                wgpu::BufferSize::new(bytes.len() as u64).expect("header"),
-            )
-            .copy_from_slice(&bytes);
-        self.belt.finish_and_recall_on_submit(encoder);
+        self.uploads.write(&b.step, 0, &bytes);
+        self.uploads.flush(encoder);
 
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("particle simulation"),
