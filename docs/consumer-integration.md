@@ -138,7 +138,9 @@ nothing is uploaded again unless the consumer asks for it:
   and normals (two buffer writes, nothing re-interleaved, no index rewrite). It is the
   per-frame call for meshes still posed on the CPU; see [Skinned meshes](#skinned-meshes) for
   the GPU path.
-- `world.set_material(id, &material)` changes a material's colours or textures.
+- `world.set_material(id, &material)` changes a material's colours or textures. With the same
+  textures it only writes the material's uniform buffer, so tinting every frame creates no GPU
+  objects; a texture change builds a new bind group.
 - `remove_mesh`, `remove_texture` and `remove_material` free a handle. A removed texture stays
   alive for as long as a material still uses it.
 

@@ -6,7 +6,7 @@
 use glam::{Mat4, Vec3};
 use render_engine::{
     headless::Headless,
-    material::StandardMaterial,
+    material::{StandardMaterial, TextureData},
     mesh::{MeshData, Shape},
     renderer::{PrepareWork, Viewport},
     scene::*,
@@ -258,7 +258,11 @@ fn one_mesh_material_or_transform_edit_costs_that_edit_alone() {
             },
         );
         let material = f.world.work() - before;
-        assert_eq!(material.material_builds, 1);
+        assert_eq!(
+            (material.material_rewrites, material.material_builds),
+            (1, 0),
+            "a uniform-only edit writes the material's buffer in place"
+        );
         deltas.push((mesh, pose, material));
 
         // A moved instance: the same prepare work as the unchanged frame.
@@ -386,4 +390,42 @@ fn retained_instances_are_written_once_and_again_only_when_edited() {
         assert_eq!(f.prepare(&mut other, &scene, &[]).instance_writes, n);
     }
     assert_eq!(edits[0], edits[1], "edits cost the same in a larger world");
+}
+
+/// `set_material` rebuilds a material only when its textures change, including a texture
+/// handle that was removed and reused by a new upload; otherwise it writes the uniform alone.
+#[test]
+fn set_material_rebuilds_only_for_new_textures() {
+    let mut f = Fixture::new();
+    let texel = TextureData {
+        width: 1,
+        height: 1,
+        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        levels: vec![vec![255; 4]],
+        sampler: Default::default(),
+    };
+    let first = f.world.add_texture(&texel);
+    let mut material = StandardMaterial::default();
+    let id = f.world.add_material(&material);
+    let set = |f: &mut Fixture, material: &StandardMaterial| {
+        let before = f.world.work();
+        f.world.set_material(id, material);
+        let work = f.world.work() - before;
+        (work.material_rewrites, work.material_builds)
+    };
+
+    material.base_color.x = 0.5;
+    assert_eq!(set(&mut f, &material), (1, 0), "colour alone");
+    material.base_color_texture = Some(first);
+    assert_eq!(set(&mut f, &material), (0, 1), "a texture added");
+    material.emissive = Vec3::ONE;
+    assert_eq!(set(&mut f, &material), (1, 0), "same texture");
+    f.world.remove_texture(first);
+    let second = f.world.add_texture(&texel);
+    assert_eq!(second, first, "the handle is reused");
+    assert_eq!(
+        set(&mut f, &material),
+        (0, 1),
+        "a new texture behind the handle"
+    );
 }
