@@ -292,7 +292,11 @@ impl World {
             materials: Slots::new(),
             skins: Slots::new(),
             emitters: Slots::new(),
-            particles: ParticlePool::new(renderer.device(), renderer.sim_pipelines()),
+            particles: ParticlePool::new(
+                renderer.device(),
+                renderer.queue(),
+                renderer.sim_pipelines(),
+            ),
             instances: Slots::new(),
             instance_ticks: Vec::new(),
             tick: 0,
