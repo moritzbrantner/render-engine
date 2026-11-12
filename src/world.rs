@@ -133,6 +133,9 @@ pub(crate) struct GpuMesh {
 }
 
 struct GpuTexture {
+    /// Unique per upload (a [`World`] tick; 0 for the white fallback), so a material can tell
+    /// whether a reused [`TextureId`] still names the texture its bind group holds.
+    serial: u64,
     view: wgpu::TextureView,
     sampler: wgpu::Sampler,
     /// The texture and its sampler for the particle pass, built once with the texture rather
@@ -143,7 +146,12 @@ struct GpuTexture {
 pub(crate) struct GpuMaterial {
     pub material: StandardMaterial,
     pub group: wgpu::BindGroup,
-    /// The [`World`] tick of its last build, like [`GpuMesh::changed`].
+    /// The uniform the bind group holds; `set_material` writes it in place while the
+    /// textures stay the same.
+    uniform: wgpu::Buffer,
+    /// [`GpuTexture::serial`] of each texture slot the bind group holds.
+    textures: [u64; 5],
+    /// The [`World`] tick of its last build or rewrite, like [`GpuMesh::changed`].
     pub changed: u64,
 }
 
@@ -227,8 +235,10 @@ pub struct WorldWork {
     pub mesh_rewrites: u64,
     /// Textures uploaded (`add_texture`).
     pub texture_uploads: u64,
-    /// Materials built (`add_material`, `set_material`).
+    /// Materials built (`add_material`, and `set_material` when the textures changed).
     pub material_builds: u64,
+    /// Materials rewritten in their uniform buffers: `set_material` with the same textures.
+    pub material_rewrites: u64,
     /// Retained instances added, changed or removed (`add_instance`, `set_instance` with a
     /// different value, `remove_instance`). They upload nothing here: the next
     /// [`Renderer::prepare`] of each viewport writes the edited instances alone.
@@ -246,6 +256,7 @@ impl std::ops::Sub for WorldWork {
             mesh_rewrites: self.mesh_rewrites - earlier.mesh_rewrites,
             texture_uploads: self.texture_uploads - earlier.texture_uploads,
             material_builds: self.material_builds - earlier.material_builds,
+            material_rewrites: self.material_rewrites - earlier.material_rewrites,
             instance_edits: self.instance_edits - earlier.instance_edits,
             upload_bytes: self.upload_bytes - earlier.upload_bytes,
         }
@@ -538,12 +549,9 @@ impl World {
     pub fn add_texture(&mut self, texture: &TextureData) -> TextureId {
         self.work.texture_uploads += 1;
         self.work.upload_bytes += texture.levels.iter().map(|l| l.len() as u64).sum::<u64>();
-        TextureId(self.textures.insert(upload_texture(
-            &self.device,
-            &self.queue,
-            &self.particle_layout,
-            texture,
-        )))
+        let mut gpu = upload_texture(&self.device, &self.queue, &self.particle_layout, texture);
+        gpu.serial = self.next_tick();
+        TextureId(self.textures.insert(gpu))
     }
     pub fn remove_texture(&mut self, texture: TextureId) {
         self.textures.remove(texture.0);
@@ -555,16 +563,30 @@ impl World {
         MaterialId(self.materials.insert(gpu))
     }
 
-    /// Replaces a material in place; instances using it pick up the change next frame.
+    /// Replaces a material in place; instances using it pick up the change next frame. With
+    /// the same textures it only writes the material's uniform buffer, so per-frame tints
+    /// create no GPU objects; other texture choices build it again.
     pub fn set_material(&mut self, id: MaterialId, material: &StandardMaterial) {
-        let gpu = self.gpu_material(material);
-        let slot = self
+        let (uniform, textures) = self.material_uniform(material);
+        let textures = textures.map(|t| t.serial);
+        let gpu = self
             .materials
             .items
-            .get_mut(id.0 as usize)
-            .and_then(Option::as_mut)
+            .get(id.0 as usize)
+            .and_then(Option::as_ref)
             .expect("set_material on a removed material");
-        *slot = gpu;
+        if gpu.textures != textures {
+            self.materials.items[id.0 as usize] = Some(self.gpu_material(material));
+            return;
+        }
+        self.queue
+            .write_buffer(&gpu.uniform, 0, bytemuck::bytes_of(&uniform));
+        self.work.material_rewrites += 1;
+        self.work.upload_bytes += size_of::<MaterialUniform>() as u64;
+        let changed = self.touch_content();
+        let gpu = self.materials.items[id.0 as usize].as_mut().unwrap();
+        gpu.material = *material;
+        gpu.changed = changed;
     }
 
     pub fn remove_material(&mut self, material: MaterialId) {
@@ -727,6 +749,44 @@ impl World {
         self.work.material_builds += 1;
         self.work.upload_bytes += size_of::<MaterialUniform>() as u64;
         let changed = self.touch_content();
+        let (uniform, textures) = self.material_uniform(m);
+        let uniform = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("material"),
+                contents: bytemuck::bytes_of(&uniform),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+        let mut entries = vec![wgpu::BindGroupEntry {
+            binding: 0,
+            resource: uniform.as_entire_binding(),
+        }];
+        for (i, t) in textures.iter().enumerate() {
+            entries.push(wgpu::BindGroupEntry {
+                binding: 1 + 2 * i as u32,
+                resource: wgpu::BindingResource::TextureView(&t.view),
+            });
+            entries.push(wgpu::BindGroupEntry {
+                binding: 2 + 2 * i as u32,
+                resource: wgpu::BindingResource::Sampler(&t.sampler),
+            });
+        }
+        let group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("material"),
+            layout: &self.material_layout,
+            entries: &entries,
+        });
+        GpuMaterial {
+            material: *m,
+            group,
+            textures: textures.map(|t| t.serial),
+            uniform,
+            changed,
+        }
+    }
+
+    /// A material's uniform and the textures its bind group holds, in binding order.
+    fn material_uniform(&self, m: &StandardMaterial) -> (MaterialUniform, [&GpuTexture; 5]) {
         let mut f = 0;
         let mut slot = |texture: Option<TextureId>, flag: u32| match texture {
             Some(id) => {
@@ -737,14 +797,16 @@ impl World {
             }
             None => &self.white,
         };
-        let base_color = slot(m.base_color_texture, flags::BASE_COLOR_TEXTURE);
-        let emissive = slot(m.emissive_texture, flags::EMISSIVE_TEXTURE);
-        let metallic_roughness = slot(
-            m.metallic_roughness_texture,
-            flags::METALLIC_ROUGHNESS_TEXTURE,
-        );
-        let occlusion = slot(m.occlusion_texture, flags::OCCLUSION_TEXTURE);
-        let normal_map = slot(m.normal_map_texture, flags::NORMAL_MAP);
+        let textures = [
+            slot(m.base_color_texture, flags::BASE_COLOR_TEXTURE),
+            slot(m.emissive_texture, flags::EMISSIVE_TEXTURE),
+            slot(
+                m.metallic_roughness_texture,
+                flags::METALLIC_ROUGHNESS_TEXTURE,
+            ),
+            slot(m.occlusion_texture, flags::OCCLUSION_TEXTURE),
+            slot(m.normal_map_texture, flags::NORMAL_MAP),
+        ];
         if m.double_sided {
             f |= flags::DOUBLE_SIDED;
         }
@@ -772,46 +834,7 @@ impl World {
             flags: f,
             _pad: [0; 3],
         };
-        let uniform = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("material"),
-                contents: bytemuck::bytes_of(&uniform),
-                usage: wgpu::BufferUsages::UNIFORM,
-            });
-        let mut entries = vec![wgpu::BindGroupEntry {
-            binding: 0,
-            resource: uniform.as_entire_binding(),
-        }];
-        for (i, t) in [
-            base_color,
-            emissive,
-            metallic_roughness,
-            occlusion,
-            normal_map,
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            entries.push(wgpu::BindGroupEntry {
-                binding: 1 + 2 * i as u32,
-                resource: wgpu::BindingResource::TextureView(&t.view),
-            });
-            entries.push(wgpu::BindGroupEntry {
-                binding: 2 + 2 * i as u32,
-                resource: wgpu::BindingResource::Sampler(&t.sampler),
-            });
-        }
-        let group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("material"),
-            layout: &self.material_layout,
-            entries: &entries,
-        });
-        GpuMaterial {
-            material: *m,
-            group,
-            changed,
-        }
+        (uniform, textures)
     }
 }
 
@@ -866,6 +889,7 @@ fn upload_texture(
         ],
     });
     GpuTexture {
+        serial: 0,
         view,
         sampler,
         particle,
