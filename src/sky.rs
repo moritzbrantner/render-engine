@@ -800,7 +800,7 @@ impl EnvironmentInputs {
 pub(crate) const SPECULAR_MIPS: u32 = ENVIRONMENT_MIPS;
 
 impl SkyTargets {
-    pub fn new(device: &wgpu::Device, p: &SkyPipelines) -> Self {
+    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, p: &SkyPipelines) -> Self {
         let (density, scattering) = p.medium.as_ref().expect(
             "Scene::sky needs wgpu::Features::FLOAT32_FILTERABLE on the device (Rgba32Float \
              medium LUTs, as in Bevy)",
@@ -1051,14 +1051,13 @@ impl SkyTargets {
             constant_bytes[at..at + size_of::<FilteringConstants>()]
                 .copy_from_slice(bytemuck::bytes_of(c));
         }
-        let constants_buffer = {
-            use wgpu::util::DeviceExt;
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("environment filter constants"),
-                contents: &constant_bytes,
-                usage: wgpu::BufferUsages::UNIFORM,
-            })
-        };
+        let constants_buffer = crate::upload::buffer(
+            device,
+            queue,
+            "environment filter constants",
+            &constant_bytes,
+            wgpu::BufferUsages::UNIFORM,
+        );
         let filter = dispatch
             .into_iter()
             .enumerate()

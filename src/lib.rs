@@ -56,4 +56,5 @@ pub mod particles;
 pub mod renderer;
 pub mod scene;
 mod sky;
+mod upload;
 pub mod world;

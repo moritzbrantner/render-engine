@@ -168,7 +168,7 @@ impl Renderer {
 
         match (&scene.sky, viewport.sky.is_some()) {
             (Some(_), false) => {
-                viewport.sky = Some(SkyTargets::new(device, &self.sky));
+                viewport.sky = Some(SkyTargets::new(device, queue, &self.sky));
                 viewport.work.allocations += 1;
                 lighting_dirty = true;
             }
