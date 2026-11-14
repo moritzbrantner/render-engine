@@ -480,12 +480,18 @@ impl World {
         self.work.mesh_builds += 1;
         self.work.upload_bytes += streams.bytes(mesh);
         let buffer = |label, contents: &[u8], usage| {
-            self.device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some(label),
-                    contents,
-                    usage: usage | wgpu::BufferUsages::COPY_DST,
-                })
+            // create_buffer_init maps the destination at creation. Chromium's SwiftShader
+            // backend can reject even small mapped mesh buffers; upload through the queue.
+            let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(label),
+                size: contents.len() as u64,
+                usage: usage | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            if !contents.is_empty() {
+                self.queue.write_buffer(&buffer, 0, contents);
+            }
+            buffer
         };
         let vertex = wgpu::BufferUsages::VERTEX;
         GpuMesh {
