@@ -480,18 +480,7 @@ impl World {
         self.work.mesh_builds += 1;
         self.work.upload_bytes += streams.bytes(mesh);
         let buffer = |label, contents: &[u8], usage| {
-            // create_buffer_init maps the destination at creation. Chromium's SwiftShader
-            // backend can reject even small mapped mesh buffers; upload through the queue.
-            let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some(label),
-                size: contents.len() as u64,
-                usage: usage | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-            if !contents.is_empty() {
-                self.queue.write_buffer(&buffer, 0, contents);
-            }
-            buffer
+            crate::upload::buffer(&self.device, &self.queue, label, contents, usage)
         };
         let vertex = wgpu::BufferUsages::VERTEX;
         GpuMesh {
@@ -760,13 +749,13 @@ impl World {
         self.work.upload_bytes += size_of::<MaterialUniform>() as u64;
         let changed = self.touch_content();
         let (uniform, textures) = self.material_uniform(m);
-        let uniform = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("material"),
-                contents: bytemuck::bytes_of(&uniform),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            });
+        let uniform = crate::upload::buffer(
+            &self.device,
+            &self.queue,
+            "material",
+            bytemuck::bytes_of(&uniform),
+            wgpu::BufferUsages::UNIFORM,
+        );
         let mut entries = vec![wgpu::BindGroupEntry {
             binding: 0,
             resource: uniform.as_entire_binding(),
