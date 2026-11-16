@@ -283,15 +283,18 @@ an unoptimized substitute for a game asset.
 The completed MMORPG browser profile is
 `benchmarks/virtual-geometry/mmorpg-browser-profile.json.gz`. The game page reported
 NVIDIA RTX 3060 Ti through ANGLE/Vulkan, 1440×900, with no page errors. Idle CPU frame
-median/p95 was 19.5/21.4 ms; the overview was 13.8/16.1 ms. GPU timer sample counts
+median/p95 was 24.5/29.7 ms; the overview was 16.0/18.4 ms. GPU timer sample counts
 were zero, so browser gameplay GPU time is unavailable. Submitted work includes
-all views: the overview recorded about 18,669 draws and 8.36 million triangles per
+all views: the overview recorded about 16,641 draws and 5.97 million triangles per
 frame. These are profiling-baseline counters, not evidence that more detailed
 geometry is free or that cluster rendering improves this game.
 
 The disposable profiler copy used ordinary button entry, omitted unrelated keyboard
 latency journeys, added frame-wait deadlines and longer startup/action deadlines,
-and selected ANGLE/Vulkan. The original profiler's OpenGL launch configuration
+and selected ANGLE/Vulkan. Visual inspection caught an entry Escape action that opened
+settings in the earlier capture; the retained report is the replacement run without
+that action. The gameplay capture uses the Vale debug camera with settings closed.
+The original profiler's OpenGL launch configuration
 selected SwiftShader in a matching environment probe. Its incomplete software runs
 were discarded. No game source or production configuration changed. The existing
 `web/dist` artifact is identified by its index hash in the saved report; it is not

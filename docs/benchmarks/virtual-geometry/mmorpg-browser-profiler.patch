@@ -44,7 +44,7 @@
  
      def take(self):
          return {"frames": self.page.evaluate("window.__valeProfile.take()"), **self.page.evaluate("window.__probe.take()")}
-@@ -227,19 +230,10 @@
+@@ -227,19 +230,9 @@
          }""")
  
      def enter_world(self):
@@ -64,11 +64,10 @@
 +        self.enter_button().click(timeout=120_000)
 +        expect(self.page.locator("#character-select")).to_be_hidden(timeout=120_000)
 +        expect(self.page.locator(".hud")).to_be_visible(timeout=120_000)
-+        self.page.keyboard.press("Escape")
  
      def warm(self, seconds=3.0):
          self.page.wait_for_timeout(seconds * 1000)
-@@ -582,30 +576,39 @@
+@@ -582,30 +575,45 @@
              session.enter_world()
              session.frames(10)
          else:
@@ -106,6 +105,12 @@
 +            print('PROFILE report["scenarios"][name] ', flush=True)
              report["scenarios"][name] = view(session, viewpoint, args.seconds)
          report["pageErrors"] = session.errors
++        close_settings = session.page.get_by_role("button", name="Close", exact=True)
++        if close_settings.is_visible():
++            close_settings.click()
++            session.frames(10)
++        session.page.evaluate("window.__valeDebug.flyTo('vale')")
++        session.frames(60)
 +        session.page.locator("#world").screenshot(path="/home/moenarch/moritzbrantner/render-engine/target/virtual-geometry/mmorpg-gameplay.png")
          session.close()
          if not args.no_sweep:
