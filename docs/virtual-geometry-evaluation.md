@@ -1,5 +1,43 @@
 # Virtual geometry evaluation: offline stage (#119)
 
+## Runtime experiment in progress
+
+The native CPU-cut prototype is now available through `kit_showcase
+--virtual-geometry KIT HIERARCHY ASSET OUTPUT`. It reuses the kit's KTX2 materials,
+restores source normals, tangents and vertex colors, and submits off-camera instances
+for independent renderer shadow-view culling. The browser prototype under
+`oracle/virtual-geometry/` uses public Three.js `BatchedMesh` APIs. Neither is a
+production virtual-geometry API. Both keep the full hierarchy resident.
+
+Native evidence is in [the runtime summary](benchmarks/virtual-geometry/native-runtime-summary.json)
+and adjacent `native-*.json.gz` raw reports. These are RTX 3060 Ti Vulkan measurements,
+1280×720, 240 moving-camera frames after warmup, two reverse-order rounds, release
+builds. Repeated asset grids are scaling workloads, not gameplay. CPU spans include
+selection, prepare, encode and submission; GPU values sum timestamp pass spans.
+The machine was shared, so timing is advisory and raw round variation is retained.
+
+Conventional candidates were generated with the existing 3d-lab `lod_chain` adapter
+using `scripts/bench-discrete-lods.py`; no new simplifier was implemented. Its current
+checkout failed a locked build because its lockfile needs updating. The benchmark
+used the same adapter source from a temporary manifest and recorded its output;
+the foundation checkout and lockfile were left unchanged. This runner resolved
+meshopt 0.7.0; the older source identifier string is not its dependency version.
+
+At 256 synthetic boulders, round 1 measured the 1 px cluster cut at CPU 1.857 ms /
+GPU 0.575 ms and discrete LOD4 at CPU 0.396 ms / GPU 0.538 ms. Four-capture mean
+sRGB RMSE against the full source is 0.01992 / 0.01999 respectively. At 256 shrine
+arches, discrete LOD2 measured CPU 0.124 ms / GPU 0.666 ms, with RMSE 0.00436;
+the 1 px cluster cut measured CPU 0.974 ms / GPU 0.270 ms, with RMSE 0.01370.
+RMSE is an image difference diagnostic, not a perceptual acceptance threshold.
+Do not add CPU and GPU spans and call that end-to-end gameplay latency.
+
+These comparisons favor conventional LODs for the tested candidates. Browser,
+actual gameplay, loading/residency and multi-material evaluation remain unfinished;
+they must not be inferred from these grids. No consumer adoption is justified yet.
+The independent `verify-cut-boundaries.mjs` diagnostic found every sampled synthetic
+boulder cut closed after positional welding. Crag/arch source meshes have open
+boundaries; their diagnostic does not establish watertight transitions.
+
 ## Decision and status
 
 Retain conventional geometry and discrete LODs. Do not adopt `three-nanite` as a

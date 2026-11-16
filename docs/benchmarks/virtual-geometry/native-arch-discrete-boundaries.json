@@ -1,0 +1,430 @@
+{
+  "asset": "shrine.kit.arch",
+  "tolerance": 0.000004043999910354614,
+  "sourceOpenEdges": 570,
+  "sourceNonManifoldEdges": 0,
+  "closedSourceCutsStayClosed": null,
+  "limitation": "Quantized-position incidence diagnostic; open-source boundary simplification can change exact edges. Does not prove coverage, orientation, shading or runtime traversal.",
+  "rows": [
+    {
+      "offset": [
+        0.6,
+        0.2,
+        0.3
+      ],
+      "threshold": 0.5,
+      "triangles": 12044,
+      "openEdges": 290,
+      "newBoundaryEdges": 24,
+      "nonManifoldEdges": 0
+    },
+    {
+      "offset": [
+        0.6,
+        0.2,
+        0.3
+      ],
+      "threshold": 1,
+      "triangles": 10332,
+      "openEdges": 138,
+      "newBoundaryEdges": 30,
+      "nonManifoldEdges": 0
+    },
+    {
+      "offset": [
+        0.6,
+        0.2,
+        0.3
+      ],
+      "threshold": 2,
+      "triangles": 8087,
+      "openEdges": 35,
+      "newBoundaryEdges": 33,
+      "nonManifoldEdges": 0
+    },
+    {
+      "offset": [
+        0.6,
+        0.2,
+        0.3
+      ],
+      "threshold": 4,
+      "triangles": 7387,
+      "openEdges": 35,
+      "newBoundaryEdges": 33,
+      "nonManifoldEdges": 0
+    },
+    {
+      "offset": [
+        0.6,
+        0.2,
+        0.3
+      ],
+      "threshold": 16,
+      "triangles": 5923,
+      "openEdges": 31,
+      "newBoundaryEdges": 29,
+      "nonManifoldEdges": 0
+    },
+    {
+      "offset": [
+        0.9,
+        0.5,
+        0.9
+      ],
+      "threshold": 0.5,
+      "triangles": 8873,
+      "openEdges": 75,
+      "newBoundaryEdges": 31,
+      "nonManifoldEdges": 0
+    },
+    {
+      "offset": [
+        0.9,
+        0.5,
+        0.9
+      ],
+      "threshold": 1,
+      "triangles": 8087,
+      "openEdges": 35,
+      "newBoundaryEdges": 33,
+      "nonManifoldEdges": 0
+    },
+    {
+      "offset": [
+        0.9,
+        0.5,
+        0.9
+      ],
+      "threshold": 2,
+      "triangles": 5019,
+      "openEdges": 13,
+      "newBoundaryEdges": 13,
+      "nonManifoldEdges": 0
+    },
+    {
+      "offset": [
+        0.9,
+        0.5,
+        0.9
+      ],
+      "threshold": 4,
+      "triangles": 4321,
+      "openEdges": 11,
+      "newBoundaryEdges": 11,
+      "nonManifoldEdges": 0
+    },
+    {
+      "offset": [
+        0.9,
+        0.5,
+        0.9
+      ],
+      "threshold": 16,
+      "triangles": 3853,
+      "openEdges": 11,
+      "newBoundaryEdges": 11,
+      "nonManifoldEdges": 1
+    },
+    {
+      "offset": [
+        2,
+        1,
+        2
+      ],
+      "threshold": 0.5,
+      "triangles": 6729,
+      "openEdges": 31,
+      "newBoundaryEdges": 29,
+      "nonManifoldEdges": 0
+    },
+    {
+      "offset": [
+        2,
+        1,
+        2
+      ],
+      "threshold": 1,
+      "triangles": 4321,
+      "openEdges": 11,
+      "newBoundaryEdges": 11,
+      "nonManifoldEdges": 0
+    },
+    {
+      "offset": [
+        2,
+        1,
+        2
+      ],
+      "threshold": 2,
+      "triangles": 3853,
+      "openEdges": 11,
+      "newBoundaryEdges": 11,
+      "nonManifoldEdges": 1
+    },
+    {
+      "offset": [
+        2,
+        1,
+        2
+      ],
+      "threshold": 4,
+      "triangles": 3853,
+      "openEdges": 11,
+      "newBoundaryEdges": 11,
+      "nonManifoldEdges": 1
+    },
+    {
+      "offset": [
+        2,
+        1,
+        2
+      ],
+      "threshold": 16,
+      "triangles": 1818,
+      "openEdges": 10,
+      "newBoundaryEdges": 10,
+      "nonManifoldEdges": 1
+    },
+    {
+      "offset": [
+        6,
+        2,
+        4
+      ],
+      "threshold": 0.5,
+      "triangles": 4321,
+      "openEdges": 11,
+      "newBoundaryEdges": 11,
+      "nonManifoldEdges": 0
+    },
+    {
+      "offset": [
+        6,
+        2,
+        4
+      ],
+      "threshold": 1,
+      "triangles": 3853,
+      "openEdges": 11,
+      "newBoundaryEdges": 11,
+      "nonManifoldEdges": 1
+    },
+    {
+      "offset": [
+        6,
+        2,
+        4
+      ],
+      "threshold": 2,
+      "triangles": 2610,
+      "openEdges": 10,
+      "newBoundaryEdges": 10,
+      "nonManifoldEdges": 1
+    },
+    {
+      "offset": [
+        6,
+        2,
+        4
+      ],
+      "threshold": 4,
+      "triangles": 1818,
+      "openEdges": 10,
+      "newBoundaryEdges": 10,
+      "nonManifoldEdges": 1
+    },
+    {
+      "offset": [
+        6,
+        2,
+        4
+      ],
+      "threshold": 16,
+      "triangles": 120,
+      "openEdges": 0,
+      "newBoundaryEdges": 0,
+      "nonManifoldEdges": 42
+    },
+    {
+      "offset": [
+        25,
+        8,
+        10
+      ],
+      "threshold": 0.5,
+      "triangles": 2610,
+      "openEdges": 10,
+      "newBoundaryEdges": 10,
+      "nonManifoldEdges": 1
+    },
+    {
+      "offset": [
+        25,
+        8,
+        10
+      ],
+      "threshold": 1,
+      "triangles": 1818,
+      "openEdges": 10,
+      "newBoundaryEdges": 10,
+      "nonManifoldEdges": 1
+    },
+    {
+      "offset": [
+        25,
+        8,
+        10
+      ],
+      "threshold": 2,
+      "triangles": 1818,
+      "openEdges": 10,
+      "newBoundaryEdges": 10,
+      "nonManifoldEdges": 1
+    },
+    {
+      "offset": [
+        25,
+        8,
+        10
+      ],
+      "threshold": 4,
+      "triangles": 120,
+      "openEdges": 0,
+      "newBoundaryEdges": 0,
+      "nonManifoldEdges": 42
+    },
+    {
+      "offset": [
+        25,
+        8,
+        10
+      ],
+      "threshold": 16,
+      "triangles": 120,
+      "openEdges": 0,
+      "newBoundaryEdges": 0,
+      "nonManifoldEdges": 42
+    },
+    {
+      "offset": [
+        0.2,
+        0.05,
+        0.31
+      ],
+      "threshold": 0.5,
+      "triangles": 12945,
+      "openEdges": 397,
+      "newBoundaryEdges": 22,
+      "nonManifoldEdges": 0
+    },
+    {
+      "offset": [
+        0.2,
+        0.05,
+        0.31
+      ],
+      "threshold": 1,
+      "triangles": 11180,
+      "openEdges": 186,
+      "newBoundaryEdges": 29,
+      "nonManifoldEdges": 0
+    },
+    {
+      "offset": [
+        0.2,
+        0.05,
+        0.31
+      ],
+      "threshold": 2,
+      "triangles": 9676,
+      "openEdges": 138,
+      "newBoundaryEdges": 30,
+      "nonManifoldEdges": 0
+    },
+    {
+      "offset": [
+        0.2,
+        0.05,
+        0.31
+      ],
+      "threshold": 4,
+      "triangles": 8873,
+      "openEdges": 75,
+      "newBoundaryEdges": 31,
+      "nonManifoldEdges": 0
+    },
+    {
+      "offset": [
+        0.2,
+        0.05,
+        0.31
+      ],
+      "threshold": 16,
+      "triangles": 8087,
+      "openEdges": 35,
+      "newBoundaryEdges": 33,
+      "nonManifoldEdges": 0
+    },
+    {
+      "offset": [
+        -0.5,
+        0.25,
+        0
+      ],
+      "threshold": 0.5,
+      "triangles": 12081,
+      "openEdges": 293,
+      "newBoundaryEdges": 27,
+      "nonManifoldEdges": 0
+    },
+    {
+      "offset": [
+        -0.5,
+        0.25,
+        0
+      ],
+      "threshold": 1,
+      "triangles": 12081,
+      "openEdges": 293,
+      "newBoundaryEdges": 27,
+      "nonManifoldEdges": 0
+    },
+    {
+      "offset": [
+        -0.5,
+        0.25,
+        0
+      ],
+      "threshold": 2,
+      "triangles": 9721,
+      "openEdges": 123,
+      "newBoundaryEdges": 30,
+      "nonManifoldEdges": 0
+    },
+    {
+      "offset": [
+        -0.5,
+        0.25,
+        0
+      ],
+      "threshold": 4,
+      "triangles": 8873,
+      "openEdges": 75,
+      "newBoundaryEdges": 31,
+      "nonManifoldEdges": 0
+    },
+    {
+      "offset": [
+        -0.5,
+        0.25,
+        0
+      ],
+      "threshold": 16,
+      "triangles": 6465,
+      "openEdges": 55,
+      "newBoundaryEdges": 13,
+      "nonManifoldEdges": 0
+    }
+  ]
+}

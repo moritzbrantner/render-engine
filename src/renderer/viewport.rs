@@ -181,6 +181,12 @@ pub struct PrepareWork {
     pub draws: u32,
     /// Draw calls the shadow passes will submit, summed.
     pub shadow_draws: u32,
+    /// Indexed triangles submitted by the main pass's CPU draws, before clipping and
+    /// rasterization. Excludes GPU-indirect draws, whose instance counts need readback.
+    pub cpu_triangles: u64,
+    /// Indexed triangles submitted by CPU shadow draws, summed over shadow views.
+    /// Excludes GPU-indirect draws, as [`Self::cpu_triangles`] does.
+    pub cpu_shadow_triangles: u64,
     /// Bytes written to GPU buffers and textures: the frame uniform, instances, joint
     /// palettes, lights, shadow views, visible indices, the [`Culling::GpuIndirect`] tables
     /// and environment cube maps. The sky's and the particles' fixed-size uniforms are not
