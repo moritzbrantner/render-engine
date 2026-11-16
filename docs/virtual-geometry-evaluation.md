@@ -2,6 +2,25 @@
 
 ## Runtime experiment in progress
 
+The native comparison also covers all five eligible crag outcrop assets at their
+actual Greyhaven dressing placements, rotations and nonuniform scales, following
+240 interpolated poses between the consumer's saved Vale and lake review cameras.
+See `benchmarks/virtual-geometry/greyhaven-native-summary.json` and the five
+`greyhaven-*.json.gz` raw reports. The path is reproducible consumer-data input;
+terrain, units and the game loop are excluded, so this is a scenery-subset A/B,
+not a candidate whole-game frame-time result. The three actual buttress-1 placements
+were visible in 185/240 source frames (181/240 cluster frames, whose bounds cull more
+tightly). In round 1 the source CPU/GPU medians were 0.109/0.109 ms versus
+0.200/0.101 ms at 1 px; the small GPU reduction does not offset added CPU work.
+
+Generate input with `python3 scripts/virtual-geometry-game-scene.py MMORPG_CHECKOUT
+crag.kit.outcrop-buttress-1 target/virtual-geometry/greyhaven-buttress-scene.json`,
+then prefix the native benchmark command with
+`VG_SCENE=target/virtual-geometry/greyhaven-buttress-scene.json`. The JSON records
+the source placement identities, transforms, camera frames and input hashes.
+Projected cluster errors use world-space bounds and the largest TRS scale axis,
+so nonuniformly scaled placements do not understate their geometric error.
+
 The native CPU-cut prototype is now available through `kit_showcase
 --virtual-geometry KIT HIERARCHY ASSET OUTPUT`. It reuses the kit's KTX2 materials,
 restores source normals, tangents and vertex colors, and submits off-camera instances

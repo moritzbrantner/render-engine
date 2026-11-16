@@ -269,7 +269,7 @@ impl Mode {
     }
 }
 
-fn camera(frame: usize, count: usize) -> (Vec3, Vec3) {
+fn grid_camera(frame: usize, count: usize) -> (Vec3, Vec3) {
     // A complete deterministic orbit: identical poses in every mode and round.
     let angle = frame as f32 * std::f32::consts::TAU / 240.0;
     let radius = (count as f32).sqrt() * 9.0 + 15.0;
@@ -279,10 +279,29 @@ fn camera(frame: usize, count: usize) -> (Vec3, Vec3) {
     )
 }
 
+fn camera(frame: usize, count: usize, path: Option<&Json>) -> (Vec3, Vec3) {
+    match path {
+        None => grid_camera(frame, count),
+        Some(path) => {
+            let poses = path["frames"].as_array().expect("camera frames");
+            let pose = &poses[frame % poses.len()];
+            let vector = |key: &str| {
+                let v = pose[key].as_array().expect("camera vector");
+                Vec3::new(
+                    v[0].as_f64().unwrap() as f32,
+                    v[1].as_f64().unwrap() as f32,
+                    v[2].as_f64().unwrap() as f32,
+                )
+            };
+            (vector("eye"), vector("target"))
+        }
+    }
+}
+
 fn select(
     asset: &Asset,
     mode: Mode,
-    positions: &[Vec3],
+    positions: &[Mat4],
     eye: Vec3,
     instances: &mut Vec<Instance>,
     errors: &mut Vec<f32>,
@@ -291,7 +310,7 @@ fn select(
     let mut triangles = 0;
     let k = HEIGHT as f32 / (2.0 * (50f32.to_radians() / 2.0).tan());
     for &position in positions {
-        let transform = Mat4::from_translation(position);
+        let transform = position;
         match mode {
             Mode::Source | Mode::Lod(_) => {
                 triangles += match mode {
@@ -313,13 +332,19 @@ fn select(
             }
             Mode::Cluster(threshold) => {
                 errors.clear();
-                let local_eye = eye - position;
+                let scale = transform
+                    .x_axis
+                    .truncate()
+                    .length()
+                    .max(transform.y_axis.truncate().length())
+                    .max(transform.z_axis.truncate().length());
                 errors.extend(asset.groups.iter().map(|g| {
-                    let d = local_eye.distance(Vec3::new(g[0], g[1], g[2])) - g[3];
+                    let d = eye.distance(transform.transform_point3(Vec3::new(g[0], g[1], g[2])))
+                        - g[3] * scale;
                     if d <= 1e-6 {
                         f32::INFINITY
                     } else {
-                        g[4] * k / d
+                        g[4] * scale * k / d
                     }
                 }));
                 for cluster in &asset.clusters {
@@ -362,9 +387,10 @@ fn measure(
     world: &World,
     asset: &Asset,
     mode: Mode,
-    positions: &[Vec3],
+    positions: &[Mat4],
     out: &Path,
     round: usize,
+    path: Option<&Json>,
 ) -> Json {
     let renderer = gpu.renderer();
     let mut viewport = Viewport::new(renderer, WIDTH, HEIGHT);
@@ -383,7 +409,7 @@ fn measure(
         view_formats: &[],
     });
     let view = target.create_view(&Default::default());
-    let (eye, target) = camera(0, positions.len());
+    let (eye, target) = camera(0, positions.len(), path);
     let mut scene = daylight(eye, target, 12.0);
     // A fixed sky-free scene isolates geometry and shadows from atmosphere LUT startup.
     scene.sky = None;
@@ -394,7 +420,7 @@ fn measure(
     let start = Instant::now();
     let mut warm = 0;
     while warm < 60 || start.elapsed() < render_engine::headless::WARMUP {
-        (scene.camera.eye, scene.camera.target) = camera(warm % 240, positions.len());
+        (scene.camera.eye, scene.camera.target) = camera(warm % 240, positions.len(), path);
         select(
             asset,
             mode,
@@ -447,7 +473,7 @@ fn measure(
         for i in 0..batch {
             let frame = block * batch + i;
             let start = Instant::now();
-            (scene.camera.eye, scene.camera.target) = camera(frame as usize, positions.len());
+            (scene.camera.eye, scene.camera.target) = camera(frame as usize, positions.len(), path);
             let tris = select(
                 asset,
                 mode,
@@ -505,7 +531,7 @@ fn measure(
     }
     if round == 0 {
         for frame in [0, 60, 120, 180] {
-            (scene.camera.eye, scene.camera.target) = camera(frame, positions.len());
+            (scene.camera.eye, scene.camera.target) = camera(frame, positions.len(), path);
             select(
                 asset,
                 mode,
@@ -561,7 +587,7 @@ pub(super) fn run(args: &[String]) {
     if kind != "all" {
         use std::io::Write;
         let mut viewport = Viewport::new(gpu.renderer(), WIDTH, HEIGHT);
-        let (eye, target) = camera(0, 1);
+        let (eye, target) = camera(0, 1, None);
         let mut scene = daylight(eye, target, 12.0);
         scene.sky = None;
         let mut instances = Vec::new();
@@ -573,7 +599,7 @@ pub(super) fn run(args: &[String]) {
         select(
             &asset,
             mode,
-            &[Vec3::ZERO],
+            &[Mat4::IDENTITY],
             eye,
             &mut instances,
             &mut Vec::new(),
@@ -596,18 +622,49 @@ pub(super) fn run(args: &[String]) {
     let mut modes = vec![Mode::Source];
     modes.extend((0..asset.lods.len()).map(Mode::Lod));
     modes.extend([Mode::Cluster(1.0), Mode::Cluster(2.0), Mode::Cluster(4.0)]);
+    let game_scene: Option<Json> = std::env::var("VG_SCENE")
+        .ok()
+        .map(|p| serde_json::from_slice(&read(Path::new(&p))).unwrap());
+    if let Some(scene) = &game_scene {
+        assert_eq!(scene["asset"].as_str(), Some(name.as_str()));
+    }
+    let counts = game_scene.as_ref().map_or_else(
+        || vec![1, 64, 256],
+        |s| vec![s["transforms"].as_array().unwrap().len()],
+    );
     let mut rows = Vec::new();
-    for count in [1, 64, 256] {
+    for count in counts {
+        assert!(count > 0);
+
         let side = (count as f32).sqrt().ceil() as usize;
-        let positions: Vec<Vec3> = (0..count)
-            .map(|i| {
-                Vec3::new(
-                    (i % side) as f32 - (side - 1) as f32 / 2.0,
-                    0.0,
-                    (i / side) as f32 - (side - 1) as f32 / 2.0,
-                ) * 16.0
-            })
-            .collect();
+        let positions: Vec<Mat4> = if let Some(scene) = &game_scene {
+            scene["transforms"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| {
+                    let values: Vec<f32> = v
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .map(|n| n.as_f64().unwrap() as f32)
+                        .collect();
+                    Mat4::from_cols_slice(&values)
+                })
+                .collect()
+        } else {
+            (0..count)
+                .map(|i| {
+                    Mat4::from_translation(
+                        Vec3::new(
+                            (i % side) as f32 - (side - 1) as f32 / 2.0,
+                            0.0,
+                            (i / side) as f32 - (side - 1) as f32 / 2.0,
+                        ) * 16.0,
+                    )
+                })
+                .collect()
+        };
         for round in 0..2 {
             let order: Vec<_> = if round == 0 {
                 modes.clone()
@@ -615,7 +672,16 @@ pub(super) fn run(args: &[String]) {
                 modes.iter().rev().copied().collect()
             };
             for mode in order {
-                let row = measure(&gpu, &world, &asset, mode, &positions, out, round);
+                let row = measure(
+                    &gpu,
+                    &world,
+                    &asset,
+                    mode,
+                    &positions,
+                    out,
+                    round,
+                    game_scene.as_ref(),
+                );
                 println!(
                     "{name} {count} {} round {round}: CPU {} GPU {}",
                     mode.name(),
@@ -623,8 +689,8 @@ pub(super) fn run(args: &[String]) {
                     row["gpu_pass_sum_ms"]["median"]
                 );
                 rows.push(row);
-                let report = serde_json::json!({ "asset": name, "adapter": format!("{:?}", gpu.adapter), "resolution": [WIDTH, HEIGHT],
-                    "scope": "Repeated real-asset scaling experiment, not gameplay. CPU selection + prepare + encode + submit; GPU pass sum, no waits in CPU span. Shadows retain off-camera instances. Fixed authored LODs are quality candidates, not assumed equivalent. All modes resident during measurement; upload counter is cluster mesh buffers only, not total residency.", "rows": rows });
+                let report = serde_json::json!({ "asset": name, "adapter": format!("{:?}", gpu.adapter), "resolution": [WIDTH, HEIGHT], "scene_input": game_scene,
+                    "scope": "Asset geometry experiment, not whole gameplay. See scene_input for real consumer placements; otherwise repeated grid. CPU selection + prepare + encode + submit; GPU pass sum, no waits in CPU span. Shadows retain off-camera instances. Fixed authored LODs are quality candidates, not assumed equivalent. All modes resident during measurement; upload counter is cluster mesh buffers only, not total residency.", "rows": rows });
                 std::fs::write(
                     out.join("report.json"),
                     serde_json::to_vec_pretty(&report).unwrap(),

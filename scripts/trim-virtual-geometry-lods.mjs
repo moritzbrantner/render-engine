@@ -8,6 +8,7 @@ export function trimDiscreteLods(directory, name) {
   const jsonPath = path.join(directory, name + '.json');
   const binPath = path.join(directory, name + '.bin');
   const meta = JSON.parse(fs.readFileSync(jsonPath));
+  if (meta.version !== 3) throw new Error('Only reference hierarchy version 3 is supported');
   if (meta.vertices === meta.dagVertices && meta.lods.length === 1) return;
   const bin = fs.readFileSync(binPath);
   const lengths = { positions: meta.dagVertices * 12, normals: meta.dagVertices * 4,
@@ -15,7 +16,9 @@ export function trimDiscreteLods(directory, name) {
   const chunks = []; let offset = 0;
   for (const [key, section] of Object.entries(meta.sections)) {
     const size = lengths[key] ?? section.bytes;
-    if (size > section.bytes) throw new Error('Hierarchy section cannot grow during trimming');
+    if (!Number.isSafeInteger(size) || size < 0 || size > section.bytes ||
+        !Number.isSafeInteger(section.offset) || section.offset < 0 ||
+        section.offset + section.bytes > bin.length) throw new Error('Invalid hierarchy section range');
     chunks.push(bin.subarray(section.offset, section.offset + size));
     section.offset = offset; section.bytes = size; offset += size;
     const padding = (4 - offset % 4) % 4;
