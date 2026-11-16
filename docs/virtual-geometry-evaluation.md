@@ -62,8 +62,9 @@ boundaries; their diagnostic does not establish watertight transitions.
 Retain conventional geometry and discrete LODs. Do not adopt `three-nanite` as a
 runtime dependency. Cluster LOD remains an evaluation candidate, **not a rejected
 technique**: evidence now includes preprocessing, sampled cuts and native/browser asset grids.
-It does not establish an equal-quality gameplay performance advantage or complete
-the requested native/browser benchmark and integration work.
+It does not establish an equal-quality whole-game performance advantage. No production
+virtual-geometry API or game migration is shipped: adoption was conditional on a
+meaningful benefit that the evaluated candidate did not establish.
 
 Useful candidates are Meshoptimizer meshlet partitioning, locked group boundaries,
 monotonic conservative error, and per-view projected-error cuts. Any implementation
@@ -74,7 +75,7 @@ representative runtime evidence first. No consumer pins or production paths chan
 
 | Capability | Existing owner and evidence | Implication |
 | --- | --- | --- |
-| Simplification and discrete LOD generation | `3d-lab/crates/three-d-lod/src/lib.rs`: Meshoptimizer through `meshopt` 0.6.2, `simplify_mesh`, `build_lod_chain`, border locking | Extend this owner if cluster preprocessing proves useful; do not create another simplifier |
+| Simplification and discrete LOD generation | `3d-lab/crates/three-d-lod/src/lib.rs`: Meshoptimizer through `meshopt` (see the version note above), `simplify_mesh`, `build_lod_chain`, border locking | Extend this owner if cluster preprocessing proves useful; do not create another simplifier |
 | Renderer-independent LOD selection | `three-d-lod/src/selection.rs`, `docs/contracts/screen-space-lod.md` | Reuse shared projected-error semantics; cluster DAGs are not currently implemented there |
 | Asset operations and packaging | asset-tooling `src/processing-operations.ts`: `mesh.simplify`, `mesh.lod_chain`; glTF-Transform exports with shared buffers and KTX2 | Packaging remains asset-tooling's job; textures and collision must stay independent of render cuts |
 | GPU resources, instancing, batching, per-view frustum culling | render-engine `World`, `renderer/prepare.rs`, `renderer/retained.rs` | Keep resources and drawing here; no asset loading or scene ownership |
@@ -367,3 +368,5 @@ target/virtual-geometry/shrine/shrine.kit.arch shrine.kit.arch
 OUTPUT_JSON`, with the repository-root server at `ORIGIN`.
 
 The five crag scene JSON files and every referenced buffer/texture were compared directly with the consumer’s current local crag payload and match. Integrated/mobile hardware follow-up: [#121](https://github.com/moritzbrantner/render-engine/issues/121).
+
+The current Shooter catalog has Assembly Works and greybox arenas, not a shipped shipyard map. Assembly Works supplies the real factory gameplay baseline; the planned large arena remains in shooter#55. No artificial shipyard scene was substituted.
