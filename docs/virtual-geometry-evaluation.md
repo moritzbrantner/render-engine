@@ -1,4 +1,4 @@
-# Virtual geometry evaluation: offline stage (#119)
+# Virtual geometry evaluation (#119)
 
 ## Runtime experiment in progress
 
@@ -31,8 +31,8 @@ the 1 px cluster cut measured CPU 0.974 ms / GPU 0.270 ms, with RMSE 0.01370.
 RMSE is an image difference diagnostic, not a perceptual acceptance threshold.
 Do not add CPU and GPU spans and call that end-to-end gameplay latency.
 
-These comparisons favor conventional LODs for the tested candidates. Browser,
-actual gameplay, loading/residency and multi-material evaluation remain unfinished;
+These comparisons favor conventional LODs for the tested candidates. Actual gameplay
+candidate comparisons, measured residency and multi-material evaluation remain unfinished;
 they must not be inferred from these grids. No consumer adoption is justified yet.
 The independent `verify-cut-boundaries.mjs` diagnostic found every sampled synthetic
 boulder cut closed after positional welding. Crag/arch source meshes have open
@@ -42,7 +42,7 @@ boundaries; their diagnostic does not establish watertight transitions.
 
 Retain conventional geometry and discrete LODs. Do not adopt `three-nanite` as a
 runtime dependency. Cluster LOD remains an evaluation candidate, **not a rejected
-technique**: this stage measures preprocessing and sampled cut correctness only.
+technique**: evidence now includes preprocessing, sampled cuts and native/browser asset grids.
 It does not establish an equal-quality gameplay performance advantage or complete
 the requested native/browser benchmark and integration work.
 
@@ -189,3 +189,32 @@ selection or consumer integration is claimed. Low asset density alone is not a
 negative performance result and must not close the larger investigation.
 
 Shared conventions resolved at `15f348b072188255da837578eaafc8a98f12fdf0`.
+
+
+## Completed browser and gameplay measurements
+
+All 48 arch browser runs finished on the RTX 3060 Ti through ANGLE/Vulkan,
+with GPU timers and public Three.js batching. Raw samples are in
+`benchmarks/virtual-geometry/browser-arch-discrete.json.gz`. Interrupted invocations
+were resumed on the same reported environment; loading entries describe only the
+latest page load. GPU variability and differing image errors preclude calling the
+cluster GPU reduction an equal-quality gameplay win.
+
+The real MMORPG native Vale profile passed on checkout
+`65b5b62f802339bd8cfb53ab008608493eb209ee`, using its pinned renderer, not this
+prototype. See `benchmarks/virtual-geometry/mmorpg-vale-native.txt`. The 80-frame run
+excludes its warmup in the summary: GPU median/p95 4.04/4.59 ms, prepare 1.23/1.39 ms,
+encode 0.39/0.58 ms. Its wall frame includes a GPU wait and must not be compared with
+the prototype's CPU submission span. This is a baseline, not a candidate integration.
+
+Reproduce with `MMORPG_PROFILE_VIEW=vale MMORPG_PROFILE_FRAMES=80
+WGPU_ADAPTER_NAME='RTX 3060 Ti' cargo test --release --locked -p mmorpg-client --lib
+outpost_frame_time -- --ignored --nocapture` in the MMORPG checkout.
+
+`virtual-geometry-footprint.py` reports referenced file lengths and logical native
+vertex/index buffer bytes in the adjacent arch/stress footprint JSON files. Those
+are not measurements of RSS, driver residency or compressed HTTP transfers. The
+prototype retains all levels and needs source attributes as well as the reference
+hierarchy. The reports therefore include those extra inputs; no loading or memory
+improvement is claimed. The synthetic source is explicitly a stress control, not
+an unoptimized substitute for a game asset.

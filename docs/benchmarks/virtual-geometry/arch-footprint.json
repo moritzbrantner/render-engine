@@ -1,0 +1,29 @@
+{
+  "asset": "shrine.kit.arch",
+  "metric": "Uncompressed referenced file lengths and logical vertex/index buffer sizes; not RSS, VRAM allocation, compressed HTTP transfer, or measured loading latency",
+  "sourceReferencedFileBytes": 1988767,
+  "sourceAndDiscreteLodsReferencedFileBytes": 2299759,
+  "clusterPrototypeReferencedFileBytes": 2775255,
+  "clusterPrototypeNote": "The experiment also needs source attributes because the reference hierarchy omits tangents/colors and quantizes normals. All hierarchy levels remain resident. Textures are shared.",
+  "logicalNativeSourceGeometryBufferBytes": 1297488,
+  "logicalNativeClusterGeometryBufferBytes": 3013744,
+  "discreteLods": [
+    {
+      "level": 1,
+      "logicalNativeGeometryBufferBytes": 1210044
+    },
+    {
+      "level": 2,
+      "logicalNativeGeometryBufferBytes": 1193568
+    },
+    {
+      "level": 3,
+      "logicalNativeGeometryBufferBytes": 1193664
+    },
+    {
+      "level": 4,
+      "logicalNativeGeometryBufferBytes": 1193664
+    }
+  ],
+  "hierarchyMetadataFileBytes": 10084
+}

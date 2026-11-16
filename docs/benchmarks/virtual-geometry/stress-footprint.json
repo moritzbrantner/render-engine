@@ -1,0 +1,29 @@
+{
+  "asset": "boulder",
+  "metric": "Uncompressed referenced file lengths and logical vertex/index buffer sizes; not RSS, VRAM allocation, compressed HTTP transfer, or measured loading latency",
+  "sourceReferencedFileBytes": 8147219,
+  "sourceAndDiscreteLodsReferencedFileBytes": 10273562,
+  "clusterPrototypeReferencedFileBytes": 19860537,
+  "clusterPrototypeNote": "The experiment also needs source attributes because the reference hierarchy omits tangents/colors and quantizes normals. All hierarchy levels remain resident. Textures are shared.",
+  "logicalNativeSourceGeometryBufferBytes": 11583552,
+  "logicalNativeClusterGeometryBufferBytes": 29505136,
+  "discreteLods": [
+    {
+      "level": 1,
+      "logicalNativeGeometryBufferBytes": 10010688
+    },
+    {
+      "level": 2,
+      "logicalNativeGeometryBufferBytes": 8831040
+    },
+    {
+      "level": 3,
+      "logicalNativeGeometryBufferBytes": 8536128
+    },
+    {
+      "level": 4,
+      "logicalNativeGeometryBufferBytes": 8493432
+    }
+  ],
+  "hierarchyMetadataFileBytes": 157336
+}
