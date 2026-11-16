@@ -3,6 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { trimDiscreteLods } from './trim-virtual-geometry-lods.mjs';
 const [reference, output] = process.argv.slice(2).map(p => path.resolve(p));
 if (!reference || !output) throw new Error('Expected reference and output');
 const { makeSample } = await import(pathToFileURL(path.join(reference, 'examples/make-sample.mjs')));
@@ -45,6 +46,7 @@ for (const [i, lod] of meta.lods.slice(1, 3).entries()) {
   fs.writeFileSync(path.join(sceneDir, filename), Buffer.concat(arrays.map(a => Buffer.from(a.buffer))));
   fs.writeFileSync(path.join(sceneDir, `lod${i + 1}.gltf`), JSON.stringify(g));
 }
+trimDiscreteLods(hierarchy, 'boulder');
 const verification = await verifyClod(hierarchy, 'boulder');
 fs.writeFileSync(path.join(hierarchy, 'verification.json'), JSON.stringify(verification, null, 2));
 if (!verification.ok) process.exitCode = 1;

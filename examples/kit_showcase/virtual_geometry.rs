@@ -48,7 +48,14 @@ fn integers(bytes: &[u8], meta: &Json, name: &str) -> Vec<i32> {
         .collect()
 }
 
-fn load(gpu: &Headless, world: &mut World, kit_path: &Path, hierarchy: &Path, name: &str) -> Asset {
+fn load(
+    gpu: &Headless,
+    world: &mut World,
+    kit_path: &Path,
+    hierarchy: &Path,
+    name: &str,
+    kind: &str,
+) -> Asset {
     let mut textures = Textures::default();
     let mut kit = Kit::open(kit_path.to_owned());
     let source_path = kit.entries.get(name).expect("kit entry").clone();
@@ -60,7 +67,10 @@ fn load(gpu: &Headless, world: &mut World, kit_path: &Path, hierarchy: &Path, na
     );
     let mut lods = Vec::new();
     let mut lod_triangles = Vec::new();
-    for lod in ["lod1", "lod2", "lod3", "lod4"] {
+    for lod in ["lod1", "lod2", "lod3", "lod4"]
+        .into_iter()
+        .filter(|_| matches!(kind, "all" | "discrete"))
+    {
         let path = source_path.with_file_name(format!("{lod}.gltf"));
         if path.exists() {
             let json: Json = serde_json::from_slice(&read(&path)).unwrap();
@@ -84,6 +94,17 @@ fn load(gpu: &Headless, world: &mut World, kit_path: &Path, hierarchy: &Path, na
     let meta: Json =
         serde_json::from_slice(&read(&hierarchy.join(format!("{name}.json")))).unwrap();
     assert_eq!(meta["version"], 3);
+    if matches!(kind, "source" | "discrete") {
+        return Asset {
+            source,
+            lods,
+            lod_triangles,
+            clusters: Vec::new(),
+            groups: Vec::new(),
+            source_triangles: meta["sourceTris"].as_u64().unwrap(),
+            uploaded_bytes: 0,
+        };
+    }
     let bytes = read(&hierarchy.join(format!("{name}.bin")));
     let positions = floats(&bytes, &meta, "positions");
     let normals = section(&bytes, &meta, "normals");
@@ -512,11 +533,12 @@ fn measure(
 }
 
 pub(super) fn run(args: &[String]) {
-    assert_eq!(
-        args.len(),
-        4,
-        "--virtual-geometry KIT HIERARCHY NAME OUTPUT"
+    assert!(
+        matches!(args.len(), 4 | 5),
+        "--virtual-geometry KIT HIERARCHY NAME OUTPUT [source|discrete|cluster]"
     );
+    let kind = args.get(4).map_or("all", String::as_str);
+    assert!(matches!(kind, "all" | "source" | "discrete" | "cluster"));
     let kit = Path::new(&args[0]);
     let hierarchy = Path::new(&args[1]);
     let name = &args[2];
@@ -529,7 +551,48 @@ pub(super) fn run(args: &[String]) {
     );
     println!("adapter: {:?}", gpu.adapter);
     let mut world = World::new(gpu.renderer());
-    let asset = load(&gpu, &mut world, kit, hierarchy, name);
+    let load_start = Instant::now();
+    let asset = load(&gpu, &mut world, kit, hierarchy, name, kind);
+    gpu.queue.submit([]);
+    gpu.device
+        .poll(wgpu::PollType::wait_indefinitely())
+        .unwrap();
+    let load_ms = load_start.elapsed().as_secs_f64() * 1e3;
+    if kind != "all" {
+        use std::io::Write;
+        let mut viewport = Viewport::new(gpu.renderer(), WIDTH, HEIGHT);
+        let (eye, target) = camera(0, 1);
+        let mut scene = daylight(eye, target, 12.0);
+        scene.sky = None;
+        let mut instances = Vec::new();
+        let mode = if kind == "cluster" {
+            Mode::Cluster(2.0)
+        } else {
+            Mode::Source
+        };
+        select(
+            &asset,
+            mode,
+            &[Vec3::ZERO],
+            eye,
+            &mut instances,
+            &mut Vec::new(),
+        );
+        for _ in 0..16 {
+            gpu.render(&mut viewport, &world, &scene, &instances)
+                .unwrap();
+        }
+        let status = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
+        let memory: Vec<_> = status
+            .lines()
+            .filter(|l| l.starts_with("VmRSS:") || l.starts_with("VmHWM:"))
+            .collect();
+        let result = serde_json::json!({"mode":kind,"asset":name,"adapter":format!("{:?}",gpu.adapter),"load_ms":load_ms,"world_upload_bytes":world.work().upload_bytes,"process_memory_kib":memory,"cluster_mesh_upload_bytes":asset.uploaded_bytes,"note":"Fresh process, warm filesystem; load span excludes device setup and the following 16 rendered warm frames. RSS/HWM include allocator and driver state. Discrete retains source and LODs; cluster retains source fallback and all cluster buffers. No streaming or eviction."});
+        println!("VG_LOAD {result}");
+        std::io::stdout().flush().unwrap();
+        std::io::stdin().read_line(&mut String::new()).unwrap();
+        return;
+    }
     let mut modes = vec![Mode::Source];
     modes.extend((0..asset.lods.len()).map(Mode::Lod));
     modes.extend([Mode::Cluster(1.0), Mode::Cluster(2.0), Mode::Cluster(4.0)]);

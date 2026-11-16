@@ -3,7 +3,7 @@
   "metric": "Uncompressed referenced file lengths and logical vertex/index buffer sizes; not RSS, VRAM allocation, compressed HTTP transfer, or measured loading latency",
   "sourceReferencedFileBytes": 8147219,
   "sourceAndDiscreteLodsReferencedFileBytes": 10273562,
-  "clusterPrototypeReferencedFileBytes": 19860537,
+  "clusterPrototypeReferencedFileBytes": 17764075,
   "clusterPrototypeNote": "The experiment also needs source attributes because the reference hierarchy omits tangents/colors and quantizes normals. All hierarchy levels remain resident. Textures are shared.",
   "logicalNativeSourceGeometryBufferBytes": 11583552,
   "logicalNativeClusterGeometryBufferBytes": 29505136,

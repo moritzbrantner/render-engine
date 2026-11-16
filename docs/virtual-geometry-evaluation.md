@@ -258,3 +258,46 @@ Gameplay captures: [MMORPG](benchmarks/virtual-geometry/images/mmorpg-gameplay.p
 [Shooter scripted motion](benchmarks/virtual-geometry/images/shooter-assembly.mp4).
 The clip plays every 30th simulation frame at 0.5-second intervals; it illustrates
 motion, not frame pacing. No candidate gameplay comparison is claimed.
+
+
+## Measured loading and residency
+
+`bench-geometry-loading.py` launches separate native processes for source geometry,
+source plus discrete LODs, and source fallback plus cluster geometry. Each run waits
+for uploads, renders 16 warm frames, then samples Linux RSS/HWM and NVIDIA's
+per-process GPU memory while the child still holds its resources. Three rounds
+alternate order. Filesystem caches are warm; this does not measure cold-boot disk
+access or network throughput. Raw rows: `arch-loading.json`, `stress-loading.json`.
+
+Median local load spans (device creation and warm rendering excluded): the arch
+source/discrete/cluster paths took 53.91/84.69/75.88 ms. The synthetic boulder paths
+took 21.98/79.94/572.78 ms. The cluster path restores missing source attributes and
+uploads every cluster once; that repair cost belongs to this prototype, not to
+cluster LOD as an algorithm. Median boulder process RSS was 317,772/317,928/407,108
+KiB respectively. RSS includes allocator-retained temporary memory and driver state;
+it is not live geometry heap size. Arch RSS varied enough that no memory win is
+claimed. NVIDIA reported 461 MiB per process for every mode, so its process-level
+allocation did not distinguish the mesh buffer differences. Logical buffer sizes
+are separately checked against actual renderer upload counters.
+
+Before the final dense loading run, `trim-virtual-geometry-lods.mjs` removed the
+reference builder's appended discrete-LOD payload from the cluster binary. The
+standalone conventional files remain. Repeating the trim is a no-op, including
+file mtimes; logical cluster GPU buffer bytes and the closed-cut diagnostic remain
+unchanged. The corrected cluster prototype's referenced-file total is 17,764,075
+bytes versus 10,273,562 for source plus conventional LODs. These are file lengths,
+not a measured compressed HTTP download. The earlier frame timing compares the same
+rendered cluster geometry and excludes loading, so it is not invalidated by trimming
+unused file payload.
+
+Reproduce after the existing kit/hierarchy preparation and release build:
+
+```sh
+python3 scripts/bench-geometry-loading.py target/release/examples/kit_showcase target/virtual-geometry/inputs/arch-discrete target/virtual-geometry/shrine/shrine.kit.arch shrine.kit.arch target/virtual-geometry/arch-loading.json
+bun scripts/trim-virtual-geometry-lods.mjs target/virtual-geometry/stress/boulder boulder
+python3 scripts/bench-geometry-loading.py target/release/examples/kit_showcase target/virtual-geometry/inputs/stress-discrete target/virtual-geometry/stress/boulder boulder target/virtual-geometry/stress-loading.json
+```
+
+No streaming or eviction is implemented by this prototype; assets stay resident
+until their `World` is dropped. These measurements do not support adopting it for
+loading or CPU-memory efficiency.
