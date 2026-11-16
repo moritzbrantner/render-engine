@@ -191,6 +191,43 @@ with upstream's WASM dependency; they are not Rust release-build runtime timings
 Cut statistics use original asset size, 1080p, 60-degree vertical FOV and the
 reference's fixed diagonal distance samples; these are not a gameplay camera path.
 
+## Runtime reproduction commands
+
+After preparing the crag hierarchy above, run the native and browser adapters
+serially; parallel GPU workloads would contaminate the timing:
+
+```sh
+cargo build --release --locked --example kit_showcase
+WGPU_ADAPTER_NAME='RTX 3060 Ti' target/release/examples/kit_showcase --virtual-geometry target/virtual-geometry/inputs/crag target/virtual-geometry/crag/crag.kit.outcrop-buttress-1 crag.kit.outcrop-buttress-1 target/virtual-geometry/reproduce-crag
+bun scripts/virtual-geometry-stress.mjs /tmp/render-engine-three-nanite target/virtual-geometry
+# LOD_CHAIN_BINARY is the existing 3d-lab asset-tooling-lod-adapter lod_chain binary.
+python3 scripts/bench-discrete-lods.py "$LOD_CHAIN_BINARY" target/virtual-geometry/inputs/stress/scenes/boulder/default.gltf target/virtual-geometry/inputs/stress-discrete
+WGPU_ADAPTER_NAME='RTX 3060 Ti' target/release/examples/kit_showcase --virtual-geometry target/virtual-geometry/inputs/stress-discrete target/virtual-geometry/stress/boulder boulder target/virtual-geometry/reproduce-stress
+bun install
+mkdir -p target/virtual-geometry/basis
+cp node_modules/three/examples/jsm/libs/basis/basis_transcoder.* target/virtual-geometry/basis/
+# In a separate terminal, serve the repository root for actual browser asset loading:
+python3 -m http.server 8000 --bind 127.0.0.1
+# In the benchmark terminal:
+node oracle/virtual-geometry/run.mjs http://127.0.0.1:8000 crag crag.kit.outcrop-buttress-1 target/virtual-geometry/reproduce-browser
+```
+
+Build `lod_chain` with `cargo build --release --manifest-path
+examples/asset-tooling-lod-adapter/Cargo.toml --bin lod_chain` in a disposable
+3d-lab checkout at the recorded revision. The checked-in lockfile did not build
+unchanged in this environment; the measured temporary runner lockfile is identified
+by hash, but was not retained. Its exact dependency resolution cannot be recovered
+from that hash alone. Preserve the new lockfile and observations when rerunning;
+compare dependency versions and geometry outputs rather than claiming bit-for-bit
+reproduction of that temporary executable.
+
+The exact disposable MMORPG profiler changes are retained in
+[the profiler patch](benchmarks/virtual-geometry/mmorpg-browser-profiler.patch).
+Apply it to a disposable copy at the recorded consumer revision, update its two
+absolute workspace paths, and run its existing Python environment with
+`--seconds 2 --no-sweep --out OUTPUT_JSON`. This preserves the hardware flags,
+deadlines and omitted input-acceptance journeys used for the recorded baseline.
+
 ## Adoption boundary
 
 The current prototype does not meet the adoption criterion. Retain conventional
