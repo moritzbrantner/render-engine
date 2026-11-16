@@ -1,0 +1,34 @@
+{
+  "frames": 120,
+  "map": "assembly-works",
+  "width": 1280,
+  "height": 720,
+  "seconds": 4.976,
+  "workMs": {
+    "mean": 3.269,
+    "p50": 1.3,
+    "p95": 2.3,
+    "max": 221.5
+  },
+  "intervalMs": {
+    "mean": 41.817,
+    "p50": 16.7,
+    "p95": 16.8,
+    "max": 2783.2
+  },
+  "adapter": {
+    "vendor": "nvidia",
+    "architecture": "ampere",
+    "device": "",
+    "description": ""
+  },
+  "console": [
+    "robot kits: 28 entries, 12 textures decoded in 99 ms",
+    "robot kits: 32 entries, 4 textures decoded in 43 ms",
+    "profile frame 30 of 120 at 3.5 s",
+    "profile frame 60 of 120 at 4.0 s",
+    "profile frame 90 of 120 at 4.5 s",
+    "profile frame 120 of 120 at 5.0 s",
+    "shooterProfile {\"frames\":120,\"map\":\"assembly-works\",\"width\":1280,\"height\":720,\"seconds\":4.976,\"workMs\":{\"mean\":3.269,\"p50\":1.300,\"p95\":2.300,\"max\":221.500},\"intervalMs\":{\"mean\":41.817,\"p50\":16.700,\"p95\":16.800,\"max\":2783.200}}"
+  ]
+}

@@ -218,3 +218,43 @@ prototype retains all levels and needs source attributes as well as the referenc
 hierarchy. The reports therefore include those extra inputs; no loading or memory
 improvement is claimed. The synthetic source is explicitly a stress control, not
 an unoptimized substitute for a game asset.
+
+
+## Gameplay baseline evidence
+
+The completed MMORPG browser profile is
+`benchmarks/virtual-geometry/mmorpg-browser-profile.json.gz`. The game page reported
+NVIDIA RTX 3060 Ti through ANGLE/Vulkan, 1440×900, with no page errors. Idle CPU frame
+median/p95 was 19.5/21.4 ms; the overview was 13.8/16.1 ms. GPU timer sample counts
+were zero, so browser gameplay GPU time is unavailable. Submitted work includes
+all views: the overview recorded about 18,669 draws and 8.36 million triangles per
+frame. These are profiling-baseline counters, not evidence that more detailed
+geometry is free or that cluster rendering improves this game.
+
+The disposable profiler copy used ordinary button entry, omitted unrelated keyboard
+latency journeys, added frame-wait deadlines and longer startup/action deadlines,
+and selected ANGLE/Vulkan. The original profiler's OpenGL launch configuration
+selected SwiftShader in a matching environment probe. Its incomplete software runs
+were discarded. No game source or production configuration changed. The existing
+`web/dist` artifact is identified by its index hash in the saved report; it is not
+claimed to be rebuilt from the current checkout.
+
+Shooter's actual Assembly Works arena completed 300 native scripted frames on the
+RTX 3060 Ti: wall step median/p95 1.63/1.87 ms, including the first frame (no warmup
+exclusion). This is not an isolated GPU time. See
+`benchmarks/virtual-geometry/shooter-assembly-native.txt`. The existing browser build
+also completed its 120-frame Assembly Works journey on an NVIDIA Ampere WebGPU
+adapter, with no logged errors: `shooter-assembly-browser.json`. Its reported work
+median/p95 is 1.3/2.3 ms; startup frames remain in that distribution. These are
+baselines, not equal-quality virtual-geometry A/B results.
+
+Shooter used checkout `eacb061cab622a32ea86120a3b4d68dbad8efbbf`. Its rolling robot
+release no longer matches the pin, but all four cached `web/dist/*-kit/kit.tar`
+files and their manifests matched the existing consumer pins and were unpacked
+into ignored native target directories. No pins were changed.
+
+Gameplay captures: [MMORPG](benchmarks/virtual-geometry/images/mmorpg-gameplay.png),
+[Shooter](benchmarks/virtual-geometry/images/shooter-assembly.png),
+[Shooter scripted motion](benchmarks/virtual-geometry/images/shooter-assembly.mp4).
+The clip plays every 30th simulation frame at 0.5-second intervals; it illustrates
+motion, not frame pacing. No candidate gameplay comparison is claimed.
