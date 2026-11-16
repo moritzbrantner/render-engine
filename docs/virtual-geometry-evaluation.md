@@ -1,6 +1,6 @@
 # Virtual geometry evaluation (#119)
 
-## Runtime experiment in progress
+## Runtime evaluation
 
 The native comparison also covers all five eligible crag outcrop assets at their
 actual Greyhaven dressing placements, rotations and nonuniform scales, following
@@ -51,7 +51,7 @@ RMSE is an image difference diagnostic, not a perceptual acceptance threshold.
 Do not add CPU and GPU spans and call that end-to-end gameplay latency.
 
 These comparisons favor conventional LODs for the tested candidates. Actual gameplay
-candidate comparisons, measured residency and multi-material evaluation remain unfinished;
+full-frame candidate integration and multi-material validation were not established;
 they must not be inferred from these grids. No consumer adoption is justified yet.
 The independent `verify-cut-boundaries.mjs` diagnostic found every sampled synthetic
 boulder cut closed after positional welding. Crag/arch source meshes have open
@@ -93,7 +93,7 @@ Inspected open work on 2026-11-16: render-engine #116 (WebGPU small-upload failu
 landmarks), MMORPG #683 (art/collision separation), Shooter #53/#55/#60 (arenas and
 destruction), PR #84 (robots), PR #98 (CI). None of the listed PRs implements cluster
 LOD. Preserve their scope; robot articulation and destruction are outside this
-static-mesh experiment. Zoo was not audited and has no justified integration here.
+static-mesh experiment. Zoo’s architecture and open performance work (#123) were inspected: primitive batching is established, and no dense-static-geometry bottleneck was demonstrated. No Zoo integration is justified here.
 
 ## Reference findings
 
@@ -190,22 +190,23 @@ with upstream's WASM dependency; they are not Rust release-build runtime timings
 Cut statistics use original asset size, 1080p, 60-degree vertical FOV and the
 reference's fixed diagonal distance samples; these are not a gameplay camera path.
 
-## Remaining evaluation before implementation
+## Adoption boundary
 
-Issue #119 remains open. No useful runtime advantage has yet been established.
-Next: compare actual Greyhaven camera paths using existing discrete LODs against a
-development-only cluster path with equal materials and independent shadow-view cuts.
-Measure warmed release CPU/GPU median/p95, draw ranges/submissions, rendered triangles,
-CPU/GPU residency, cold/warm loading and bytes. Preserve screenshots and moving-camera
-evidence of transitions, shadows and material quality. Add architectural modules,
-caves and bounded dense stress scenes only using actual appropriate source assets.
+The current prototype does not meet the adoption criterion. Retain conventional
+rendering and discrete LODs for the evaluated games. Do not build GPU selection,
+streaming/eviction or another HZB implementation merely to complete a feature list.
+A future candidate needs a representative dense consumer workload, complete
+material attributes and per-view shadow acceptance, and an equal-quality whole-game
+comparison before it can replace any production path. See the technical decision
+in [ADR 0001](adr/0001-virtual-geometry-evaluation.md).
 
-This machine exposes an RTX 3060 Ti (8 GiB, driver 595.99.02); **no GPU timing was
-performed in this stage**. Its desktop and Blender were active, so even later GPU
-measurements must record contention. Integrated/mobile hardware is unmeasured.
-No native/browser gameplay, screenshot comparison, geometry streaming, GPU-driven
-selection or consumer integration is claimed. Low asset density alone is not a
-negative performance result and must not close the larger investigation.
+This machine exposes only the RTX 3060 Ti graphics adapter. Integrated and mobile
+hardware were unavailable; no hardware claim is made for them. Whole-game candidate
+integration, arbitrary multi-material assets, crack-free transitions for open meshes,
+GPU selection and geometry streaming are not validated. The supplied whole-game
+captures/profile runs are conventional-renderer baselines. These limits are reasons
+to withhold adoption, not successful feature checks or proof that all future cluster
+implementations would lose.
 
 Shared conventions resolved at `15f348b072188255da837578eaafc8a98f12fdf0`.
 
@@ -320,3 +321,49 @@ python3 scripts/bench-geometry-loading.py target/release/examples/kit_showcase t
 No streaming or eviction is implemented by this prototype; assets stay resident
 until their `World` is dropped. These measurements do not support adopting it for
 loading or CPU-memory efficiency.
+
+
+## Browser real-placement cut comparison
+
+`benchmarks/virtual-geometry/greyhaven-browser-buttress.json.gz` contains 12 warmed
+runs over the same three real placements and 240 camera frames used by native.
+The page reported RTX 3060 Ti through ANGLE/Vulkan. Round-1 source/1 px cluster GPU
+medians were 0.531/0.390 ms; CPU medians both rounded to 0.1 ms, with p95 0.1/0.2 ms.
+Fixed LOD2 was cheaper on the GPU (0.343 ms), but has a different geometric error;
+none of these values establishes an equal-quality whole-game frame improvement.
+The browser source uses InstancedMesh; clusters use public BatchedMesh with per-view
+cluster frustum culling. That difference is part of the compared mechanics, not a
+claim that all production instance-culling policies are equivalent.
+
+Reproduce by setting `VG_SCENE_URL=/target/virtual-geometry/greyhaven-buttress-scene.json`
+on `node oracle/virtual-geometry/run.mjs ORIGIN crag crag.kit.outcrop-buttress-1 OUTPUT`.
+The runner rejects resumed samples with a different scene or reported environment.
+
+Inspect source/candidate captures directly:
+[Greyhaven source](benchmarks/virtual-geometry/images/greyhaven-source.png),
+[Greyhaven 1 px clusters](benchmarks/virtual-geometry/images/greyhaven-cluster-1px.png),
+[arch source](benchmarks/virtual-geometry/images/arch-source.png),
+[arch discrete LOD2](benchmarks/virtual-geometry/images/arch-discrete-lod2.png),
+[arch 1 px clusters](benchmarks/virtual-geometry/images/arch-cluster-1px.png).
+These scenery-subset images contain no terrain or units; the separately linked
+actual gameplay captures are baselines.
+
+
+## Actual HTTP payload comparison
+
+`bench-geometry-transfer.py` fetched each compared artifact set over loopback HTTP
+with no HTTP client cache, three alternating rounds. The response bodies used
+identity content encoding. Raw per-file byte counts and serial fetch durations are
+in `arch-transfer.json` and `stress-transfer.json`. Measured payload bytes equal the
+referenced file totals: arch source/discrete/cluster 1,988,767/2,299,759/2,775,255;
+dense control 8,147,219/10,273,562/17,764,075. This tests actual transferred bodies,
+not WAN latency, gzip/Brotli size or mobile startup. Local fetch durations are
+recorded separately from the native decode/upload spans and must not be presented
+as end-to-end browser loading time.
+
+Example: `python3 scripts/bench-geometry-transfer.py ORIGIN
+target/virtual-geometry/inputs/arch-discrete
+target/virtual-geometry/shrine/shrine.kit.arch shrine.kit.arch
+OUTPUT_JSON`, with the repository-root server at `ORIGIN`.
+
+The five crag scene JSON files and every referenced buffer/texture were compared directly with the consumer’s current local crag payload and match. Integrated/mobile hardware follow-up: [#121](https://github.com/moritzbrantner/render-engine/issues/121).

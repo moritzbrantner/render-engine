@@ -15,14 +15,17 @@ const browser = await chromium.launch({ headless: true, args: ['--enable-gpu', '
 try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   page.on('pageerror', e => console.error(e));
-  await page.goto(`${origin}/oracle/virtual-geometry/?kit=${encodeURIComponent(kit)}&asset=${encodeURIComponent(asset)}&hierarchy=${encodeURIComponent(hierarchy)}`);
-  await page.waitForFunction(() => window.vgReady, { timeout: 120000 });
+  await page.goto(`${origin}/oracle/virtual-geometry/?kit=${encodeURIComponent(kit)}&asset=${encodeURIComponent(asset)}&hierarchy=${encodeURIComponent(hierarchy)}${process.env.VG_SCENE_URL ? `&scene=${encodeURIComponent(process.env.VG_SCENE_URL)}` : ''}`);
+  await page.waitForFunction(() => window.vgReady, null, { timeout: 120000 });
   const environment = await page.evaluate(() => window.vg.environment);
   console.log(environment);
   if (previous && JSON.stringify(previous.environment) !== JSON.stringify(environment)) throw new Error('Incomparable browser environment; choose a new output directory');
   const completed = previous?.rows.slice() || [];
   const modes = await page.evaluate(() => window.vg.modes);
-  for (const count of [1, 64, 256]) {
+  const scene = await page.evaluate(() => window.vg.sceneInput);
+  if (previous && JSON.stringify(previous.scene || null) !== JSON.stringify(scene)) throw new Error('Incomparable scene input; choose a new output directory');
+  const counts = await page.evaluate(() => window.vg.counts);
+  for (const count of counts) {
     for (let round = 0; round < 2; round++) {
       const order = round ? modes.slice().reverse() : modes;
       for (const mode of order) {

@@ -6,6 +6,8 @@ import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
 const q = new URLSearchParams(location.search);
 const name = q.get('asset') || 'crag.kit.outcrop-buttress-1';
 const kit = q.get('kit') || 'crag';
+const sceneInput = q.get('scene') ? await fetch(q.get('scene')).then(r => { if (!r.ok) throw new Error('Scene unavailable'); return r.json(); }) : null;
+if (sceneInput && sceneInput.asset !== name) throw new Error('Scene asset mismatch');
 const root = `/target/virtual-geometry/inputs/${kit}/scenes/${name}/`;
 const hierarchy = `/target/virtual-geometry/${q.get('hierarchy') || kit}/${name}/`;
 const renderer = new T.WebGLRenderer({ canvas: document.querySelector('canvas'), antialias: true, preserveDrawingBuffer: true });
@@ -94,7 +96,8 @@ let active;
 function setup(mode, count) {
   if (active) { scene.remove(active); active.dispose(); }
   const side = Math.ceil(Math.sqrt(count));
-  const matrices = Array.from({ length: count }, (_, i) => new T.Matrix4().makeTranslation((i % side - (side - 1) / 2) * 16, 0, (Math.floor(i / side) - (side - 1) / 2) * 16));
+  const matrices = sceneInput ? sceneInput.transforms.map(values => new T.Matrix4().fromArray(Array.from(new Float32Array(values)))) : Array.from({ length: count }, (_, i) => new T.Matrix4().makeTranslation((i % side - (side - 1) / 2) * 16, 0, (Math.floor(i / side) - (side - 1) / 2) * 16));
+  if (matrices.length !== count) throw new Error('Scene placement count mismatch');
   const cluster = mode.startsWith('cluster');
   let ids;
   if (cluster) {
@@ -117,15 +120,20 @@ function setup(mode, count) {
 function select(state, frame) {
   const a = frame * Math.PI * 2 / 240, radius = Math.sqrt(state.count) * 9 + 15;
   camera.position.set(Math.sin(a) * radius, 18, Math.cos(a) * radius); camera.lookAt(0, 3, 0); camera.updateMatrixWorld();
+  if (sceneInput) {
+    const pose = sceneInput.frames[frame % sceneInput.frames.length];
+    camera.position.fromArray(pose.eye); camera.lookAt(new T.Vector3().fromArray(pose.target)); camera.updateMatrixWorld();
+  }
   if (!state.ids) return;
   const errorPx = Number(state.mode.split('-')[1]);
   const K = 720 / (2 * Math.tan(50 * Math.PI / 360));
-  const errors = new Float64Array(meta.groups), local = new T.Vector3(), translation = new T.Vector3();
+  const errors = new Float64Array(meta.groups), center = new T.Vector3();
   state.matrices.forEach((matrix, i) => {
-    translation.setFromMatrixPosition(matrix); local.copy(camera.position).sub(translation);
+    const scale = matrix.getMaxScaleOnAxis();
     for (let g = 0; g < meta.groups; g++) {
-      const o = g * 5, d = Math.hypot(gf[o] - local.x, gf[o + 1] - local.y, gf[o + 2] - local.z) - gf[o + 3];
-      errors[g] = d <= 1e-6 ? Infinity : gf[o + 4] * K / d;
+      const o = g * 5; center.set(gf[o], gf[o + 1], gf[o + 2]).applyMatrix4(matrix);
+      const d = center.distanceTo(camera.position) - gf[o + 3] * scale;
+      errors[g] = d <= 1e-6 ? Infinity : gf[o + 4] * scale * K / d;
     }
     for (let c = 0; c < meta.clusters; c++) {
       const producer = cu[c * 4 + 2];
@@ -162,8 +170,8 @@ async function bench({ mode = 'cluster-2', count = 64, round = 0 } = {}) {
   rows.push(row); document.querySelector('#status').textContent = JSON.stringify({ environment, asset: name, mode, count, cpu: row.cpu_ms, gpu: row.gpu_ms }, null, 2);
   return { ...row, raw: undefined };
 }
-window.vg = { environment, bench, modes: ['source', ...lods.map((_, i) => `lod${i + 1}`), 'cluster-1', 'cluster-2', 'cluster-4'],
-  report: () => ({ environment, asset: name, load_ms: loadMs, loading: 'Local HTTP, mixed asset/hierarchy/LOD loading and transcode; not comparable cold download', resources: performance.getEntriesByType('resource').map(r => ({ name: r.name, transferSize: r.transferSize, encodedBodySize: r.encodedBodySize, duration: r.duration })), rows }),
+window.vg = { environment, sceneInput, bench, counts: sceneInput ? [sceneInput.transforms.length] : [1, 64, 256], modes: ['source', ...lods.map((_, i) => `lod${i + 1}`), 'cluster-1', 'cluster-2', 'cluster-4'],
+  report: () => ({ environment, asset: name, scene: sceneInput, load_ms: loadMs, loading: 'Local HTTP, mixed asset/hierarchy/LOD loading and transcode; not comparable cold download', resources: performance.getEntriesByType('resource').map(r => ({ name: r.name, transferSize: r.transferSize, encodedBodySize: r.encodedBodySize, duration: r.duration })), rows }),
   capture: (mode, count = 64, frame = 0) => { const state = setup(mode, count); select(state, frame); renderer.render(scene, camera); return renderer.domElement.toDataURL('image/png'); } };
 document.querySelector('#status').textContent = JSON.stringify({ environment, asset: name, ready: true }, null, 2);
 window.vgReady = true;
