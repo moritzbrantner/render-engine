@@ -101,7 +101,8 @@ ported by hand (the D8 rule), and its CPU cost is three.js's, not measured here.
 
 ## Comparison
 
-Headless Chromium 159 on this machine (no hardware GPU: llvmpipe/lavapipe, WSL2), 2026-11-20.
+Headless Chromium 159 and Firefox 159 on this machine (no hardware GPU: llvmpipe/lavapipe, WSL2),
+2026-11-20.
 Bevy, native render-engine and the oracle's three.js frame come from the oracle
 (`--only sun_shadows --only textured_props`, lavapipe). FLIP mean / p99, D3's gates 0.005 / 0.05.
 
@@ -109,6 +110,11 @@ Bevy, native render-engine and the oracle's three.js frame come from the oracle
 | --- | --- | --- | --- | --- | --- |
 | `sun_shadows` | 0.0000 / 0.0000 | 0.0000 / 0.0000 | 0.0243 / 0.0493 | 0.0000 / 0.0000 (14) | 0.0000 / 0.0000 |
 | `textured_props` | 0.0000 / 0.0006 | 0.0000 / 0.0005 | not run (glTF from disk) | 0.0000 / 0.0002 (96) | 0.0000 / 0.0005 |
+
+Playwright's Firefox 159 gives the same WebGL 2 numbers (its WebGL 2 is also on llvmpipe), and its
+WebGPU (behind `dom.webgpu.enabled`; wgpu on the same llvmpipe Vulkan driver) renders
+`sun_shadows` byte-identically to native render-engine: 0 differing pixels, FLIP 0.0000 / 0.0000
+against Bevy.
 
 The WebGL 2 frames ran through ANGLE on llvmpipe (OpenGL ES); the oracle's three.js side uses
 ANGLE on Vulkan, hence the few differing pixels. The browser's WebGPU column is the software
@@ -129,7 +135,11 @@ same WebGL 2 page rendered through ANGLE on SwiftShader is identical to that Web
   `sun_shadows`; `textured_props` fails to initialise in wasm and falls back), with WebGPU off
   (WebGL 2 renders both) and with WebGPU and WebGL off (the error on the page), then
   `compare select` fails if a WebGL 2 frame is outside D3's gates against Bevy. `SKIP_WEBGPU=1`
-  skips the WebGPU cases.
+  skips the WebGPU cases, `SMOKE_BROWSER=firefox` runs Firefox (the switches become prefs).
+- `scripts/browser-hardware.sh` (local, for a machine with a hardware GPU): the oracle on the GPU,
+  the WebGPU smoke against native and Bevy in Chromium and Firefox, the backend selection and the
+  fallback's frames in both, and browser GPU and CPU time against native, into
+  `target/browser-hardware/report.md`. A failed step is recorded and the run goes on.
 - The fallback's rendering of every lighting scenario is already gated on CI by the oracle's
   three.js side.
 
@@ -140,8 +150,9 @@ bash scripts/browser-backends.sh
 
 ## Not verified
 
-- Firefox, Safari, Chrome on a real window, mobile browsers and any hardware GPU: everything here
-  ran in the Playwright headless shell on software adapters.
+- Safari, Chrome or Firefox on a real window, mobile browsers and any hardware GPU: everything here
+  ran headless in Playwright's Chromium and Firefox on software adapters
+  (`scripts/browser-hardware.sh` is the run that covers the hardware GPU).
 - A real consumer: the mmorpg web client stays on three.js (mmorpg#80) and has no WebGPU build
   to fall back from; there is no consumer-facing wasm build (D10, #75's prototype scope).
 - WebGL context loss and WebGPU device loss after start, and WebGL 1.

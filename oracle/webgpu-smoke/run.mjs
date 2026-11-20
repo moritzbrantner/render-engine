@@ -7,13 +7,13 @@
 // .png) and .json, where tag is webgpu (render), select.<backend> (select: select.webgpu,
 // select.webgl2 or select.null when neither started) or the mode. Set SMOKE_FALLBACK=1 for Chromium's software
 // adapter (SwiftShader), SMOKE_DEV=1 for --enable-webgpu-developer-features (unquantised
-// timestamps; measurement only).
+// timestamps; measurement only), SMOKE_BROWSER=firefox for Playwright's Firefox.
 
 import { createServer } from 'node:http';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright';
+import { chromium, firefox } from 'playwright';
 
 // The repository root, so the `select` mode can load packages/three-lighting, three.js and the
 // oracle's three.js scene; /out/ is the output directory (the scenario exports it reads).
@@ -58,7 +58,18 @@ const args =
 if (process.env.SMOKE_WEBGL === '0') args.push('--disable-webgl');
 if (process.env.SMOKE_FALLBACK === '1') args.push('--use-webgpu-adapter=swiftshader');
 if (process.env.SMOKE_DEV === '1') args.push('--enable-webgpu-developer-features');
-const browser = await chromium.launch({ headless: true, args });
+// SMOKE_BROWSER=firefox: Playwright's Firefox, the same switches as prefs (WebGPU is behind
+// `dom.webgpu.enabled` there; the Chromium-only switches do not apply).
+const browser =
+  process.env.SMOKE_BROWSER === 'firefox'
+    ? await firefox.launch({
+        headless: true,
+        firefoxUserPrefs: {
+          'dom.webgpu.enabled': process.env.SMOKE_WEBGPU !== '0',
+          ...(process.env.SMOKE_WEBGL === '0' ? { 'webgl.disabled': true } : {}),
+        },
+      })
+    : await chromium.launch({ headless: true, args });
 const page = await browser.newPage();
 const logs = [];
 page.on('console', (m) => logs.push(`${m.type()}: ${m.text()}`));
