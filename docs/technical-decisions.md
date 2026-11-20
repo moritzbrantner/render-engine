@@ -258,7 +258,8 @@ port** of the lighting, using three.js built-ins where they pass the gate and cu
 chunks where they don't. Each web scenario is checked against the **same Bevy oracle
 scenarios** through a headless Chromium side with the same FLIP thresholds (D3); GPU time is
 advisory there. Option A (render-engine compiled to WASM/WebGPU) was held back at the time for
-particles only, if three.js GPU particles could not meet the gate. D10 widens that: the browser
+particles only, if three.js GPU particles could not meet the gate (a CPU-simulated three.js
+side now meets it, #126). D10 widens that: the browser
 is now a target of the crate itself; a smoke build ran the oracle's fixtures in Chromium WebGPU
 ([assessment](webgpu-browser-assessment.md), #75), but no consumer-facing WASM build exists, and
 the three.js port stays the web client's path unless a WebGPU build passes D10's adoption gate.
@@ -571,6 +572,16 @@ Each capture is judged by one of two tiers:
   encoder (`bevy_side::HanabiTimer`, found by system name, which needs Bevy's `debug`
   feature); Bevy submits the encoders in system order. Rounds alternate as for lighting, each
   side keeping its fastest, and the local gate applies as for lighting.
+- **Web (three.js) side** (#126). `packages/three-lighting/particles.js` runs render-engine's
+  emitters on WebGL 2 for the WebGL 2 fallback: a CPU simulation that replays the engine's GPU
+  one (the spawner, the seed chain with its ChaCha12 `StdRng`, `pcg_hash` streams, the dead-slot
+  stack and the init and update passes, pinned to each other by test vectors on both sides) and
+  instanced quads in `Lighting`'s HDR pass. The oracle exports each `Reference::Hanabi` scenario
+  with the engine's own emitter descriptions (`three_side::export_particles`), drives them as it
+  drives render-engine, and judges them by the same tiers and counts. Every hanabi scenario
+  passes; lit, fogged and soft particles are not ported ([#130](https://github.com/moritzbrantner/render-engine/issues/130)).
+  Its update runs in alive-list order, one valid order of the engine's atomics, so with the
+  engine and Bevy recycling slots in the same order (above) its late captures match too.
 
 ## D10 — Direction: a Rust-first wgpu/WebGPU renderer, adopted on evidence
 

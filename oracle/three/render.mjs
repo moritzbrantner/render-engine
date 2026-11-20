@@ -1,6 +1,7 @@
 // The oracle's three.js side: renders exported scenarios (`<name>.three.json` + `.three.bin`)
-// with packages/three-lighting in headless Chromium and writes `<name>.three.png` (and
-// `<name>.three.err` on failure).
+// with packages/three-lighting in headless Chromium and writes `<name>.three.png` (a particle
+// scenario: `<name>.plate.three.png` and `<name>.<capture>.three.png`, its counts in
+// `<name>.three.meta.json`), or `<name>.three.err` on failure.
 //
 //   node oracle/three/render.mjs <out dir> <scenario>...
 //
@@ -76,10 +77,17 @@ for (const name of names) {
     const frames = Number(process.env.THREE_FRAMES ?? 0);
     await page.goto(`${origin}/oracle/three/index.html?scene=${encodeURIComponent(`/out/${name}`)}&frames=${frames}`);
     const result = await page.waitForFunction(() => window.oracleResult, null, { timeout: Number(process.env.THREE_TIMEOUT_MS ?? 600_000) });
-    const { png, error, renderer, gpuMs } = await result.jsonValue();
+    const { png, error, renderer, gpuMs, plate, captures, spawnCounts, alive } = await result.jsonValue();
     if (error) throw new Error(error);
-    await writeFile(join(out, `${name}.three.png`), Buffer.from(png, 'base64'));
-    await writeFile(join(out, `${name}.three.meta.json`), JSON.stringify({ renderer, gpuMs }));
+    if (captures) {
+      // A particle scenario: the plate, each capture, and the spawn and alive counts per frame.
+      await writeFile(join(out, `${name}.plate.three.png`), Buffer.from(plate, 'base64'));
+      for (const c of captures) await writeFile(join(out, `${name}.${c.label}.three.png`), Buffer.from(c.png, 'base64'));
+      await writeFile(join(out, `${name}.three.meta.json`), JSON.stringify({ renderer, spawnCounts, alive }));
+    } else {
+      await writeFile(join(out, `${name}.three.png`), Buffer.from(png, 'base64'));
+      await writeFile(join(out, `${name}.three.meta.json`), JSON.stringify({ renderer, gpuMs }));
+    }
     console.log(`three: ${name} rendered (${renderer})`);
     if (process.env.THREE_DEBUG === '1') console.log(logs.join('\n'));
   } catch (e) {
