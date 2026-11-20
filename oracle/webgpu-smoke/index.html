@@ -3,8 +3,17 @@
   <head>
     <meta charset="utf-8" />
     <title>render-engine: WebGPU smoke</title>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "/node_modules/three/build/three.module.js",
+          "three/addons/": "/node_modules/three/examples/jsm/"
+        }
+      }
+    </script>
   </head>
   <body>
+    <p id="status" role="status"></p>
     <canvas id="surface"></canvas>
     <script type="module" src="./main.js"></script>
   </body>

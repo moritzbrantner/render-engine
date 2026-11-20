@@ -16,11 +16,13 @@ gltf = "1.4.1"
 bytemuck = "1.25.2"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+# wgpu's WebGL 2 backend on top of the engine's default features (the fallback probe).
+wgpu = { version = "30.0.1", features = ["webgl"] }
 # Keep in step with wgpu's: the wasm-bindgen CLI must match this version exactly.
 wasm-bindgen = "=0.2.130"
 wasm-bindgen-futures = "0.4.80"
 js-sys = "0.3.107"
-web-sys = { version = "0.3.107", features = ["HtmlCanvasElement", "Performance", "Window"] }
+web-sys = { version = "0.3.107", features = ["console", "HtmlCanvasElement", "Performance", "Window"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # The image comparison and the native baseline (`src/bin/compare.rs`).

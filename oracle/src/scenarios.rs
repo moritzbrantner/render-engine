@@ -129,7 +129,7 @@ pub fn all() -> Vec<Scenario> {
 /// the cluster lists differ across the screen and through the depth slices and many lights end
 /// in plain view.
 fn many_lights() -> Scenario {
-    let mut s = crate::forward_plus_bench::dungeon("many_lights", 64, 4, 1280, 720);
+    let mut s = crate::forward_plus_scenes::dungeon("many_lights", 64, 4, 1280, 720);
     s.capability = "64 point + spot lights, clustered assignment (Forward+)";
     s
 }

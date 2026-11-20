@@ -7,6 +7,9 @@
 #[path = "../../src/content.rs"]
 mod content;
 #[allow(dead_code)]
+#[path = "../../src/forward_plus_scenes.rs"]
+mod forward_plus_scenes;
+#[allow(dead_code)]
 #[path = "../../src/particles.rs"]
 mod particles;
 #[allow(dead_code)]
@@ -62,6 +65,150 @@ fn median(mut v: Vec<f64>) -> f64 {
     v[v.len() / 2]
 }
 
+/// wgpu reports validation errors by panicking; without this the page only sees `unreachable`.
+fn panic_to_console() {
+    std::panic::set_hook(Box::new(|info| {
+        web_sys::console::error_1(&JsValue::from_str(&info.to_string()))
+    }));
+}
+
+/// Appends to `globalThis.probeLog`: a GL call can abort the module (the multisampled depth
+/// texture), and then only the page still has what the probe found.
+fn page_log(line: &str) {
+    if let Ok(list) = js_sys::Reflect::get(&js_sys::global(), &"probeLog".into())
+        && let Some(list) = list.dyn_ref::<js_sys::Array>()
+    {
+        list.push(&JsValue::from_str(line));
+    }
+}
+
+fn set(o: &js_sys::Object, key: &str, value: impl Into<JsValue>) {
+    js_sys::Reflect::set(o, &key.into(), &value.into()).expect("plain object");
+}
+
+/// The WebGL 2 feasibility probe of `docs/webgl2-fallback.md`: wgpu's GL backend on `canvas`,
+/// its adapter's downlevel flags and limits, then `Renderer::new` and one `sun_shadows` frame
+/// with every validation error collected instead of panicking on the first (also into the page's
+/// `probeLog`). Returns `{adapter, missingDownlevel, limits, errors}` if the frame completes.
+#[wasm_bindgen]
+pub async fn probe_webgl2(canvas: web_sys::HtmlCanvasElement) -> Result<js_sys::Object, JsValue> {
+    panic_to_console();
+    let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+    descriptor.backends = wgpu::Backends::GL;
+    let instance = wgpu::Instance::new(descriptor);
+    // A WebGL 2 adapter comes from a canvas's context.
+    let surface = instance
+        .create_surface(wgpu::SurfaceTarget::Canvas(canvas))
+        .map_err(err)?;
+    let adapter = instance
+        .request_adapter(&wgpu::RequestAdapterOptions {
+            compatible_surface: Some(&surface),
+            ..Default::default()
+        })
+        .await
+        .map_err(err)?;
+    let out = js_sys::Object::new();
+    let info = adapter.get_info();
+    set(
+        &out,
+        "adapter",
+        format!("{:?} {} ({})", info.backend, info.name, info.driver_info),
+    );
+    let downlevel = adapter.get_downlevel_capabilities();
+    let missing = wgpu::DownlevelFlags::all() - downlevel.flags;
+    set(&out, "missingDownlevel", format!("{missing:?}"));
+    let l = adapter.limits();
+    let limits = js_sys::Object::new();
+    for (k, v) in [
+        (
+            "maxStorageBuffersPerShaderStage",
+            l.max_storage_buffers_per_shader_stage,
+        ),
+        (
+            "maxStorageTexturesPerShaderStage",
+            l.max_storage_textures_per_shader_stage,
+        ),
+        (
+            "maxComputeWorkgroupsPerDimension",
+            l.max_compute_workgroups_per_dimension,
+        ),
+        (
+            "maxSampledTexturesPerShaderStage",
+            l.max_sampled_textures_per_shader_stage,
+        ),
+        (
+            "maxUniformBufferBindingSize",
+            l.max_uniform_buffer_binding_size as u32,
+        ),
+        ("maxTextureDimension2D", l.max_texture_dimension_2d),
+        ("maxBindGroups", l.max_bind_groups),
+    ] {
+        set(&limits, k, v);
+    }
+    page_log(&format!(
+        "adapter {:?} {}; missing downlevel flags {missing:?}; limits {}",
+        info.backend,
+        info.name,
+        js_sys::JSON::stringify(&limits)
+            .map(String::from)
+            .unwrap_or_default()
+    ));
+    set(&out, "limits", limits);
+    // The adapter's own limits: `Limits::default()` (WebGPU's) is refused outright, since it
+    // asks for compute workgroups and storage buffers WebGL 2 does not have.
+    let (device, queue) = adapter
+        .request_device(&wgpu::DeviceDescriptor {
+            label: Some("render-engine webgl2 probe"),
+            required_limits: l,
+            ..Default::default()
+        })
+        .await
+        .map_err(err)?;
+    let errors = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let sink = errors.clone();
+    device.on_uncaptured_error(std::sync::Arc::new(move |e: wgpu::Error| {
+        // The source chain's innermost line names the missing capability.
+        let text = e.to_string();
+        let line = text
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .collect::<Vec<_>>()
+            .join(" | ");
+        page_log(&line);
+        sink.lock().expect("single-threaded").push(line);
+    }));
+    let renderer = Renderer::new(&device, &queue, COLOR_FORMAT);
+    let s = scenario_list::find("sun_shadows").expect("sun_shadows");
+    let (world, instances, _) = content::upload(&renderer, &s.assets, &s.objects);
+    let mut viewport = Viewport::new(&renderer, s.width, s.height);
+    renderer.prepare(&mut viewport, &world, &s.scene, &instances);
+    let target = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("probe target"),
+        size: wgpu::Extent3d {
+            width: s.width,
+            height: s.height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: COLOR_FORMAT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    });
+    let view = target.create_view(&Default::default());
+    let mut encoder = device.create_command_encoder(&Default::default());
+    renderer.encode(&mut encoder, &viewport, &world, &view, None);
+    queue.submit([encoder.finish()]);
+    let list = js_sys::Array::new();
+    for e in errors.lock().expect("single-threaded").iter() {
+        list.push(&JsValue::from_str(e));
+    }
+    set(&out, "errors", list);
+    Ok(out)
+}
+
 #[wasm_bindgen]
 pub struct Smoke {
     instance: wgpu::Instance,
@@ -88,6 +235,7 @@ struct Loaded {
 impl Smoke {
     /// Adapter, device and pipelines; the same features `Headless::new` asks for.
     pub async fn create() -> Result<Smoke, JsValue> {
+        panic_to_console();
         let start = now();
         let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
         descriptor.backends = wgpu::Backends::BROWSER_WEBGPU;
@@ -377,7 +525,12 @@ impl Smoke {
             let bytes = read(&readback).await?;
             let ticks: Vec<u64> = bytemuck::pod_collect_to_vec(&bytes);
             for f in ticks.chunks_exact(per_frame as usize).take(n as usize) {
-                let spans: u64 = f.chunks_exact(2).map(|p| p[1].wrapping_sub(p[0])).sum();
+                let spans: u64 = f
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .map(|p| p[1].wrapping_sub(p[0]))
+                    .sum();
                 gpu.push(spans as f64 * period / 1e6);
             }
         }

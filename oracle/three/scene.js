@@ -1,5 +1,5 @@
-// Builds one exported oracle scenario with packages/three-lighting, renders it and hands the
-// image (and, where the browser exposes GPU timer queries, an advisory GPU time) to render.mjs.
+// Builds one exported oracle scenario with packages/three-lighting and renders it: the image
+// (and, where the browser exposes GPU timer queries, an advisory GPU time) for render.mjs.
 
 import {
   BatchedMesh,
@@ -29,11 +29,13 @@ import {
   textureFromData,
 } from '../../packages/three-lighting/index.js';
 
-// Frames timed for the advisory GPU time (render.mjs passes the oracle's count; 0 skips timing).
-const TIMED_FRAMES = Number(new URLSearchParams(location.search).get('frames') ?? 0);
-
-async function main() {
-  const base = new URLSearchParams(location.search).get('scene');
+/**
+ * Renders the exported scenario at `base` (`<base>.three.json` + `.three.bin`) and returns
+ * `{ png (base64), renderer, gpuMs }`. `timedFrames` frames are timed for the advisory GPU time
+ * (render.mjs passes the oracle's count; 0 skips timing). Also the WebGL 2 side of the browser
+ * backend selection (`oracle/webgpu-smoke`, docs/webgl2-fallback.md).
+ */
+export async function renderScenario(base, timedFrames = 0) {
   const doc = await (await fetch(`${base}.three.json`)).json();
   const bin = await (await fetch(`${base}.three.bin`)).arrayBuffer();
   const { width, height } = doc;
@@ -200,12 +202,12 @@ async function main() {
   png.getContext('2d').putImageData(image, 0, 0);
   const dataUrl = png.toDataURL('image/png');
 
-  // Advisory GPU time: the whole Lighting.render per frame, median of TIMED_FRAMES.
+  // Advisory GPU time: the whole Lighting.render per frame, median of timedFrames.
   let gpuMs = null;
   const timer = gl.getExtension('EXT_disjoint_timer_query_webgl2');
-  if (timer && TIMED_FRAMES > 0) {
+  if (timer && timedFrames > 0) {
     const queries = [];
-    for (let i = 0; i < TIMED_FRAMES; i++) {
+    for (let i = 0; i < timedFrames; i++) {
       const q = gl.createQuery();
       gl.beginQuery(timer.TIME_ELAPSED_EXT, q);
       lighting.render(renderer, scene, camera, target);
@@ -226,9 +228,5 @@ async function main() {
     if (times.length) gpuMs = times[Math.floor(times.length / 2)];
   }
 
-  window.oracleResult = { png: dataUrl.slice(dataUrl.indexOf(',') + 1), renderer: rendererName, gpuMs };
+  return { png: dataUrl.slice(dataUrl.indexOf(',') + 1), renderer: rendererName, gpuMs };
 }
-
-main().catch((e) => {
-  window.oracleResult = { error: `${e.message}\n${e.stack}` };
-});

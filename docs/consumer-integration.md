@@ -534,6 +534,13 @@ and limits it needs and its fallback, and passes the [evidence](technical-decisi
 on each target it claims. The three.js port has no compute, indirect draws or fragment storage
 buffers, so Forward+ or GPU-driven work in the crate does not by itself reach today's web client.
 
+**Choosing a backend in the browser.** The crate does not run on wgpu's WebGL 2 backend (storage
+buffers, compute, cube-array and multisampled depth textures; [WebGL 2 fallback](webgl2-fallback.md)).
+A page that offers a WebGPU build calls `selectBackend` from
+`@moritzbrantner/three-lighting/backend`: WebGPU first, else this port on WebGL 2 (per-fragment
+lights, CPU culling, no particles yet, #126), else `NoGraphicsBackendError`, whose message names
+both reasons for the page to show.
+
 ## Web client (three.js)
 
 The web client gets the same lighting through `@moritzbrantner/three-lighting`

@@ -1,7 +1,20 @@
 // Runs one oracle scenario on the engine compiled to wasm32 in the browser's WebGPU and leaves
 // the result in `window.smokeResult` for run.mjs. Query: scene=<name>, mode=render|time|present|
-// particles, frames=n, count=1 (GPU API calls and bytes per frame), spawn, frame (particles).
-import init, { Smoke } from './pkg/webgpu_smoke.js';
+// particles|probe|select, frames=n, count=1 (GPU API calls and bytes per frame), spawn, frame
+// (particles), backend=webgpu|webgl2 (select: force one).
+//
+// probe: wgpu's WebGL 2 backend under the engine (docs/webgl2-fallback.md), no WebGPU needed.
+// select: the browser backend selection of packages/three-lighting/backend.js: the engine on
+// WebGPU, else the three.js port on WebGL 2 (the oracle's own three.js scene, from the scenario's
+// export in /out/), else the error on the page.
+import { NoGraphicsBackendError, selectBackend } from '/packages/three-lighting/backend.js';
+
+// Loaded on first use: the WebGL 2 fallback and the error path never need the wasm build.
+const wasm = async () => {
+  const module = await import('./pkg/webgpu_smoke.js');
+  await module.default();
+  return module;
+};
 
 const q = new URLSearchParams(location.search);
 
@@ -34,9 +47,18 @@ function base64(bytes) {
 
 async function main() {
   if (q.get('count') === '1') countCalls();
+  if (q.get('mode') === 'select') {
+    window.smokeResult = await select();
+    return;
+  }
   const t0 = performance.now();
-  await init();
+  const { Smoke, probe_webgl2 } = await wasm();
   const wasmMs = performance.now() - t0;
+  if (q.get('mode') === 'probe') {
+    window.probeLog = [];
+    window.smokeResult = { mode: 'probe', ...(await probe_webgl2(document.getElementById('surface'))) };
+    return;
+  }
   const smoke = await Smoke.create();
   const info = JSON.parse(smoke.info());
   const startupMs = performance.now() - t0;
@@ -72,6 +94,46 @@ async function main() {
   }
   window.smokeResult = result;
 }
+
+async function select() {
+  const scene = q.get('scene');
+  const forced = q.get('backend');
+  const status = document.getElementById('status');
+  const result = { mode: 'select', scene };
+  try {
+    const chosen = await selectBackend(
+      {
+        webgpu: async () => {
+          const { Smoke } = await wasm();
+          const smoke = await Smoke.create();
+          const f = await smoke.render(scene);
+          return { info: JSON.parse(smoke.info()), width: f.width, height: f.height, rgba: base64(f.rgba) };
+        },
+        webgl2: async () => {
+          const { renderScenario } = await import('/oracle/three/scene.js');
+          return renderScenario(`/out/${scene}`);
+        },
+      },
+      forced ? { backends: [forced] } : {},
+    );
+    status.textContent = `Rendering with ${chosen.backend === 'webgpu' ? 'WebGPU (render-engine)' : 'WebGL 2 (three-lighting)'}`;
+    Object.assign(result, chosen.value, { backend: chosen.backend, attempts: chosen.attempts });
+  } catch (e) {
+    if (!(e instanceof NoGraphicsBackendError)) throw e;
+    // What a user sees: the reason for each backend, on the page.
+    status.setAttribute('role', 'alert');
+    status.textContent = e.message;
+    Object.assign(result, { backend: null, attempts: e.attempts });
+  }
+  result.status = status.textContent;
+  return result;
+}
+
+// A wasm abort inside a GPU callback (the probe's glow panic) never settles main()'s promise.
+window.addEventListener('error', (e) => {
+  const errors = window.probeLog?.length ? `\nprobe log before it:\n${window.probeLog.join('\n')}` : '';
+  window.smokeResult ??= { error: `uncaught: ${e.message}${errors}` };
+});
 
 main().catch((e) => {
   window.smokeResult = { error: String(e?.stack ?? e) };
