@@ -5,7 +5,21 @@
 //! compare native <out dir> <scenario>...    the same CPU/GPU protocol on native render-engine
 //! compare select <out dir> <scenario>...    FLIP of the `select` mode's WebGL 2 fallback; fails
 //!                                           outside D3's gates against Bevy
+//! compare showcase <out dir> <frame>:<view>...  FLIP of the browser showcase's captures
+//!                                           (web/showcase, #128) against native render-engine;
+//!                                           fails outside D3's gates
+//! compare showcase-native <out dir> <frame>:<view>...  the `time` protocol natively on a
+//!                                           showcase view
 //! ```
+//!
+//! A showcase `<view>` is `eye` or an orbit angle in degrees, as the page's `view=` takes it.
+
+#[allow(dead_code)]
+#[path = "../../../../examples/shooter_frame/fixture.rs"]
+mod fixture;
+#[allow(dead_code)]
+#[path = "../../../../web/examples/shooter_showcase/view.rs"]
+mod view;
 
 #[allow(dead_code)]
 #[path = "../../../src/content.rs"]
@@ -23,9 +37,16 @@ mod scenarios;
 #[path = "../scenario_list.rs"]
 mod scenario_list;
 
-use render_engine::{headless::Headless, renderer::Viewport, wgpu};
+use render_engine::{
+    headless::Headless,
+    renderer::Viewport,
+    scene::Scene,
+    wgpu,
+    world::{Instance, World},
+};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
+use view::View;
 
 fn flip(w: u32, h: u32, reference: &[u8], test: &[u8]) -> (f32, f32) {
     let rgb = |rgba: &[u8]| -> Vec<u8> {
@@ -157,23 +178,38 @@ fn native(name: &str, gpu: &Headless, frames: usize) -> Result<(), String> {
     let s = scenario_list::find(name).ok_or("no scenario")?;
     let (mut world, instances, _) = content::upload(gpu.renderer(), &s.assets, &s.objects);
     let mut viewport = Viewport::new(gpu.renderer(), s.width, s.height);
-    gpu.render(&mut viewport, &world, &s.scene, &instances)
+    time_native(
+        name,
+        gpu,
+        &mut viewport,
+        &mut world,
+        &s.scene,
+        &instances,
+        frames,
+    )
+}
+
+/// GPU time by `Headless::gpu_frame_times`, then `prepare`, `encode` and submit per frame.
+fn time_native(
+    name: &str,
+    gpu: &Headless,
+    viewport: &mut Viewport,
+    world: &mut World,
+    scene: &Scene,
+    instances: &[Instance],
+    frames: usize,
+) -> Result<(), String> {
+    gpu.render(viewport, world, scene, instances)
         .map_err(|e| e.to_string())?;
     let gpu_times = gpu
-        .gpu_frame_times(
-            &mut viewport,
-            &mut world,
-            &s.scene,
-            &instances,
-            frames,
-            None,
-        )
+        .gpu_frame_times(viewport, world, scene, instances, frames, None)
         .map_err(|e| e.to_string())?;
+    let (width, height) = viewport.size();
     let target = gpu.device.create_texture(&wgpu::TextureDescriptor {
         label: None,
         size: wgpu::Extent3d {
-            width: s.width,
-            height: s.height,
+            width,
+            height,
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
@@ -187,12 +223,11 @@ fn native(name: &str, gpu: &Headless, frames: usize) -> Result<(), String> {
     let (mut prepare, mut encode, mut submit) = (Vec::new(), Vec::new(), Vec::new());
     for f in 0..frames {
         let t0 = Instant::now();
-        gpu.renderer()
-            .prepare(&mut viewport, &world, &s.scene, &instances);
+        gpu.renderer().prepare(viewport, world, scene, instances);
         let t1 = Instant::now();
         let mut encoder = gpu.device.create_command_encoder(&Default::default());
         gpu.renderer()
-            .encode(&mut encoder, &viewport, &world, &view, None);
+            .encode(&mut encoder, viewport, world, &view, None);
         let buffer = encoder.finish();
         let t2 = Instant::now();
         gpu.queue.submit([buffer]);
@@ -216,10 +251,111 @@ fn native(name: &str, gpu: &Headless, frames: usize) -> Result<(), String> {
     Ok(())
 }
 
+/// A showcase frame and view (`tick1422:eye`) built natively: its world and scene at
+/// `width` × `height`, as the page builds them.
+fn showcase_frame(
+    gpu: &Headless,
+    spec: &str,
+    width: u32,
+    height: u32,
+) -> Result<(String, View, World, Scene), String> {
+    let (frame, view) = spec
+        .split_once(':')
+        .ok_or_else(|| format!("{spec}: expected <frame>:<view>"))?;
+    let view = View::parse(view).ok_or_else(|| format!("{spec}: unknown view"))?;
+    let json = fixture::FIXTURES
+        .iter()
+        .find(|(name, _)| *name == frame)
+        .ok_or_else(|| format!("{spec}: no fixture {frame}"))?
+        .1;
+    let mut world = World::new(gpu.renderer());
+    let mut scene = fixture::build(&mut world, json, view::BUILD_ASPECT).scene;
+    scene.camera = view.camera(&scene.camera, width as f32 / height as f32);
+    Ok((frame.to_string(), view, world, scene))
+}
+
+/// The showcase's canvas captures (`<frame>.showcase-<view>.rgba`, and the frames after device
+/// loss and recovery, `showcase-lose-<view>` and `showcase-crash-<view>`, where present) against
+/// native render-engine.
+/// False when a capture is missing or outside D3's gates.
+fn showcase(out: &Path, specs: &[String]) -> bool {
+    let gpu = Headless::new().expect("adapter");
+    let mut ok = true;
+    println!("frame:view | capture | vs native engine (mean / p99 / differing px) | gate");
+    for spec in specs {
+        let (w, h) = (1280, 720);
+        let (frame, view, world, scene) = match showcase_frame(&gpu, spec, w, h) {
+            Ok(f) => f,
+            Err(e) => {
+                println!("{e}");
+                ok = false;
+                continue;
+            }
+        };
+        let mut viewport = Viewport::new(gpu.renderer(), w, h);
+        let engine = gpu
+            .render(&mut viewport, &world, &scene, &[])
+            .expect("native frame")
+            .rgba;
+        let base = format!("{frame}.showcase-{}", view.tag());
+        image::save_buffer(
+            out.join(format!("{base}.engine.png")),
+            &engine,
+            w,
+            h,
+            image::ExtendedColorType::Rgba8,
+        )
+        .expect("png");
+        for tag in [
+            format!("showcase-{}", view.tag()),
+            format!("showcase-lose-{}", view.tag()),
+            format!("showcase-crash-{}", view.tag()),
+        ] {
+            let Ok(rgba) = std::fs::read(out.join(format!("{frame}.{tag}.rgba"))) else {
+                if tag == format!("showcase-{}", view.tag()) {
+                    println!("{spec} | {tag} | no capture | FAIL");
+                    ok = false;
+                }
+                continue;
+            };
+            if rgba.len() != engine.len() {
+                println!("{spec} | {tag} | capture is not {w}x{h} | FAIL");
+                ok = false;
+                continue;
+            }
+            image::save_buffer(
+                out.join(format!("{frame}.{tag}.png")),
+                &rgba,
+                w,
+                h,
+                image::ExtendedColorType::Rgba8,
+            )
+            .expect("png");
+            let differing = engine
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .zip(rgba.as_chunks::<4>().0)
+                .filter(|(a, b)| a != b)
+                .count();
+            let (m, p) = flip(w, h, &engine, &rgba);
+            let pass = m <= FLIP_MEAN_MAX && p <= FLIP_P99_MAX;
+            ok &= pass;
+            println!(
+                "{spec} | {tag} | {m:.4} / {p:.4} / {differing} | {}",
+                if pass { "ok" } else { "FAIL" }
+            );
+        }
+    }
+    ok
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let [mode, out, names @ ..] = args.as_slice() else {
-        eprintln!("usage: compare (images|native|select) <out dir> <scenario>...");
+        eprintln!(
+            "usage: compare (images|native|select|showcase|showcase-native) <out dir> <scenario>..."
+        );
         std::process::exit(2);
     };
     let out = PathBuf::from(out);
@@ -235,6 +371,24 @@ fn main() {
             for name in names {
                 if let Err(e) = native(name, &gpu, 300) {
                     eprintln!("{name}: {e}");
+                }
+            }
+        }
+        "showcase" => {
+            if !showcase(&out, names) {
+                std::process::exit(1);
+            }
+        }
+        "showcase-native" => {
+            let gpu = Headless::new().expect("adapter");
+            for spec in names {
+                let result =
+                    showcase_frame(&gpu, spec, 1280, 720).and_then(|(_, _, mut world, scene)| {
+                        let mut viewport = Viewport::new(gpu.renderer(), 1280, 720);
+                        time_native(spec, &gpu, &mut viewport, &mut world, &scene, &[], 300)
+                    });
+                if let Err(e) = result {
+                    eprintln!("{spec}: {e}");
                 }
             }
         }
