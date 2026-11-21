@@ -59,7 +59,7 @@ case "${1:-}" in
         cp --update=none "$exe" "$CORE_DIR/" || true
       fi
       gdb -batch -nx \
-        -ex 'set debuginfod enabled on' \
+        -iex 'set debuginfod enabled on' \
         -ex 'set pagination off' \
         -ex 'bt' \
         -ex 'thread apply all bt' \
