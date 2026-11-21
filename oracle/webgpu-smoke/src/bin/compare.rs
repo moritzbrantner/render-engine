@@ -3,11 +3,16 @@
 //! ```text
 //! compare images <out dir> <scenario>...    FLIP of <scenario>.webgpu against the oracle's PNGs
 //! compare native <out dir> <scenario>...    the same CPU/GPU protocol on native render-engine
+//! compare select <out dir> <scenario>...    FLIP of the `select` mode's WebGL 2 fallback; fails
+//!                                           outside D3's gates against Bevy
 //! ```
 
 #[allow(dead_code)]
 #[path = "../../../src/content.rs"]
 mod content;
+#[allow(dead_code)]
+#[path = "../../../src/forward_plus_scenes.rs"]
+mod forward_plus_scenes;
 #[allow(dead_code)]
 #[path = "../../../src/particles.rs"]
 mod particles;
@@ -24,7 +29,9 @@ use std::time::Instant;
 
 fn flip(w: u32, h: u32, reference: &[u8], test: &[u8]) -> (f32, f32) {
     let rgb = |rgba: &[u8]| -> Vec<u8> {
-        rgba.chunks_exact(4)
+        rgba.as_chunks::<4>()
+            .0
+            .iter()
             .flat_map(|p| [p[0], p[1], p[2]])
             .collect()
     };
@@ -62,8 +69,10 @@ fn images(out: &Path, names: &[String]) {
         )
         .expect("png");
         let differing = engine
-            .chunks_exact(4)
-            .zip(rgba.chunks_exact(4))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .zip(rgba.as_chunks::<4>().0)
             .filter(|(a, b)| a != b)
             .count();
         let (m, p) = flip(w, h, &engine, &rgba);
@@ -80,6 +89,62 @@ fn images(out: &Path, names: &[String]) {
             cell("bevy", &engine)
         );
     }
+}
+
+/// D3's gates (`oracle/src/main.rs`).
+const FLIP_MEAN_MAX: f32 = 0.005;
+const FLIP_P99_MAX: f32 = 0.05;
+
+/// The `select` mode's WebGL 2 frame (`<scenario>.select.webgl2.png`, the three.js port) against
+/// Bevy, native render-engine, the browser's WebGPU frame (`select.webgpu.rgba`, when the same
+/// scenario was also selected onto WebGPU) and the oracle's own three.js frame. False when a frame
+/// is missing or the WebGL 2 frame fails D3's gates against Bevy.
+fn select(out: &Path, names: &[String]) -> bool {
+    let mut ok = true;
+    println!(
+        "scenario | WebGL 2 vs Bevy (mean / p99) | vs native engine | vs WebGPU | vs oracle three.js (differing px)"
+    );
+    for name in names {
+        let Some((w, h, webgl2)) = png(&out.join(format!("{name}.select.webgl2.png"))) else {
+            println!("{name}: no select.webgl2 capture");
+            ok = false;
+            continue;
+        };
+        let Some((_, _, bevy)) = png(&out.join(format!("{name}.bevy.png"))) else {
+            println!("{name}: no Bevy PNG (run the oracle first)");
+            ok = false;
+            continue;
+        };
+        let (mean, p99) = flip(w, h, &bevy, &webgl2);
+        let pass = mean <= FLIP_MEAN_MAX && p99 <= FLIP_P99_MAX;
+        ok &= pass;
+        let cell = |reference: Option<Vec<u8>>| {
+            reference.map_or("-".to_string(), |r| {
+                let (m, p) = flip(w, h, &r, &webgl2);
+                format!("{m:.4} / {p:.4}")
+            })
+        };
+        let file = |tag: &str| png(&out.join(format!("{name}.{tag}.png"))).map(|(_, _, r)| r);
+        let webgpu = std::fs::read(out.join(format!("{name}.select.webgpu.rgba"))).ok();
+        let three = file("three");
+        let differing = three.as_ref().map_or("-".to_string(), |t| {
+            t.as_chunks::<4>()
+                .0
+                .iter()
+                .zip(webgl2.as_chunks::<4>().0)
+                .filter(|(a, b)| a != b)
+                .count()
+                .to_string()
+        });
+        println!(
+            "{name} | {mean:.4} / {p99:.4} {} | {} | {} | {} ({differing})",
+            if pass { "ok" } else { "FAIL" },
+            cell(file("engine")),
+            cell(webgpu),
+            cell(three.clone()),
+        );
+    }
+    ok
 }
 
 fn median(mut v: Vec<f64>) -> f64 {
@@ -154,12 +219,17 @@ fn native(name: &str, gpu: &Headless, frames: usize) -> Result<(), String> {
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let [mode, out, names @ ..] = args.as_slice() else {
-        eprintln!("usage: compare (images|native) <out dir> <scenario>...");
+        eprintln!("usage: compare (images|native|select) <out dir> <scenario>...");
         std::process::exit(2);
     };
     let out = PathBuf::from(out);
     match mode.as_str() {
         "images" => images(&out, names),
+        "select" => {
+            if !select(&out, names) {
+                std::process::exit(1);
+            }
+        }
         "native" => {
             let gpu = Headless::new().expect("adapter");
             for name in names {

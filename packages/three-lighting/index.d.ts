@@ -12,6 +12,8 @@ import type {
   WebGLRenderTarget,
 } from 'three';
 
+export * from './backend.js';
+
 export type Vec3 = [number, number, number];
 export type Vec4 = [number, number, number, number];
 

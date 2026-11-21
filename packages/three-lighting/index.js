@@ -74,6 +74,7 @@ import {
 } from './shaders.js';
 
 export { DEFAULT_SUN_SHADOWS, singleCascade, farBounds, cascadeRanges, fitCascade } from './cascades.js';
+export * from './backend.js';
 
 /** Bevy `Exposure::exposure()` for an EV100. */
 export function exposureFromEv100(ev100) {

@@ -34,6 +34,7 @@
 mod bevy_side;
 mod content;
 mod forward_plus_bench;
+mod forward_plus_scenes;
 mod gpu_driven_bench;
 mod occlusion_bench;
 mod particles;
@@ -237,7 +238,7 @@ fn bevy_child(name: &str, o: &Options) -> Result<(), String> {
     }
     let scenario = scenarios::all()
         .into_iter()
-        .chain(forward_plus_bench::bevy_scenes())
+        .chain(forward_plus_scenes::bevy_scenes())
         .find(|s| s.name == name)
         .ok_or_else(|| format!("unknown scenario {name}"))?;
     let run = bevy_side::run(scenario, o.frames);

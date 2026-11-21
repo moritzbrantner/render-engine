@@ -15,6 +15,10 @@
     ".": {
       "types": "./packages/three-lighting/index.d.ts",
       "import": "./packages/three-lighting/index.js"
+    },
+    "./backend": {
+      "types": "./packages/three-lighting/backend.d.ts",
+      "import": "./packages/three-lighting/backend.js"
     }
   },
   "scripts": {

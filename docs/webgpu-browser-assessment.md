@@ -58,7 +58,7 @@ bash scripts/webgpu-smoke.sh sun_shadows
 
 The smoke is not built by `cargo build` at the repository root or by CI: `oracle/webgpu-smoke/`
 has its own manifest and lockfile (the root workspace excludes `oracle/`), and no job runs it. It
-compiles the oracle's `content.rs`, `scenarios.rs` and `particles.rs` by path, so the scene is the
+compiles the oracle's `content.rs`, `scenarios.rs`, `forward_plus_scenes.rs` and `particles.rs` by path, so the scene is the
 oracle's, and it calls the same `Renderer::new`, `prepare` and `encode` a native consumer calls.
 Run measured 2026-11-09 on the owner's desktop (Linux 7.0.0-42, RTX 3060 Ti, driver 595.99.02,
 rustc 1.99.1), with other GPU clients open (Blender, a browser), on the working tree over commit
@@ -273,6 +273,9 @@ Not filed: GO means the owner can decide whether to open it. It should cover, an
    one 22 k-instance scene at 67 draws per frame does not settle it; consumer pilot and adoption
    stay subject to D10.
 5. A real failure mode: what the build does with no WebGPU, a software adapter or lost device.
+   No WebGPU is now handled by falling back to the three.js port on WebGL 2
+   ([WebGL 2 fallback](webgl2-fallback.md)); the engine itself does not run on wgpu's WebGL 2
+   backend. Device loss is still open.
 
 Prerequisite for it to be worth more than a demo: a consumer that reports a bottleneck in the
 sense of mmorpg#80's closure. Without one, the result of this assessment is still "feasible, but
