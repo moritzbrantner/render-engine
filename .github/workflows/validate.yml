@@ -57,7 +57,7 @@ jobs:
       - name: Install lavapipe (software Vulkan)
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libvulkan1
+          sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libvulkan1 vulkan-tools
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
@@ -69,8 +69,33 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-targets --locked -- -D warnings
 
+      # A crashing test binary leaves a core dump (#122); the job still fails on it.
       - name: Tests (headless render on lavapipe)
-        run: cargo test --locked
+        id: tests
+        env:
+          CORE_DIR: ${{ runner.temp }}/cores
+        run: |
+          sudo --preserve-env=CORE_DIR bash scripts/crash-stacks.sh enable
+          bash scripts/crash-stacks.sh env
+          ulimit -c unlimited
+          cargo test --locked
+
+      - name: Crash stacks
+        if: failure() && steps.tests.outcome == 'failure'
+        env:
+          CORE_DIR: ${{ runner.temp }}/cores
+        run: |
+          sudo apt-get install -y --no-install-recommends gdb
+          bash scripts/crash-stacks.sh report
+
+      - name: Upload crash cores and backtraces
+        if: failure() && steps.tests.outcome == 'failure'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: crash-stacks
+          path: ${{ runner.temp }}/cores
+          retention-days: 14
+          if-no-files-found: ignore
 
   # Oracle clippy and unit tests and the three-lighting unit tests: no rendering.
   oracle-checks:
