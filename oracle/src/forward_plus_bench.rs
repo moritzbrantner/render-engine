@@ -145,8 +145,7 @@ fn cluster_diagnostic(
         .map_err(|e| e.to_string())?;
     gpu.render(&mut viewport, world, &scenario.scene, instances)
         .map_err(|e| e.to_string())?;
-    renderer
-        .read_cluster_diagnostic(&viewport)
+    pollster::block_on(renderer.read_cluster_diagnostic(&viewport))
         .ok_or_else(|| "no diagnostic".to_string())
 }
 

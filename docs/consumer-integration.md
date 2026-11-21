@@ -445,8 +445,10 @@ world.step_particles(&mut encoder, dt, None);
   one encoder; a frame rendered without a step shows the last step's particles again. Pass
   `FrameTimestamps` to time the pass (two queries).
 - **Statistics.** `world.spawn_count(id)` is the last step's spawn count (CPU).
-  `world.read_alive_particles()` reads every emitter's alive count back from the GPU and waits,
-  for tests and tools.
+  `world.read_alive_particles().await` reads every emitter's alive count back from the GPU, for
+  tests and tools. It is async, like `Renderer::read_gpu_culled` and
+  `Renderer::read_cluster_diagnostic`: natively the future completes on its first poll
+  (`pollster::block_on`), in the browser once the GPU has written the counts (#129).
 - **Limits.** At most 8 init modifiers per emitter and 8 keys per gradient.
 - **Velocity cones.** `InitModifier::VelocityCone { direction, spread, speed }` throws each
   particle in a direction uniform over a cone of half-angle `spread` radians around
@@ -529,9 +531,9 @@ same GPU). "Ran in Chromium" below means those, on that adapter.
 | `TIMESTAMP_QUERY` | GPU timing only, at pass begin and end | adapter-dependent | optional `timestamp-query`; ran in Chromium on NVIDIA, present on SwiftShader | advisory timing through `EXT_disjoint_timer_query_webgl2` |
 | Compute and write-only storage textures | The sky's environment filter, particle simulation | available | core; ran in Chromium | none in WebGL 2 |
 | `draw_indirect` | Particle draws | available | core; ran in Chromium | none in WebGL 2 |
-| A read-only depth attachment also bound as a multisampled depth texture | Soft particles (`Emitter::depth_fade`), opt-in | available | core; not run in a browser yet | the opaque depth resolved into a texture after the opaque draws (#130) |
-| Indirect draws with a non-zero `first_instance` | Required by the opt-in `Culling::GpuIndirect`; it stays on the CPU path without it. Measured on the RTX 3060 Ti ([experiment](gpu-driven-experiment.md)) | `INDIRECT_FIRST_INSTANCE` | optional `indirect-first-instance`, present in Chromium on both adapters; the path has not run in a browser | none in WebGL 2 |
-| A fourth bind group and 4 fragment-stage storage buffers | Required by the default `LightAssignment::Clustered`; the viewport falls back to per-fragment without them. Measured on the RTX 3060 Ti ([experiment](forward-plus-experiment.md)) | adapter/limits-dependent | within the WebGPU defaults, 16 on NVIDIA and 10 on SwiftShader in Chromium; the showcase (#128) runs it in Chromium and Firefox on NVIDIA, byte-identical to native; its diagnostic readback blocks and has not run | none in WebGL 2 (no fragment storage buffers) |
+| A read-only depth attachment also bound as a multisampled depth texture | Soft particles (`Emitter::depth_fade`), opt-in | available | core; ran in Chromium and Firefox (#129), on NVIDIA and in Firefox on lavapipe | the opaque depth resolved into a texture after the opaque draws (#130) |
+| Indirect draws with a non-zero `first_instance` | Required by the opt-in `Culling::GpuIndirect`; it stays on the CPU path without it. Measured on the RTX 3060 Ti ([experiment](gpu-driven-experiment.md)) | `INDIRECT_FIRST_INSTANCE` | optional `indirect-first-instance`, present in Chromium on both adapters and in Firefox; the path ran in Chromium and Firefox (#129) with the same images and per-view counts as native | none in WebGL 2 |
+| A fourth bind group and 4 fragment-stage storage buffers | Required by the default `LightAssignment::Clustered`; the viewport falls back to per-fragment without them. Measured on the RTX 3060 Ti ([experiment](forward-plus-experiment.md)) | adapter/limits-dependent | within the WebGPU defaults, 16 on NVIDIA and 10 on SwiftShader in Chromium; the showcase (#128) runs it in Chromium and Firefox on NVIDIA, byte-identical to native; the oracle's `many_lights` (64 lights) passes against Bevy in both (#129), and the async diagnostic readback runs (its counts differ from native, which has `SHADER_EARLY_DEPTH_TEST`) | none in WebGL 2 (no fragment storage buffers) |
 | `multi_draw_*_indirect_count` | Not used by the experiment: with one mesh per run it could only remove empty draws. The RTX 3060 Ti reports it; it would need a shared vertex and index buffer to batch runs | `MULTI_DRAW_INDIRECT_COUNT`, Vulkan 1.2+ and DX12 | none: native-only in wgpu | none in WebGL 2 |
 
 Without `MULTI_DRAW_INDIRECT_COUNT`, wgpu may emulate multi-draw as a series of `draw_indirect`
@@ -617,10 +619,22 @@ let running = render_engine_web::start(canvas, Options::default(), Game::new()).
   app, not the state. Five failed attempts end the loop with `App::failed`.
 - **Timing.** `timing::frame_times` is the async `Headless::gpu_frame_times`: GPU timestamps plus
   `prepare`, `encode` and submit per frame, offscreen, after a warm-up.
-- **Not in the browser yet** ([#129](https://github.com/moritzbrantner/render-engine/issues/129)):
-  glTF and skinned content (no file-free loader path), particles, the blocking diagnostics
-  (`read_alive_particles`, the clustered and GPU-culling readbacks; they would need async forms)
-  and `Culling::GpuIndirect`. The default clustered light assignment runs.
+- **Content.** The engine reads no files, natively or in the browser (D7). The page fetches its
+  glTF, buffers and textures (`fetch` → `ArrayBuffer` → `Vec<u8>` through wasm-bindgen), the
+  game's own loader decodes them from bytes (with the `gltf` crate: `Gltf::from_slice`, each
+  buffer and image resolved from the fetched bytes rather than `gltf::import`, which reads files)
+  into `MeshData` and `TextureData`, and they go through the same `World::add_mesh`,
+  `add_texture`, `add_material` and `add_skin` as natively. The oracle's loader
+  (`oracle/src/content.rs`) works this way: the WebGPU smoke's page hands it the files of
+  `textured_props` and `skinned_figure` (#129), which then match native render-engine and pass
+  against Bevy in Chromium and Firefox.
+- **Everything else runs** (#129): glTF and skinned content, particles (soft ones included), the
+  default clustered light assignment and `Culling::GpuIndirect`. The diagnostic readbacks
+  (`World::read_alive_particles`, `Renderer::read_gpu_culled`, `Renderer::read_cluster_diagnostic`)
+  are async: `.await` them in the page (they complete once the GPU has written the counts; the
+  frame loop must not be blocked waiting for them, so run them in `Running::suspend` or a
+  spawned task). Every oracle scenario passes in the browser against Bevy ([browser
+  gate](#browser-gate)).
 - **Backend selection.** Offer the build as `selectBackend`'s `webgpu` initialiser. A page with
   no three.js version of its scene offers only that one, and without WebGPU shows
   `NoGraphicsBackendError`'s message (the showcase does).
@@ -687,6 +701,53 @@ cost of a game-sized frame in the browser is still unmeasured (#615's bottleneck
 | `Renderer::new` | 16–17 | 13 |
 | World build | 2–3 | 1 |
 | First frame drawn | 412–435 | 567–581 |
+
+### Browser gate
+
+`scripts/browser-gate.sh [out dir]` (#129) runs the oracle's own scenarios on the crate compiled
+to wasm32 (`oracle/webgpu-smoke/`) in a browser and judges them against a full oracle run's
+images: every lighting scenario against Bevy with D3's gates, `many_instances`, `many_lights` and
+`textured_props` again with `Culling::GpuIndirect` and the clustered diagnostic (the browser's
+per-view culled counts must equal native's), every D9 particle scenario by its tier and its spawn
+and alive counts (read with the async `read_alive_particles` each frame; `particles_soft` tests soft
+particles against Bevy), and
+`particles_textured` and `smoke_and_sparks` with every emitter soft (`depth_fade` 0.5 m) against
+the same run natively. CI's `browser` job runs it in Playwright's Firefox on lavapipe, under Xvfb (without a display
+Firefox offers no WebGPU and reports it "disabled by blocklist"; the gate then stops at its first
+scenario); Chromium's
+software adapter (SwiftShader) cannot be compared with Bevy on lavapipe (D8).
+
+**Evidence** (#129): RTX 3060 Ti, driver 595.99.02, Linux 7.0, Playwright's Chromium 159 and
+Firefox 159, headless, against a full GPU oracle run (`scripts/browser-hardware.sh`); and
+Firefox with only lavapipe's ICD visible against a lavapipe oracle run, as CI runs it. Every
+scenario passes in all three. FLIP mean / p99 against Bevy (D3: 0.005 / 0.05), with the pixels
+that differ from native render-engine on the same device:
+
+| Scenario | Chromium (NVIDIA) | Firefox (NVIDIA) | Firefox (lavapipe) |
+| --- | --- | --- | --- |
+| `textured_props` (glTF fetched by the page) | 0.0000 / 0.0007, 0 px | 0.0000 / 0.0007, 0 px | 0.0000 / 0.0005, 0 px |
+| `skinned_figure` (glTF fetched by the page) | 0.0000 / 0.0002, 4 px | 0.0000 / 0.0002, 4 px | 0.0000 / 0.0002, 5 px |
+| `many_lights` (64 lights, clustered) | 0.0000 / 0.0004, 0 px | 0.0000 / 0.0004, 0 px | 0.0000 / 0.0002, 0 px |
+| `many_instances`, `Culling::GpuIndirect` | 0.0000 / 0.0007, 1 px | 0.0000 / 0.0007, 1 px | 0.0000 / 0.0006, 3 px |
+| `many_lights`, `Culling::GpuIndirect` | 0.0000 / 0.0004, 0 px | 0.0000 / 0.0004, 0 px | 0.0000 / 0.0002, 0 px |
+| `textured_props`, `Culling::GpuIndirect` | 0.0000 / 0.0007, 0 px | 0.0000 / 0.0007, 0 px | 0.0000 / 0.0005, 0 px |
+| Every other lighting scenario (24) | ≤ 0.0009 / ≤ 0.0143 (the sky views; native: ≤ 0.0001 / ≤ 0.0034) | ≤ 0.0001 / ≤ 0.0034 | ≤ 0.0001 / ≤ 0.0022 |
+| D9 particle captures (18, 9 scenarios, `particles_soft` included) | all pass their tier; counts equal Bevy's; `particles_soft` 0.0000 / 0.0006, byte-identical to native | same | same; `particles_soft` 0.0000 / 0.0000, byte-identical |
+| Soft particles vs native (4 captures) | ≤ 0.0013 / ≤ 0.0308 | ≤ 0.0013 / ≤ 0.0290 | ≤ 0.0013 / ≤ 0.0338 |
+
+- The GPU-culled instance counts per view equal native's in every case. The clustered
+  diagnostic's counters run but differ from native (`many_lights`: 1.72 M fragments looping over
+  6.71 M lights in both browsers, 1.47–1.53 M and 5.47–5.75 M natively): native compiles the
+  diagnostic with `SHADER_EARLY_DEPTH_TEST`, which WebGPU lacks, so the browser also counts
+  fragments that later fail the depth test.
+- Particle captures of the alpha-blended scenarios (`particles_alpha`, `smoke_and_sparks`) differ
+  from native in up to 41k pixels: their draw order follows the GPU's alive list, which differs
+  from run to run natively too (D9's statistical tier). Exact-tier captures differ in at most
+  a few hundred pixels.
+- Chromium's sky views differ from native in 7–14k pixels (the #75 finding, cause unknown);
+  Firefox's, on wgpu like native, in at most 12.
+- The page fetches 15 files (1.6 MB) for `textured_props` and 20 (3.1 MB) for `skinned_figure`
+  in 39–69 ms from a local server.
 
 ## Web client (three.js)
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# The Chromium WebGPU smoke of docs/webgpu-browser-assessment.md. Not part of CI or the default
+# The WebGPU smoke of docs/webgpu-browser-assessment.md on chosen scenarios (CI runs all of them:
+# scripts/browser-gate.sh). Not part of the default
 # build. Needs `rustup target add wasm32-unknown-unknown`, `bun install` (Playwright's headless
 # Chromium) and the wasm-bindgen CLI at the crate's exact version:
 #   cargo install wasm-bindgen-cli --version 0.2.130 --locked

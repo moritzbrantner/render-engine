@@ -4,8 +4,11 @@
 //   node oracle/webgpu-smoke/run.mjs <out dir> <mode> <scenario> [key=value ...]
 //
 // Modes: render, present, time, particles, meshes (#116), probe, select. Writes <out>/<scenario>.<tag>.rgba (or
-// .png) and .json, where tag is webgpu (render), select.<backend> (select: select.webgpu,
-// select.webgl2 or select.null when neither started) or the mode. Set SMOKE_FALLBACK=1 for Chromium's software
+// .png) and .json, where tag is webgpu (render, particles), select.<backend> (select: select.webgpu,
+// select.webgl2 or select.null when neither started) or the mode; SMOKE_TAG overrides it. A
+// particle run writes <scenario>.<capture>.<tag>.rgba per capture and the plate, and reads the
+// oracle's <scenario>.bevy.json from <out>; the page reads the glTF files a scenario needs from
+// the repository's assets/ (#129). Set SMOKE_FALLBACK=1 for Chromium's software
 // adapter (SwiftShader), SMOKE_DEV=1 for --enable-webgpu-developer-features (unquantised
 // timestamps; measurement only), SMOKE_BROWSER=firefox for Playwright's Firefox, SMOKE_DPR=n for a
 // device pixel ratio of n.
@@ -73,6 +76,11 @@ const browser =
         headless: true,
         firefoxUserPrefs: {
           'dom.webgpu.enabled': process.env.SMOKE_WEBGPU !== '0',
+          // Firefox's driver blocklist disables WebGPU on Mesa older than 25.0.4 (its bug 1979007),
+          // llvmpipe included; the gate wants lavapipe, the oracle's adapter, whatever the Mesa.
+          // Without a display Firefox has no WebGPU at all ("disabled by blocklist"): run it
+          // under Xvfb where there is none (CI: xvfb-run).
+          'gfx.webgpu.ignore-blocklist': true,
           ...(process.env.SMOKE_WEBGL === '0' ? { 'webgl.disabled': true } : {}),
         },
       })
@@ -111,10 +119,16 @@ if (result.error) {
   console.error(`webgpu smoke failed: ${result.error}\n${logs.join('\n')}`);
   process.exit(1);
 }
-const tag = process.env.SMOKE_TAG ?? result.tag ?? (mode === 'render' ? 'webgpu' : mode === 'select' ? `select.${result.backend}` : mode);
+const tag =
+  process.env.SMOKE_TAG ??
+  result.tag ??
+  (mode === 'render' || mode === 'particles' ? 'webgpu' : mode === 'select' ? `select.${result.backend}` : mode);
 if (result.rgba) writeFileSync(join(out, `${scene}.${tag}.rgba`), Buffer.from(result.rgba, 'base64'));
 if (result.png) writeFileSync(join(out, `${scene}.${tag}.png`), Buffer.from(result.png, 'base64'));
+// Particle runs: the plate and each capture, <scenario>.<label>.<tag>.rgba.
+for (const { label, rgba } of result.images ?? []) writeFileSync(join(out, `${scene}.${label}.${tag}.rgba`), Buffer.from(rgba, 'base64'));
 delete result.rgba;
 delete result.png;
+delete result.images;
 writeFileSync(join(out, `${scene}.${tag}.json`), JSON.stringify(result, null, 1));
 console.log(JSON.stringify(result));

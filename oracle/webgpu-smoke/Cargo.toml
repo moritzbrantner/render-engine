@@ -14,6 +14,8 @@ render-engine = { path = "../.." }
 # `oracle/src/content.rs` is compiled here (scenario content is not duplicated).
 gltf = "1.4.1"
 bytemuck = "1.25.2"
+# `content.rs` decodes the glTF textures the page fetched (#129).
+image = { version = "0.25.10", default-features = false, features = ["png"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # wgpu's WebGL 2 backend on top of the engine's default features (the fallback probe).
@@ -26,7 +28,6 @@ web-sys = { version = "0.3.107", features = ["console", "HtmlCanvasElement", "Pe
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # The image comparison and the native baseline (`src/bin/compare.rs`).
-image = { version = "0.25.10", default-features = false, features = ["png"] }
 nv-flip = "0.1.2"
 pollster = "1.0.1"
 # The browser showcase's shooter frames, built natively for `compare showcase` (#128).

@@ -77,6 +77,9 @@ pub struct Frame {
 /// The lock serializes adapter selection and device creation on it: enumerating the GL backend
 /// makes the instance's one EGL context current, which fails with `BadAccess` when two threads
 /// do it at once.
+///
+/// Native only: wgpu's handles are not `Send` on wasm32, so the static does not compile there.
+#[cfg(not(target_arch = "wasm32"))]
 fn instance() -> std::sync::MutexGuard<'static, wgpu::Instance> {
     static INSTANCE: std::sync::OnceLock<std::sync::Mutex<wgpu::Instance>> =
         std::sync::OnceLock::new();
@@ -93,6 +96,8 @@ fn instance() -> std::sync::MutexGuard<'static, wgpu::Instance> {
 }
 
 impl Headless {
+    /// Native only: in the browser the device comes asynchronously (`render-engine-web`).
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new() -> Result<Self, Error> {
         let instance = instance();
         let force_fallback_adapter = std::env::var("WGPU_FORCE_FALLBACK_ADAPTER")

@@ -779,35 +779,26 @@ impl ParticlePool {
         }
     }
 
-    /// Every emitter id's alive count after the last submitted step (blocks on a readback).
-    pub fn read_alive(&self, queue: &wgpu::Queue) -> Vec<u32> {
+    /// Every emitter id's alive count after the last submitted step (a readback); empty if the
+    /// device is lost.
+    pub async fn read_alive(&self, queue: &wgpu::Queue) -> Vec<u32> {
         let size = u64::from(self.buffers.ids) * COUNTER_BYTES;
         if size == 0 {
             return Vec::new();
         }
-        let readback = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("particle alive readback"),
+        let Some(bytes) = crate::readback::read_buffer(
+            &self.device,
+            queue,
+            &self.buffers.counters,
             size,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
-        let mut encoder = self.device.create_command_encoder(&Default::default());
-        encoder.copy_buffer_to_buffer(&self.buffers.counters, 0, &readback, 0, size);
-        queue.submit([encoder.finish()]);
-        let slice = readback.slice(..);
-        let (tx, rx) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |r| {
-            let _ = tx.send(r);
-        });
-        let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
-        rx.recv()
-            .expect("map_async callback dropped")
-            .expect("particle alive readback");
-        let words: Vec<u32> =
-            bytemuck::cast_slice(&slice.get_mapped_range().expect("mapped")).to_vec();
+            "particle alive readback",
+        )
+        .await
+        else {
+            return Vec::new();
+        };
+        let words: Vec<u32> = bytemuck::pod_collect_to_vec(&bytes);
         // `Counters::alive` is the fifth word of each.
-        let counts = words.as_chunks::<8>().0.iter().map(|c| c[4]).collect();
-        readback.unmap();
-        counts
+        words.as_chunks::<8>().0.iter().map(|c| c[4]).collect()
     }
 }

@@ -1,8 +1,13 @@
 // Runs one oracle scenario on the engine compiled to wasm32 in the browser's WebGPU and leaves
 // the result in `window.smokeResult` for run.mjs. Query: scene=<name>, mode=render|time|present|
-// particles|meshes|probe|select, frames=n, count=1 (GPU API calls and bytes per frame), spawn,
-// frame (particles), meshes=n (meshes: n small meshes added after `frames` rendered frames, #116),
-// backend=webgpu|webgl2 (select: force one).
+// particles|meshes|probe|select, frames=n, count=1 (GPU API calls and bytes per frame),
+// culling=cpu|gpu and lights=clustered|per-fragment|diagnostic (render), soft=<metres>
+// (particles: every emitter soft), meshes=n (meshes: n small meshes added after `frames` rendered
+// frames, #116), backend=webgpu|webgl2 (select: force one).
+//
+// The engine reads no files: the page fetches the glTF and texture files a scenario needs
+// (`asset_files`) and hands their bytes to the wasm (`provide_asset`, #129). A particle scenario
+// replays Bevy's run, so the page fetches the oracle's `<scene>.bevy.json` from /out/.
 //
 // probe: wgpu's WebGL 2 backend under the engine (docs/webgl2-fallback.md), no WebGPU needed.
 // select: the browser backend selection of packages/three-lighting/backend.js: the engine on
@@ -46,6 +51,21 @@ function base64(bytes) {
   return btoa(s);
 }
 
+// Fetches the files under /assets/ the scenario reads and hands their bytes to the wasm: the
+// file-free path of glTF and texture content (#129). Returns the count and bytes.
+async function provideAssets(module, scene) {
+  const files = module.asset_files(scene);
+  const bytes = await Promise.all(
+    files.map(async (f) => {
+      const r = await fetch(`/assets/${f}`);
+      if (!r.ok) throw new Error(`/assets/${f}: ${r.status}`);
+      return new Uint8Array(await r.arrayBuffer());
+    }),
+  );
+  files.forEach((f, i) => module.provide_asset(f, bytes[i]));
+  return { count: files.length, bytes: bytes.reduce((n, b) => n + b.length, 0) };
+}
+
 async function main() {
   if (q.get('count') === '1') countCalls();
   if (q.get('mode') === 'select') {
@@ -53,7 +73,8 @@ async function main() {
     return;
   }
   const t0 = performance.now();
-  const { Smoke, probe_webgl2 } = await wasm();
+  const module = await wasm();
+  const { Smoke, probe_webgl2 } = module;
   const wasmMs = performance.now() - t0;
   if (q.get('mode') === 'probe') {
     window.probeLog = [];
@@ -66,15 +87,29 @@ async function main() {
   const scene = q.get('scene');
   const mode = q.get('mode') ?? 'render';
   const result = { wasmMs, startupMs, info, mode, scene };
-  if (mode === 'render' || mode === 'particles' || mode === 'meshes') {
+  const ta = performance.now();
+  const files = await provideAssets(module, scene);
+  if (files.count) result.assets = { ...files, fetchMs: performance.now() - ta };
+  if (mode === 'particles') {
+    const bevy = await (await fetch(`/out/${scene}.bevy.json`)).json();
+    const soft = q.get('soft');
+    const t1 = performance.now();
+    const p = await smoke.particles(scene, bevy.first_spawn_update, Uint32Array.from(bevy.spawns.flat()), soft ? Number(soft) : NaN);
+    result.runMs = performance.now() - t1;
+    result.width = p.width;
+    result.height = p.height;
+    result.particles = JSON.parse(p.json);
+    result.images = [
+      { label: 'plate', rgba: base64(p.plate) },
+      ...result.particles.labels.map((label, i) => ({ label, rgba: base64(p.capture(i)) })),
+    ];
+  } else if (mode === 'render' || mode === 'meshes') {
     const t1 = performance.now();
     if (q.get('count') === '1') for (const k in counters) delete counters[k];
     const f =
       mode === 'render'
-        ? await smoke.render(scene)
-        : mode === 'meshes'
-          ? await smoke.many_meshes(scene, Number(q.get('frames') ?? 30), Number(q.get('meshes') ?? 150))
-          : await smoke.particles(scene, Number(q.get('spawn')), Number(q.get('frame')));
+        ? await smoke.render(scene, q.get('culling') ?? '', q.get('lights') ?? '')
+        : await smoke.many_meshes(scene, Number(q.get('frames') ?? 30), Number(q.get('meshes') ?? 150));
     result.firstFrameMs = performance.now() - t1;
     result.timeToFirstFrameMs = performance.now() - t0;
     if (q.get('count') === '1') result.calls = { ...counters };
@@ -82,6 +117,7 @@ async function main() {
     result.height = f.height;
     result.uploadMs = f.upload_ms;
     result.prepareMs = f.prepare_ms;
+    if (mode === 'render') result.diagnostics = JSON.parse(f.diagnostics);
     result.rgba = base64(f.rgba);
   } else if (mode === 'time') {
     result.timing = JSON.parse(await smoke.time(scene, Number(q.get('frames') ?? 300)));
@@ -110,9 +146,12 @@ async function select() {
     const chosen = await selectBackend(
       {
         webgpu: async () => {
-          const { Smoke } = await wasm();
+          const module = await wasm();
+          // assets=0 withholds the glTF files, so the engine fails to initialise (check-backends).
+          if (q.get('assets') !== '0') await provideAssets(module, scene);
+          const { Smoke } = module;
           const smoke = await Smoke.create();
-          const f = await smoke.render(scene);
+          const f = await smoke.render(scene, '', '');
           return { info: JSON.parse(smoke.info()), width: f.width, height: f.height, rgba: base64(f.rgba) };
         },
         webgl2: async () => {

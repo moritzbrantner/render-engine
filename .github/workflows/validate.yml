@@ -182,8 +182,73 @@ jobs:
           name: oracle-shard-${{ matrix.shard }}
           path: |
             target/oracle/*.png
+            target/oracle/*.bevy.json
             target/oracle/report.json
           retention-days: 1
+          if-no-files-found: warn
+
+  # The browser gate (D8, #129): render-engine compiled to wasm32 in Playwright's Firefox on
+  # WebGPU, which runs on lavapipe here like the oracle (Chromium only offers SwiftShader, whose
+  # sRGB rounding differs), against this run's oracle images with D3's gates and D9's tiers.
+  browser:
+    needs: [docs-scope, oracle-shard]
+    if: always() && needs.docs-scope.outputs.docs-only != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install the rust-toolchain.toml toolchain
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+
+      - name: Install lavapipe (software Vulkan)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libvulkan1
+          # Firefox offers WebGPU only with a display: Xvfb, with Mesa's GL for its driver probe.
+          sudo apt-get install -y --no-install-recommends xvfb xauth libgl1-mesa-dri
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: oracle/webgpu-smoke -> target
+
+      # The CLI must match the smoke's wasm-bindgen exactly.
+      - name: Install wasm-bindgen
+        run: cargo install wasm-bindgen-cli --version 0.2.130 --locked
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - name: Install npm dependencies and Firefox
+        run: |
+          bun install --frozen-lockfile
+          bunx --no-install playwright install --with-deps firefox
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: oracle-shard-*
+          path: shards
+
+      - name: Oracle images and Bevy runs
+        run: |
+          mkdir -p target/oracle
+          cp shards/*/*.png shards/*/*.bevy.json target/oracle/
+
+      - name: Browser gate (Firefox, WebGPU on lavapipe)
+        env:
+          SMOKE_BROWSER: firefox
+        run: xvfb-run -a bash scripts/browser-gate.sh target/oracle
+
+      - name: Upload the browser captures
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: browser-gate
+          path: |
+            target/oracle/*.webgpu*.png
+            target/oracle/*.webgpu*.json
+          retention-days: 7
           if-no-files-found: warn
 
   # Joins the slices into one report (and the Pages site) and fails when any oracle job failed.
@@ -254,11 +319,11 @@ jobs:
   merge-ready:
     name: merge-ready
     if: ${{ always() }}
-    needs: [docs-scope, tests, oracle]
+    needs: [docs-scope, tests, oracle, browser]
     runs-on: ubuntu-latest
     steps:
       - uses: moritzbrantner/reusable-workflows/.github/actions/merge-ready@b0f25f241d76af2584dfc9e375084ff5c5cb97da
         with:
           needs: ${{ toJSON(needs) }}
-          required: '["docs-scope", "tests", "oracle"]'
-          allow-skipped: ${{ needs.docs-scope.outputs.docs-only == 'true' && '["tests", "oracle"]' || '[]' }}
+          required: '["docs-scope", "tests", "oracle", "browser"]'
+          allow-skipped: ${{ needs.docs-scope.outputs.docs-only == 'true' && '["tests", "oracle", "browser"]' || '[]' }}

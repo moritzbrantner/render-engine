@@ -109,7 +109,7 @@ Bevy, native render-engine and the oracle's three.js frame come from the oracle
 | Scenario | WebGL 2 fallback vs Bevy | vs native engine | vs browser WebGPU (engine wasm) | vs oracle three.js (differing px) | Native engine vs Bevy |
 | --- | --- | --- | --- | --- | --- |
 | `sun_shadows` | 0.0000 / 0.0000 | 0.0000 / 0.0000 | 0.0243 / 0.0493 | 0.0000 / 0.0000 (14) | 0.0000 / 0.0000 |
-| `textured_props` | 0.0000 / 0.0006 | 0.0000 / 0.0005 | not run (glTF from disk) | 0.0000 / 0.0002 (96) | 0.0000 / 0.0005 |
+| `textured_props` | 0.0000 / 0.0006 | 0.0000 / 0.0005 | not run (glTF from disk; the page fetches it since #129) | 0.0000 / 0.0002 (96) | 0.0000 / 0.0005 |
 
 Playwright's Firefox 159 gives the same WebGL 2 numbers (its WebGL 2 is also on llvmpipe), and its
 WebGPU (behind `dom.webgpu.enabled`; wgpu on the same llvmpipe Vulkan driver) renders
@@ -155,7 +155,8 @@ within an emitter; the three.js side's is deterministic.
   probe's extension check and context release.
 - `scripts/browser-backends.sh` (local, like the WebGPU smoke; not on CI): `check-backends.mjs`
   runs the `select` page in headless Chromium with WebGPU available (the engine renders
-  `sun_shadows`; `textured_props` fails to initialise in wasm and falls back), with WebGPU off
+  `sun_shadows`; `textured_props` with its glTF files withheld, `assets=0`, fails to initialise in
+  wasm and falls back), with WebGPU off
   (WebGL 2 renders both) and with WebGPU and WebGL off (the error on the page), then
   `compare select` fails if a WebGL 2 frame is outside D3's gates against Bevy. `SKIP_WEBGPU=1`
   skips the WebGPU cases, `SMOKE_BROWSER=firefox` runs Firefox (the switches become prefs).

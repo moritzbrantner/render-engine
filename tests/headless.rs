@@ -428,7 +428,7 @@ fn gpu_particles_spawn_age_die_and_draw() {
             let lit = frame.rgba.chunks(4).filter(|p| p[0] > 50).count();
             assert!(lit > 20, "particles light {lit} pixels");
         }
-        let counts = world.read_alive_particles();
+        let counts = pollster::block_on(world.read_alive_particles());
         let of = |id| counts.iter().find(|c| c.0 == id).unwrap().1;
         alive.push((of(rate), of(burst)));
     }
@@ -490,7 +490,7 @@ fn particle_snapshots_and_triggered_bursts() {
     world.burst(bursts, 2, Mat4::from_translation(-Vec3::X));
     gpu.queue.submit([encoder.finish()]);
     let alive = |world: &World| {
-        let counts = world.read_alive_particles();
+        let counts = pollster::block_on(world.read_alive_particles());
         [fed, bursts].map(|id| counts.iter().find(|c| c.0 == id).unwrap().1)
     };
     assert_eq!(alive(&world), [3, 0], "the dead state is left out");

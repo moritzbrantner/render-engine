@@ -1378,7 +1378,10 @@ fn cpu_frames(gpu: &Headless, viewport: &mut Viewport, b: &mut Built, frames: us
 fn measure(gpu: &Headless, b: &mut Built, frames: usize) -> Json {
     let mut viewport = Viewport::new(gpu.renderer(), WIDTH, HEIGHT);
     let cpu = cpu_frames(gpu, &mut viewport, b, frames);
-    let alive: u32 = b.world.read_alive_particles().iter().map(|(_, n)| n).sum();
+    let alive: u32 = pollster::block_on(b.world.read_alive_particles())
+        .iter()
+        .map(|(_, n)| n)
+        .sum();
     let capacity: u64 = b
         .emitters
         .iter()

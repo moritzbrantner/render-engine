@@ -1,8 +1,17 @@
 //! Native half of the WebGPU smoke (`docs/webgpu-browser-assessment.md`).
 //!
 //! ```text
-//! compare images <out dir> <scenario>...    FLIP of <scenario>.webgpu against the oracle's PNGs
+//! compare images <out dir> <scenario>[:<tag>]...  FLIP of <scenario>.<tag> (default webgpu)
+//!                                           against the oracle's PNGs; fails outside D3's
+//!                                           gates against Bevy
 //! compare native <out dir> <scenario>...    the same CPU/GPU protocol on native render-engine
+//! compare particles <out dir> <scenario>[:<tag>]...  the browser's particle runs judged as
+//!                                           the oracle judges them (D9); fails outside the gates
+//! compare soft <out dir> <metres> <scenario>...  soft particles: the browser's run against the
+//!                                           same natively; fails outside D3's gates
+//! compare diagnostics <out dir> <scenario>...  the browser's GPU-culling and clustered
+//!                                           readbacks against native; fails if they differ
+//! compare list lighting|particles -           the scenario names the other modes take
 //! compare select <out dir> <scenario>...    FLIP of the `select` mode's WebGL 2 fallback; fails
 //!                                           outside D3's gates against Bevy
 //! compare showcase <out dir> <frame>:<view>...  FLIP of the browser showcase's captures
@@ -34,6 +43,10 @@ mod particles;
 #[path = "../../../src/scenarios.rs"]
 mod scenarios;
 
+#[allow(dead_code)]
+#[path = "../particle_run.rs"]
+mod particle_run;
+#[allow(dead_code)]
 #[path = "../scenario_list.rs"]
 mod scenario_list;
 
@@ -68,21 +81,28 @@ fn png(path: &Path) -> Option<(u32, u32, Vec<u8>)> {
     Some((image.width(), image.height(), image.into_raw()))
 }
 
-fn images(out: &Path, names: &[String]) {
+/// `<scenario>[:<tag>]`: the browser capture `<scenario>.<tag>.rgba` (tag `webgpu` by default;
+/// `run.mjs` takes another from `SMOKE_TAG`, e.g. for `culling=gpu`) against the oracle's PNGs.
+/// False when a capture is missing or outside D3's gates against Bevy.
+fn images(out: &Path, specs: &[String]) -> bool {
+    let mut ok = true;
     println!(
-        "scenario | vs native engine (mean / p99 / differing px) | vs Bevy | vs three.js | native engine vs Bevy"
+        "scenario | capture | vs native engine (mean / p99 / differing px) | vs Bevy | vs three.js | native engine vs Bevy"
     );
-    for name in names {
+    for spec in specs {
+        let (name, tag) = spec.split_once(':').unwrap_or((spec, "webgpu"));
         let Some((w, h, engine)) = png(&out.join(format!("{name}.engine.png"))) else {
-            println!("{name}: no engine PNG");
+            println!("{name} | {tag} | no engine PNG (run the oracle first) | FAIL");
+            ok = false;
             continue;
         };
-        let Ok(rgba) = std::fs::read(out.join(format!("{name}.webgpu.rgba"))) else {
-            println!("{name}: no webgpu capture");
+        let Ok(rgba) = std::fs::read(out.join(format!("{name}.{tag}.rgba"))) else {
+            println!("{name} | {tag} | no capture | FAIL");
+            ok = false;
             continue;
         };
         image::save_buffer(
-            out.join(format!("{name}.webgpu.png")),
+            out.join(format!("{name}.{tag}.png")),
             &rgba,
             w,
             h,
@@ -97,19 +117,23 @@ fn images(out: &Path, names: &[String]) {
             .filter(|(a, b)| a != b)
             .count();
         let (m, p) = flip(w, h, &engine, &rgba);
-        let cell = |file: &str, against: &[u8]| {
-            png(&out.join(format!("{name}.{file}.png"))).map_or("-".to_string(), |(_, _, r)| {
-                let (m, p) = flip(w, h, &r, against);
-                format!("{m:.4} / {p:.4}")
-            })
+        let against = |file: &str, test: &[u8]| {
+            png(&out.join(format!("{name}.{file}.png"))).map(|(_, _, r)| flip(w, h, &r, test))
         };
+        let cell =
+            |v: Option<(f32, f32)>| v.map_or("-".to_string(), |(m, p)| format!("{m:.4} / {p:.4}"));
+        let bevy = against("bevy", &rgba);
+        let pass = bevy.is_some_and(|(m, p)| m <= FLIP_MEAN_MAX && p <= FLIP_P99_MAX);
+        ok &= pass;
         println!(
-            "{name} | {m:.4} / {p:.4} / {differing} | {} | {} | {}",
-            cell("bevy", &rgba),
-            cell("three", &rgba),
-            cell("bevy", &engine)
+            "{name} | {tag} | {m:.4} / {p:.4} / {differing} | {} {} | {} | {}",
+            cell(bevy),
+            if pass { "ok" } else { "FAIL" },
+            cell(against("three", &rgba)),
+            cell(against("bevy", &engine)),
         );
     }
+    ok
 }
 
 /// D3's gates (`oracle/src/main.rs`).
@@ -350,6 +374,256 @@ fn showcase(out: &Path, specs: &[String]) -> bool {
     ok
 }
 
+/// Bevy's run of a particle scenario, from the oracle's `<name>.bevy.json`.
+fn bevy_run(out: &Path, name: &str) -> Result<particle_run::BevyRun, String> {
+    let file = out.join(format!("{name}.bevy.json"));
+    let json: serde_json::Value = std::fs::read(&file)
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .ok_or_else(|| format!("{}: missing (run the oracle first)", file.display()))?;
+    let spawns = serde_json::from_value(json["spawns"].clone()).map_err(|e| e.to_string())?;
+    let first_spawn_update = json["first_spawn_update"]
+        .as_u64()
+        .ok_or("first_spawn_update")?;
+    Ok(particle_run::BevyRun {
+        first_spawn_update: first_spawn_update as u32,
+        spawns,
+    })
+}
+
+fn particle_scenario(name: &str) -> Option<particles::ParticleScenario> {
+    particles::all().into_iter().find(|s| s.name == name)
+}
+
+/// The browser's particle runs (`run.mjs <out> particles <name>`: `<name>.<capture>.<tag>.rgba`,
+/// the plate, and `<name>.<tag>.json` with its spawn and alive counts) judged as the oracle
+/// judges render-engine (D9): each capture by its tier against Bevy, every frame by the counts.
+/// Also FLIP against native render-engine's capture. False when anything fails.
+fn particle_images(out: &Path, specs: &[String]) -> bool {
+    let mut ok = true;
+    println!(
+        "scenario@capture | tier | vs Bevy (mean / p99; stats coverage / spatial / colour) | gate | vs native engine (mean / p99 / differing px) | counts"
+    );
+    for spec in specs {
+        let (name, tag) = spec.split_once(':').unwrap_or((spec, "webgpu"));
+        let Some(s) = particle_scenario(name) else {
+            println!("{name}: no particle scenario");
+            ok = false;
+            continue;
+        };
+        let (w, h) = (s.width, s.height);
+        let counts_ok = std::fs::read(out.join(format!("{name}.{tag}.json")))
+            .ok()
+            .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+            .and_then(|j| j["particles"]["populationOk"].as_bool())
+            .unwrap_or(false);
+        ok &= counts_ok;
+        let read = |label: &str, side: &str| png(&out.join(format!("{name}.{label}.{side}.png")));
+        let browser =
+            |label: &str| std::fs::read(out.join(format!("{name}.{label}.{tag}.rgba"))).ok();
+        let (Some((_, _, bevy_plate)), Some(plate)) = (read("plate", "bevy"), browser("plate"))
+        else {
+            println!("{name} | {tag} | no plate | FAIL");
+            ok = false;
+            continue;
+        };
+        for c in &s.captures {
+            let label = c.label();
+            let (Some((_, _, bevy)), Some(rgba)) = (read(&label, "bevy"), browser(&label)) else {
+                println!("{name}@{label} | {tag} | missing capture | FAIL");
+                ok = false;
+                continue;
+            };
+            image::save_buffer(
+                out.join(format!("{name}.{label}.{tag}.png")),
+                &rgba,
+                w,
+                h,
+                image::ExtendedColorType::Rgba8,
+            )
+            .expect("png");
+            let (m, p) = flip(w, h, &bevy, &rgba);
+            let stats = particles::StatDistance::new(
+                &particles::ImageStats::new(w, h, &bevy, &bevy_plate),
+                &particles::ImageStats::new(w, h, &rgba, &plate),
+            );
+            let pass = match c.tier {
+                particles::Tier::Exact => m <= FLIP_MEAN_MAX && p <= FLIP_P99_MAX,
+                particles::Tier::Statistical => stats.passes(s.stat_max),
+            };
+            ok &= pass;
+            let native = read(&label, "engine").map_or("-".to_string(), |(_, _, e)| {
+                let (m, p) = flip(w, h, &e, &rgba);
+                let differing = e
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .zip(rgba.as_chunks::<4>().0)
+                    .filter(|(a, b)| a != b)
+                    .count();
+                format!("{m:.4} / {p:.4} / {differing}")
+            });
+            println!(
+                "{name}@{label} | {} | {m:.4} / {p:.4}; {:.3} / {:.3} / {:.3} | {} | {native} | {}",
+                c.tier.id(),
+                stats.coverage,
+                stats.spatial,
+                stats.colour,
+                if pass { "ok" } else { "FAIL" },
+                if counts_ok { "ok" } else { "DIFFER" },
+            );
+        }
+    }
+    ok
+}
+
+/// Soft particles (`Emitter::depth_fade`): the scenarios run natively with `fade` metres on every
+/// emitter (`particle_run`, Bevy's spawns), against the browser's run of the same
+/// (`run.mjs <out> particles <name> soft=<fade>` with `SMOKE_TAG=webgpu-soft`). There is no Bevy
+/// counterpart for a soft emitter here, so the gate is D3's against native render-engine. Also
+/// counts the pixels the fade changed natively against the hard run, so a fade that does
+/// nothing shows. False when anything fails.
+fn soft(out: &Path, fade: f32, names: &[String]) -> bool {
+    let gpu = Headless::new().expect("adapter");
+    let mut ok = true;
+    println!(
+        "scenario@capture | browser soft vs native soft (mean / p99 / differing px) | gate | native soft vs hard (differing px)"
+    );
+    for name in names {
+        let (Some(s), Ok(bevy)) = (particle_scenario(name), bevy_run(out, name)) else {
+            println!("{name}: no particle scenario or Bevy run");
+            ok = false;
+            continue;
+        };
+        let (w, h) = (s.width, s.height);
+        let native = |fade| {
+            pollster::block_on(particle_run::run(
+                gpu.renderer(),
+                &gpu.device,
+                &gpu.queue,
+                &s,
+                &bevy,
+                fade,
+                async |viewport, world, scene, instances| {
+                    gpu.render(viewport, world, scene, instances)
+                        .map(|f| f.rgba)
+                        .map_err(|e| e.to_string())
+                },
+            ))
+        };
+        let (soft_run, hard_run) = match (native(Some(fade)), native(None)) {
+            (Ok(a), Ok(b)) => (a, b),
+            (Err(e), _) | (_, Err(e)) => {
+                println!("{name}: native run failed: {e}");
+                ok = false;
+                continue;
+            }
+        };
+        for ((frame, engine), (_, hard)) in soft_run.captures.iter().zip(&hard_run.captures) {
+            let label = s
+                .captures
+                .iter()
+                .find(|c| c.frame == *frame)
+                .expect("captured frame")
+                .label();
+            image::save_buffer(
+                out.join(format!("{name}.{label}.engine-soft.png")),
+                engine,
+                w,
+                h,
+                image::ExtendedColorType::Rgba8,
+            )
+            .expect("png");
+            let differing = |a: &[u8], b: &[u8]| {
+                a.as_chunks::<4>()
+                    .0
+                    .iter()
+                    .zip(b.as_chunks::<4>().0)
+                    .filter(|(a, b)| a != b)
+                    .count()
+            };
+            let faded = differing(engine, hard);
+            let Ok(rgba) = std::fs::read(out.join(format!("{name}.{label}.webgpu-soft.rgba")))
+            else {
+                println!("{name}@{label} | no browser capture | FAIL | {faded}");
+                ok = false;
+                continue;
+            };
+            let (m, p) = flip(w, h, engine, &rgba);
+            let pass = m <= FLIP_MEAN_MAX && p <= FLIP_P99_MAX && faded > 0;
+            ok &= pass;
+            println!(
+                "{name}@{label} | {m:.4} / {p:.4} / {} | {} | {faded}",
+                differing(engine, &rgba),
+                if pass { "ok" } else { "FAIL" }
+            );
+        }
+    }
+    ok
+}
+
+/// The GPU readbacks of `run.mjs <out> render <name> culling=gpu lights=diagnostic` with
+/// `SMOKE_TAG=webgpu-gpu` (`<name>.webgpu-gpu.json`: per-view instances kept by
+/// `Culling::GpuIndirect`, the clustered counters) against the same frame natively. False when
+/// the culled counts differ or the browser has no cluster counters.
+fn diagnostics(out: &Path, names: &[String]) -> bool {
+    use render_engine::renderer::{ClusterConfig, Culling, LightAssignment};
+    let gpu = Headless::new().expect("adapter");
+    let mut ok = true;
+    println!(
+        "scenario | GPU-culled instances per view: native | browser | cluster (fragments, lights looped): native | browser | culled counts equal"
+    );
+    for name in names {
+        let Some(s) = scenario_list::find(name) else {
+            println!("{name}: no scenario");
+            ok = false;
+            continue;
+        };
+        let (world, instances, _) = content::upload(gpu.renderer(), &s.assets, &s.objects);
+        let mut viewport = Viewport::new(gpu.renderer(), s.width, s.height);
+        viewport
+            .set_culling(gpu.renderer(), Culling::GpuIndirect)
+            .expect("GPU culling");
+        viewport
+            .set_light_assignment(
+                gpu.renderer(),
+                LightAssignment::Clustered(ClusterConfig {
+                    diagnostic: true,
+                    ..ClusterConfig::default()
+                }),
+            )
+            .expect("clustered");
+        gpu.render(&mut viewport, &world, &s.scene, &instances)
+            .expect("frame");
+        let culled = pollster::block_on(gpu.renderer().read_gpu_culled(&viewport));
+        let cluster = pollster::block_on(gpu.renderer().read_cluster_diagnostic(&viewport));
+        let native_culled = serde_json::json!(culled);
+        let native_cluster = serde_json::json!(cluster.map(|(f, n)| [f, n]));
+        let browser = std::fs::read(out.join(format!("{name}.webgpu-gpu.json")))
+            .ok()
+            .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok());
+        let (browser_culled, browser_cluster) =
+            browser
+                .as_ref()
+                .map_or((serde_json::Value::Null, serde_json::Value::Null), |j| {
+                    (
+                        j["diagnostics"]["gpuCulledPerView"].clone(),
+                        j["diagnostics"]["clusterFragmentsLights"].clone(),
+                    )
+                });
+        // The cluster counters count fragment invocations, so they only match where both run
+        // the same early depth test (native has `SHADER_EARLY_DEPTH_TEST`, WebGPU does not):
+        // reported, not gated.
+        let same = browser_culled == native_culled && !browser_cluster.is_null();
+        ok &= same;
+        println!(
+            "{name} | {native_culled} | {browser_culled} | {native_cluster} | {browser_cluster} | {}",
+            if same { "ok" } else { "FAIL" }
+        );
+    }
+    ok
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let [mode, out, names @ ..] = args.as_slice() else {
@@ -360,7 +634,42 @@ fn main() {
     };
     let out = PathBuf::from(out);
     match mode.as_str() {
-        "images" => images(&out, names),
+        "images" => {
+            if !images(&out, names) {
+                std::process::exit(1);
+            }
+        }
+        "list" => {
+            // `compare list lighting|particles -`: the scenario names, one per line.
+            let names: Vec<&str> = match out.to_str() {
+                Some("lighting") => scenarios::all().iter().map(|s| s.name).collect(),
+                Some("particles") => particles::all().iter().map(|s| s.name).collect(),
+                _ => std::process::exit(2),
+            };
+            println!("{}", names.join("\n"));
+        }
+        "particles" => {
+            if !particle_images(&out, names) {
+                std::process::exit(1);
+            }
+        }
+        "soft" => {
+            let [fade, names @ ..] = names else {
+                std::process::exit(2);
+            };
+            if !soft(
+                &out,
+                fade.parse().expect("soft <out> <metres> <scenario>..."),
+                names,
+            ) {
+                std::process::exit(1);
+            }
+        }
+        "diagnostics" => {
+            if !diagnostics(&out, names) {
+                std::process::exit(1);
+            }
+        }
         "select" => {
             if !select(&out, names) {
                 std::process::exit(1);
