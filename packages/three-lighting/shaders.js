@@ -10,6 +10,8 @@ export const MAX_CASCADES = 4;
 /** Shadow-casting point and spot lights per frame (each takes texture units). */
 export const MAX_POINT_SHADOWS = 4;
 export const MAX_SPOT_SHADOWS = 4;
+/** The light-count defines of `litShading` before `Lighting` sets a frame's. */
+export const NO_LOCAL_LIGHTS = Object.freeze({ LIT_POINT_LIGHTS: 0, LIT_SPOT_LIGHTS: 0, LIT_POINT_SHADOWS: 0, LIT_SPOT_SHADOWS: 0 });
 
 // Bevy skin_model: four-influence linear blend skinning through three's SkinnedMesh (USE_SKINNING,
 // skinIndex/skinWeight, boneTexture = bone.matrixWorld × boneInverse per joint). The blended
@@ -101,7 +103,11 @@ void main() {
 }
 `;
 
-export const litFragment = /* glsl */ `
+// LitMaterial's fragment stage without its `main`: the material and frame inputs, the lights,
+// shadows, environment light and fog (`litRadiance`, `applyFog`). Lit and fogged particles
+// append their own `main` (particles.js), as render-engine appends `particles_shaded.wgsl` to
+// `lit.wgsl`.
+export const litShading = /* glsl */ `
 #define PI 3.141592653589793
 #define MAX_CASCADES ${MAX_CASCADES}
 
@@ -1004,6 +1010,9 @@ vec3 applyFog(vec3 inputColor, vec3 world) {
     return inputColor * (1.0 - extinctionFactor * color.a) + color.rgb * inscatteringFactor * color.a;
 }
 
+`;
+
+export const litFragment = /* glsl */ `${litShading}
 // Bevy pbr_fragment + apply_pbr_lighting + main_pass_post_lighting_processing, with
 // alpha_discard for masked materials. Front faces follow three's winding, which flips for
 // mirroring model matrices (Bevy's winding_corrected_front_facing).

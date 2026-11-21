@@ -67,6 +67,7 @@ import {
   MAX_CASCADES,
   MAX_POINT_SHADOWS,
   MAX_SPOT_SHADOWS,
+  NO_LOCAL_LIGHTS,
   outputFragment,
   shadowFragment,
   shadowVertex,
@@ -331,6 +332,8 @@ function frameUniforms() {
     atmosphere: { value: new Vector4(INNER_RADIUS, OUTER_RADIUS, 0, 0) },
     disks: { value: new Vector2() },
     atmosphereTransmittance: { value: null },
+    // The opaque draws' resolved depth, for soft particles (set when one is in the scene).
+    sceneDepth: { value: null },
     ...Object.fromEntries(
       ['pointShadowMap', 'pointShadowDepth', 'spotShadowMap', 'spotShadowDepth'].flatMap((name) =>
         Array.from({ length: 4 }, (_, i) => [`${name}${i}`, { value: null }]),
@@ -461,8 +464,6 @@ function packLocalLights(pointLights, spotLights, directionalSize, pointSize) {
     },
   };
 }
-
-const NO_LOCAL_LIGHTS = { LIT_POINT_LIGHTS: 0, LIT_SPOT_LIGHTS: 0, LIT_POINT_SHADOWS: 0, LIT_SPOT_SHADOWS: 0 };
 
 const WRAP = { repeat: RepeatWrapping, clampToEdge: ClampToEdgeWrapping, mirrorRepeat: MirroredRepeatWrapping };
 
@@ -1213,11 +1214,14 @@ export class Lighting {
     this.#updateUniforms(camera, cascades, local);
     const definesKey = JSON.stringify(local.defines);
     const sceneMaterials = new Set();
+    // Soft particles read the opaque draws' depth (particles.js).
+    let readsSceneDepth = false;
     scene.traverse((o) => {
       const materials = Array.isArray(o.material) ? o.material : [o.material];
       for (const m of materials) {
         if (m) sceneMaterials.add(m);
-        if (!m?.isLitMaterial) continue;
+        if (!m?.isLitMaterial && !m?.usesLighting) continue;
+        readsSceneDepth ||= Boolean(m.readsSceneDepth && o.visible);
         // The frame uniforms are shared objects whose values #updateUniforms sets: a material
         // takes them once.
         if (m.uniforms.exposure !== this.uniforms.exposure) Object.assign(m.uniforms, this.uniforms);
@@ -1261,14 +1265,18 @@ export class Lighting {
         projection.copy(upright);
       }
     };
-    if (this.sky) {
+    this.uniforms.sceneDepth.value = readsSceneDepth ? this.hdrTarget.depthTexture : null;
+    if (this.sky || readsSceneDepth) {
       // Like Bevy's main pass with a sky: the opaque and alpha-masked draws, the sky over them
-      // (reading their depth), then the blended draws.
+      // (reading their depth), then the blended draws. Soft particles read the same resolved
+      // depth (render-engine reads the multisampled one, which WebGL 2 cannot sample).
       const visible = new Map([...sceneMaterials].map((m) => [m, m.visible]));
       try {
         for (const [m, v] of visible) m.visible = v && !m.transparent;
         drawScene();
-        this.skyPasses.composite(renderer, this.hdrTarget, this.hdrTarget.depthTexture, camera.projectionMatrixInverse);
+        if (this.sky) {
+          this.skyPasses.composite(renderer, this.hdrTarget, this.hdrTarget.depthTexture, camera.projectionMatrixInverse);
+        }
         for (const [m, v] of visible) m.visible = v && m.transparent;
         drawScene();
       } finally {

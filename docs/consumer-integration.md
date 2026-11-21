@@ -529,7 +529,7 @@ not change the web client. "Ran in Chromium" below means that smoke, on that ada
 | `TIMESTAMP_QUERY` | GPU timing only, at pass begin and end | adapter-dependent | optional `timestamp-query`; ran in Chromium on NVIDIA, present on SwiftShader | advisory timing through `EXT_disjoint_timer_query_webgl2` |
 | Compute and write-only storage textures | The sky's environment filter, particle simulation | available | core; ran in Chromium | none in WebGL 2 |
 | `draw_indirect` | Particle draws | available | core; ran in Chromium | none in WebGL 2 |
-| A read-only depth attachment also bound as a multisampled depth texture | Soft particles (`Emitter::depth_fade`), opt-in | available | core; not run in a browser yet | not ported (#130): hard edges |
+| A read-only depth attachment also bound as a multisampled depth texture | Soft particles (`Emitter::depth_fade`), opt-in | available | core; not run in a browser yet | the opaque depth resolved into a texture after the opaque draws (#130) |
 | Indirect draws with a non-zero `first_instance` | Required by the opt-in `Culling::GpuIndirect`; it stays on the CPU path without it. Measured on the RTX 3060 Ti ([experiment](gpu-driven-experiment.md)) | `INDIRECT_FIRST_INSTANCE` | optional `indirect-first-instance`, present in Chromium on both adapters; the path has not run in a browser | none in WebGL 2 |
 | A fourth bind group and 4 fragment-stage storage buffers | Required by the default `LightAssignment::Clustered`; the viewport falls back to per-fragment without them. Measured on the RTX 3060 Ti ([experiment](forward-plus-experiment.md)) | adapter/limits-dependent | within the WebGPU defaults, 16 on NVIDIA and 10 on SwiftShader in Chromium; the path has not run in a browser | none in WebGL 2 (no fragment storage buffers) |
 | `multi_draw_*_indirect_count` | Not used by the experiment: with one mesh per run it could only remove empty draws. The RTX 3060 Ti reports it; it would need a shared vertex and index buffer to batch runs | `MULTI_DRAW_INDIRECT_COUNT`, Vulkan 1.2+ and DX12 | none: native-only in wgpu | none in WebGL 2 |
@@ -734,9 +734,9 @@ debris.setParticles(states.map((p) => ({ position: p.position, velocity: p.veloc
 `setEmitter`, `setTransform`, `burst`, `setParticles`, `step`, `spawnCount` and `aliveCount`
 match the `World` methods of the same name. A texture is a three `Texture` (`textureFromData` or
 any loader) with its mapping and flipbook. The oracle checks every bevy_hanabi particle scenario
-on this side against Bevy under D9's gates. Not on WebGL 2 yet (#130): lit, fogged and soft
-particles; such an emitter draws unlit, unfogged and with hard edges, and lists what it skipped in
-`emitter.unsupported`. The simulation runs on the main thread: a step of 100k live particles
+on this side against Bevy under D9's gates, `particles_lit_fog` and `particles_soft` included:
+`lighting` and `fog` take `Lighting`'s lights, shadows, exposure and fog, and `depthFade` the
+opaque depth `Lighting.render` resolves for it (#130). The simulation runs on the main thread: a step of 100k live particles
 takes about 4 ms (median, Node 24 on an Intel Core Ultra 7 258V, one thread; measured
 2026-11-20), plus the upload of their instance data, so very large emitters cost CPU time where
 the native build pays GPU time.

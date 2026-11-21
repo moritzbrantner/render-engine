@@ -52,11 +52,14 @@ export interface EmitterDescription {
     flipbook?: { grid: [number, number]; frames: number } | null;
   } | null;
   roundness?: number;
-  /** Not on WebGL 2 (render-engine#130): reported in `ParticleEmitter.unsupported`. */
+  /**
+   * Soft particles: metres over which a particle fades out in front of the opaque scene (0:
+   * hard). `Lighting.render` resolves the opaque draws' depth for it.
+   */
   depthFade?: number;
-  /** Not on WebGL 2 (render-engine#130): reported in `ParticleEmitter.unsupported`. */
+  /** Lit particles: each quad shaded as a StandardMaterial under `Lighting`'s lights. */
   lighting?: { perceptualRoughness: number; metallic: number; reflectance: number } | null;
-  /** Not on WebGL 2 (render-engine#130): reported in `ParticleEmitter.unsupported`. */
+  /** Fogged particles: `Lighting.fog`, lit or not. */
   fog?: boolean;
   blend?: 'add' | 'alpha';
   active?: boolean;
@@ -92,8 +95,6 @@ export class ParticleEmitter extends Mesh {
   readonly desc: Required<EmitterDescription>;
   /** Where new particles spawn (`World::set_emitter_transform`). */
   readonly transform: Matrix4;
-  /** Requested features WebGL 2 does not draw: 'lighting', 'fog', 'depthFade'. */
-  readonly unsupported: string[];
   /** The effect seed the next step uses. */
   readonly seed: number;
   /** Particles the spawner and bursts asked for in the last step. */

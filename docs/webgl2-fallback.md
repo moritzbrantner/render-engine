@@ -93,7 +93,7 @@ On WebGL 2 it uses the paths that exist without compute or storage buffers:
 | --- | --- |
 | Light assignment | Every point and spot light for every fragment, the engine's reference path (`LightAssignment::PerFragment`). No clustering. |
 | Culling | CPU: three.js frustum culling, plus `culling.js` per shadow view for instanced meshes. No `Culling::GpuIndirect`. |
-| Particles | CPU-simulated: `ParticleEmitter` replays the engine's emitters on the CPU and draws instanced quads (#126); every bevy_hanabi scenario passes against Bevy. Lit, fogged and soft particles are not ported ([#130](https://github.com/moritzbrantner/render-engine/issues/130)). |
+| Particles | CPU-simulated: `ParticleEmitter` replays the engine's emitters on the CPU and draws instanced quads (#126); every bevy_hanabi scenario passes against Bevy, and so do lit, fogged and soft particles (#130). |
 | HUD overlay | Not drawn: the web client draws its HUD in CSS (D8). |
 
 Limitations: it is a second implementation of the shading, so a shading change in the engine is
@@ -126,10 +126,10 @@ same WebGL 2 page rendered through ANGLE on SwiftShader is identical to that Web
 
 ### Particles
 
-The oracle's three.js side runs every particle scenario that has a bevy_hanabi reference with
-`ParticleEmitter`, driven as it drives render-engine, under D9's gates (lavapipe, headless
-Chromium through ANGLE on Vulkan; FLIP mean / p99, and coverage / spatial / colour distances for
-statistical captures):
+The oracle's three.js side runs every particle scenario (bevy_hanabi and `StandardMaterial` quad
+references) with `ParticleEmitter`, driven as it drives render-engine, under D9's gates
+(lavapipe, headless Chromium through ANGLE on Vulkan; FLIP mean / p99, and coverage / spatial /
+colour distances for statistical captures):
 
 | Scenario | Capture | three.js vs Bevy | render-engine vs Bevy |
 | --- | --- | --- | --- |
@@ -140,7 +140,8 @@ statistical captures):
 | `smoke_and_sparks` | 1.0 s, 3.0 s statistical | 0.000 / 0.002–0.005 / 0.001 | 0.000 / 0.001–0.002 / 0.000 |
 | `particles_snapshot` | 0.5 s, 1.0 s exact | 0.0000 / 0.0000 | the same |
 | `particles_cone` | 0.5 s exact, 2.5 s statistical | 0.0000 / 0.0000; 0.000 / 0.000 / 0.000 | the same |
-| `particles_lit_fog` | | not ported ([#130](https://github.com/moritzbrantner/render-engine/issues/130)) | passes |
+| `particles_lit_fog` | 0.5 s, 2.5 s exact | 0.0000 / 0.0000 | the same |
+| `particles_soft` | 0.5 s, 2.5 s exact | 0.0000 / 0.0001 | 0.0000 / 0.0000 |
 
 The spawn and alive counts match Bevy's on every frame of every scenario. `particles_alpha`'s
 colour distance varies between runs because Bevy's GPU decides the alpha-blended draw order

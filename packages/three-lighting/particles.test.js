@@ -168,13 +168,26 @@ describe('simulation', () => {
     expect(sprites).toEqual([0, 1, 1, 2, 2, 3, 3]);
   });
 
-  test('lighting, fog and soft edges are reported as unsupported', () => {
-    expect(sparks({ lighting: { perceptualRoughness: 1, metallic: 0, reflectance: 0 }, fog: true, depthFade: 0.2 }).unsupported).toEqual([
-      'lighting',
-      'fog',
-      'depthFade',
-    ]);
-    expect(sparks().unsupported).toEqual([]);
+  test('lighting, fog and soft edges select the shaded fragment stage', () => {
+    const plain = sparks().material;
+    expect(plain.fragmentShader).not.toContain('vec3 litRadiance(');
+    expect(plain.readsSceneDepth).toBe(false);
+    const e = sparks({ lighting: { perceptualRoughness: 1, metallic: 0.2, reflectance: 0.3 }, fog: true, depthFade: 0.2 });
+    const m = e.material;
+    expect(m.fragmentShader).toContain('vec3 litRadiance(');
+    expect(Object.keys(m.defines)).toEqual(expect.arrayContaining(['PARTICLE_LIT', 'PARTICLE_FOG', 'PARTICLE_SOFT', 'LIT_POINT_LIGHTS']));
+    expect(m.readsSceneDepth).toBe(true);
+    expect([m.uniforms.perceptualRoughness.value, m.uniforms.metallic.value, m.uniforms.reflectance.value]).toEqual([1, 0.2, 0.3]);
+    expect(m.uniforms.depthFade.value).toBe(0.2);
+    // Back to hanabi's defaults.
+    e.setEmitter({ ...e.desc, lighting: null, fog: false, depthFade: 0 });
+    expect(m.fragmentShader).not.toContain('vec3 litRadiance(');
+    expect(Object.keys(m.defines)).not.toEqual(expect.arrayContaining(['PARTICLE_LIT']));
+    expect(m.readsSceneDepth).toBe(false);
+    // Unlit but fogged: the shaded stage without lights.
+    const fogged = sparks({ fog: true }).material;
+    expect(fogged.fragmentShader).toContain('vec3 applyFog(');
+    expect(Object.hasOwn(fogged.defines, 'PARTICLE_LIT')).toBe(false);
   });
 
   test('descriptions are validated', () => {

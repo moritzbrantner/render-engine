@@ -19,7 +19,7 @@ use bevy::{
         DirectionalLightShadowMap, EnvironmentMapLight, GlobalAmbientLight, PointLightShadowMap,
         ShadowFilteringMethod, SunDisk, atmosphere::ScatteringMedium,
     },
-    pbr::AtmosphereSettings,
+    pbr::{AtmosphereSettings, ExtendedMaterial, MaterialExtension},
     prelude::*,
     render::{
         RenderApp, RenderPlugin, RenderStartup,
@@ -27,7 +27,8 @@ use bevy::{
         diagnostic::RenderDiagnosticsPlugin,
         occlusion_culling::OcclusionCulling,
         render_resource::{
-            Extent3d, TextureDataOrder, TextureFormat, TextureViewDescriptor, TextureViewDimension,
+            AsBindGroup, Extent3d, TextureDataOrder, TextureFormat, TextureViewDescriptor,
+            TextureViewDimension,
         },
         renderer::{RenderContext, RenderGraph, RenderGraphSystems, RenderQueue},
         settings::{RenderCreation, WgpuFeatures, WgpuSettings},
@@ -36,6 +37,7 @@ use bevy::{
             screenshot::{Screenshot, ScreenshotCaptured},
         },
     },
+    shader::ShaderRef,
     ui_render::UiAntiAlias,
     window::ExitCondition,
 };
@@ -1337,6 +1339,16 @@ pub fn run_particles(
     let seed = variant.seed.unwrap_or(scenario.seed);
     let quads = scenario.reference == particles::Reference::StandardQuads;
     let quad_spawns = quads.then(|| particles::quad_spawns(&scenario));
+    // Soft quads read the depth prepass.
+    let soft = scenario.emitters.iter().any(|e| e.depth_fade > 0.0);
+    app.add_plugins(MaterialPlugin::<SoftQuadMaterial>::default());
+    app.world_mut()
+        .resource_mut::<Assets<Shader>>()
+        .insert(
+            SOFT_QUAD_SHADER.id(),
+            Shader::from_wesl(include_str!("soft_quad.wesl"), "soft_quad.wesl"),
+        )
+        .expect("the soft quad shader is stored");
     if quads {
         let cam = scenario.scene.camera;
         app.insert_resource(QuadReference {
@@ -1349,16 +1361,19 @@ pub fn run_particles(
     }
     app.add_systems(
         Startup,
-        move |mut set: SceneSet, mut effects: ResMut<Assets<hanabi::EffectAsset>>| {
+        move |mut set: SceneSet,
+              mut effects: ResMut<Assets<hanabi::EffectAsset>>,
+              mut soft_materials: ResMut<Assets<SoftQuadMaterial>>| {
             let images = set.spawn(
                 (width, height),
                 &scenario.scene,
                 &scenario.objects,
                 &scenario.assets,
-                None,
+                // The depth prepass soft quads read.
+                soft.then_some(OcclusionMode::Depth),
             );
             if quads {
-                spawn_quads(&mut set, &scenario, &images);
+                spawn_quads(&mut set, &mut soft_materials, &scenario, &images);
                 return;
             }
             for (i, e) in scenario.emitters.iter().enumerate() {
@@ -1412,9 +1427,14 @@ struct QuadIndex(usize, usize);
 /// Lit and fogged particles (#84) as Bevy draws them: per particle a unit `Rectangle` (normal
 /// +z, uvs as hanabi's quad) with its own `StandardMaterial`: the particle's colour times the
 /// emitter's texture, lit with the emitter's `ParticleLighting` or unlit, `fog_enabled` per
-/// emitter, blended like the emitter. The quads cast no shadows (particles do not); hidden until
-/// [`pose_quads`] places them.
-fn spawn_quads(set: &mut SceneSet, s: &ParticleScenario, images: &[Handle<Image>]) {
+/// emitter, blended like the emitter; a soft emitter's (#83) extended with [`SoftFade`]. The quads
+/// cast no shadows (particles do not); hidden until [`pose_quads`] places them.
+fn spawn_quads(
+    set: &mut SceneSet,
+    soft_materials: &mut Assets<SoftQuadMaterial>,
+    s: &ParticleScenario,
+    images: &[Handle<Image>],
+) {
     let rectangle = set.meshes.add(Rectangle::new(1.0, 1.0));
     for (i, e) in s.emitters.iter().enumerate() {
         let Spawn::Burst { count } = e.spawn else {
@@ -1429,7 +1449,7 @@ fn spawn_quads(set: &mut SceneSet, s: &ParticleScenario, images: &[Handle<Image>
         }
         let lighting = e.lighting.unwrap_or_default();
         for k in 0..count.min(e.capacity) as usize {
-            let material = set.materials.add(StandardMaterial {
+            let material = StandardMaterial {
                 base_color_texture: e.texture.map(|t| images[t.texture].clone()),
                 perceptual_roughness: lighting.perceptual_roughness,
                 metallic: lighting.metallic,
@@ -1441,31 +1461,67 @@ fn spawn_quads(set: &mut SceneSet, s: &ParticleScenario, images: &[Handle<Image>
                     ParticleBlend::Alpha => AlphaMode::Blend,
                 },
                 ..default()
-            });
-            set.commands.spawn((
+            };
+            let mut quad = set.commands.spawn((
                 Mesh3d(rectangle.clone()),
-                MeshMaterial3d(material),
                 Transform::default(),
                 Visibility::Hidden,
                 bevy::light::NotShadowCaster,
                 QuadIndex(i, k),
             ));
+            if e.depth_fade > 0.0 {
+                quad.insert(MeshMaterial3d(soft_materials.add(ExtendedMaterial {
+                    base: material,
+                    extension: SoftFade {
+                        depth_fade: e.depth_fade,
+                    },
+                })));
+            } else {
+                quad.insert(MeshMaterial3d(set.materials.add(material)));
+            }
         }
     }
 }
+
+/// The soft quads' fragment stage (`soft_quad.wesl`).
+const SOFT_QUAD_SHADER: Handle<Shader> =
+    bevy::asset::uuid_handle!("5c0f7a3e-83d1-4b9a-9e52-1d30c6a0b083");
+
+/// Soft particles (#83) on a quad: render-engine's depth fade over `StandardMaterial`'s
+/// fragment stage, from the depth prepass (`soft_quad.wesl`). Bevy has no soft particles
+/// (technical decisions D9), so this is the engine's formula on Bevy's shading, depth and blending.
+#[derive(Asset, AsBindGroup, TypePath, Clone, Debug)]
+struct SoftFade {
+    #[uniform(100)]
+    depth_fade: f32,
+}
+
+impl MaterialExtension for SoftFade {
+    fn fragment_shader() -> ShaderRef {
+        SOFT_QUAD_SHADER.into()
+    }
+
+    fn enable_shadows() -> bool {
+        false
+    }
+}
+
+type SoftQuadMaterial = ExtendedMaterial<StandardMaterial, SoftFade>;
+
+/// A quad's material: plain, or soft ([`SoftFade`]).
+type QuadMaterial = AnyOf<(
+    &'static MeshMaterial3d<StandardMaterial>,
+    &'static MeshMaterial3d<SoftQuadMaterial>,
+)>;
 
 /// Places every quad at its particle's state after this simulation frame
 /// (`particles::quad_states`), facing the camera like hanabi's `ParallelCameraDepthPlane`.
 fn pose_quads(
     plan: Res<ParticlePlan>,
     reference: Option<Res<QuadReference>>,
-    mut quads: Query<(
-        &QuadIndex,
-        &mut Transform,
-        &mut Visibility,
-        &MeshMaterial3d<StandardMaterial>,
-    )>,
+    mut quads: Query<(&QuadIndex, &mut Transform, &mut Visibility, QuadMaterial)>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut soft_materials: ResMut<Assets<SoftQuadMaterial>>,
 ) {
     let Some(r) = reference else { return };
     if plan.sim_frame == 0 {
@@ -1483,8 +1539,19 @@ fn pose_quads(
             rotation: r.rotation,
             scale: Vec3::new(s.size.x, s.size.y, 1.0),
         };
-        if let Some(mut m) = materials.get_mut(&material.0) {
-            m.base_color = Color::linear_rgba(s.color.x, s.color.y, s.color.z, s.color.w);
+        let color = Color::linear_rgba(s.color.x, s.color.y, s.color.z, s.color.w);
+        match material {
+            (Some(standard), _) => {
+                if let Some(mut m) = materials.get_mut(&standard.0) {
+                    m.base_color = color;
+                }
+            }
+            (None, Some(soft)) => {
+                if let Some(mut m) = soft_materials.get_mut(&soft.0) {
+                    m.base.base_color = color;
+                }
+            }
+            (None, None) => {}
         }
     }
 }
