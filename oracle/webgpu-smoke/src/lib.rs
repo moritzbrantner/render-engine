@@ -376,6 +376,61 @@ impl Smoke {
         Ok(rgba)
     }
 
+    /// #116: `frames` rendered frames of the scenario, then `meshes` small meshes of different
+    /// sizes, each with its own material, added to its world around the camera's target, then
+    /// the frame with them. The upload that failed on SwiftShader after many small allocations
+    /// (`mappedAtCreation`) is the point; the pixels show the meshes drew.
+    pub async fn many_meshes(
+        &self,
+        name: &str,
+        frames: u32,
+        meshes: u32,
+    ) -> Result<Rendered, JsValue> {
+        use render_engine::{
+            glam::{Mat4, Vec3, Vec4},
+            material::StandardMaterial,
+            mesh::{MeshData, Shape},
+        };
+        let mut l = self.load(name)?;
+        for _ in 0..frames {
+            self.renderer
+                .prepare(&mut l.viewport, &l.world, &l.scene, &l.instances);
+            self.capture(&mut l).await?;
+        }
+        let start = now();
+        let target = l.scene.camera.target;
+        for i in 0..meshes {
+            let mesh = l.world.add_mesh(&MeshData::shape(Shape::Sphere {
+                radius: 0.1,
+                sectors: 3 + i % 20,
+                stacks: 2 + i % 11,
+            }));
+            let material = l.world.add_material(&StandardMaterial {
+                base_color: Vec4::new(1.0, 0.2 + (i % 5) as f32 * 0.2, 0.2, 1.0),
+                ..StandardMaterial::default()
+            });
+            let (x, z) = ((i % 15) as f32 * 0.25 - 1.75, (i / 15) as f32 * 0.25 - 1.25);
+            l.instances.push(Instance {
+                mesh,
+                material,
+                world_from_local: Mat4::from_translation(target + Vec3::new(x, 0.5, z)),
+                skin: None,
+            });
+        }
+        let upload_ms = now() - start;
+        let t0 = now();
+        self.renderer
+            .prepare(&mut l.viewport, &l.world, &l.scene, &l.instances);
+        let prepare_ms = now() - t0;
+        Ok(Rendered {
+            rgba: self.capture(&mut l).await?,
+            width: l.width,
+            height: l.height,
+            upload_ms,
+            prepare_ms,
+        })
+    }
+
     /// A particle capture: `frame` simulation steps of the scenario's emitters, then the frame
     /// the oracle captures (`run_engine_particles`, without its alive-count readback, which
     /// blocks). Pixels only.
