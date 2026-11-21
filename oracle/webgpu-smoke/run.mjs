@@ -7,7 +7,12 @@
 // .png) and .json, where tag is webgpu (render), select.<backend> (select: select.webgpu,
 // select.webgl2 or select.null when neither started) or the mode. Set SMOKE_FALLBACK=1 for Chromium's software
 // adapter (SwiftShader), SMOKE_DEV=1 for --enable-webgpu-developer-features (unquantised
-// timestamps; measurement only), SMOKE_BROWSER=firefox for Playwright's Firefox.
+// timestamps; measurement only), SMOKE_BROWSER=firefox for Playwright's Firefox, SMOKE_DPR=n for a
+// device pixel ratio of n.
+//
+// Mode `showcase` opens the browser showcase (web/showcase/, #128) instead, with <scenario> as the
+// shooter frame and its `task=` (capture, time, startup, lose [how=crash], resize, status); the page names
+// the tag (showcase-<view>, ...).
 
 import { createServer } from 'node:http';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -50,10 +55,12 @@ const server = createServer((req, res) => {
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 // SMOKE_WEBGPU=0 and SMOKE_WEBGL=0 switch the APIs off, for the `select` mode's fallback and
 // error paths. Without WebGPU the GL device stays the same (Vulkan on, so ANGLE does not drop to
-// SwiftShader, whose sRGB stores round differently from the oracle's adapter).
+// SwiftShader, whose sRGB stores round differently from the oracle's adapter). Chromium 159 offers a
+// hardware adapter on Linux without --enable-unsafe-webgpu, and only disabling WebGPUService too
+// takes it away.
 const args =
   process.env.SMOKE_WEBGPU === '0'
-    ? ['--enable-features=Vulkan', '--disable-features=WebGPU', '--use-vulkan=native', '--ignore-gpu-blocklist', '--enable-gpu']
+    ? ['--enable-features=Vulkan', '--disable-features=WebGPU,WebGPUService', '--use-vulkan=native', '--ignore-gpu-blocklist', '--enable-gpu']
     : ['--enable-unsafe-webgpu', '--enable-features=Vulkan,WebGPU', '--use-vulkan=native', '--ignore-gpu-blocklist', '--enable-gpu'];
 if (process.env.SMOKE_WEBGL === '0') args.push('--disable-webgl');
 if (process.env.SMOKE_FALLBACK === '1') args.push('--use-webgpu-adapter=swiftshader');
@@ -70,15 +77,26 @@ const browser =
         },
       })
     : await chromium.launch({ headless: true, args });
-const page = await browser.newPage();
+const page = await browser.newPage({ deviceScaleFactor: Number(process.env.SMOKE_DPR ?? 1) });
 const logs = [];
 page.on('console', (m) => logs.push(`${m.type()}: ${m.text()}`));
 page.on('pageerror', (e) => logs.push(`pageerror: ${e.message}`));
 const query = new URLSearchParams([['scene', scene], ['mode', mode], ...rest.map((kv) => kv.split('='))]);
 const t0 = Date.now();
-await page.goto(`http://127.0.0.1:${server.address().port}/oracle/webgpu-smoke/index.html?${query}`);
+const path = mode === 'showcase' ? '/web/showcase/index.html' : '/oracle/webgpu-smoke/index.html';
+await page.goto(`http://127.0.0.1:${server.address().port}${path}?${query}`);
+// The showcase's `task=lose how=crash`: a real device loss, by crashing Chromium's GPU process
+// once the page asks for it.
+if (mode === 'showcase' && query.get('how') === 'crash') {
+  await page.waitForFunction(() => window.smokeCrashGpu || window.smokeResult, null, { polling: 100, timeout: 120_000 });
+  if (await page.evaluate(() => window.smokeCrashGpu)) {
+    const cdp = await browser.newBrowserCDPSession();
+    await cdp.send('Browser.crashGpuProcess');
+  }
+}
 const handle = await page
-  .waitForFunction(() => window.smokeResult, null, { timeout: Number(process.env.SMOKE_TIMEOUT_MS ?? 300_000) })
+  // Polled on a timer: animation frames can stop (Firefox after a destroyed device).
+  .waitForFunction(() => window.smokeResult, null, { polling: 100, timeout: Number(process.env.SMOKE_TIMEOUT_MS ?? 300_000) })
   .catch((e) => {
     console.error(`webgpu smoke: no result (${e.message})\n${logs.join('\n')}`);
     process.exit(1);
@@ -93,7 +111,7 @@ if (result.error) {
   console.error(`webgpu smoke failed: ${result.error}\n${logs.join('\n')}`);
   process.exit(1);
 }
-const tag = process.env.SMOKE_TAG ?? (mode === 'render' ? 'webgpu' : mode === 'select' ? `select.${result.backend}` : mode);
+const tag = process.env.SMOKE_TAG ?? result.tag ?? (mode === 'render' ? 'webgpu' : mode === 'select' ? `select.${result.backend}` : mode);
 if (result.rgba) writeFileSync(join(out, `${scene}.${tag}.rgba`), Buffer.from(result.rgba, 'base64'));
 if (result.png) writeFileSync(join(out, `${scene}.${tag}.png`), Buffer.from(result.png, 'base64'));
 delete result.rgba;

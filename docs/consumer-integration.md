@@ -514,12 +514,12 @@ world.set_particles(&mut encoder, debris_emitter, &states);
 
 ## Native and browser targets
 
-The crate runs natively today, and the web client runs on the three.js port below, on WebGL 2.
-Browser WebGPU is a direction (D10) with a measured
-[feasibility assessment](webgpu-browser-assessment.md) behind it: `oracle/webgpu-smoke/`, compiled to
-wasm and run by Playwright's headless Chromium on an RTX 3060 Ti, rendered the oracle's fixtures
-within D3's gates. It is not a supported build, no other browser or adapter was tested, and it does
-not change the web client. "Ran in Chromium" below means that smoke, on that adapter.
+The crate runs natively, and in the browser on WebGPU through `render-engine-web`
+([below](#browser-webgpu), #128); the mmorpg web client runs on the three.js port further below, on
+WebGL 2. The browser columns rest on the [feasibility assessment](webgpu-browser-assessment.md)
+(`oracle/webgpu-smoke/`, the oracle's fixtures in Playwright's headless Chromium on an RTX 3060 Ti)
+and the showcase (`web/showcase/`, the shooter's frames in Playwright's Chromium and Firefox on the
+same GPU). "Ran in Chromium" below means those, on that adapter.
 
 | Capability | Use in the engine today | Native (wgpu 30) | WebGPU | three.js `WebGLRenderer` |
 | --- | --- | --- | --- | --- |
@@ -531,7 +531,7 @@ not change the web client. "Ran in Chromium" below means that smoke, on that ada
 | `draw_indirect` | Particle draws | available | core; ran in Chromium | none in WebGL 2 |
 | A read-only depth attachment also bound as a multisampled depth texture | Soft particles (`Emitter::depth_fade`), opt-in | available | core; not run in a browser yet | the opaque depth resolved into a texture after the opaque draws (#130) |
 | Indirect draws with a non-zero `first_instance` | Required by the opt-in `Culling::GpuIndirect`; it stays on the CPU path without it. Measured on the RTX 3060 Ti ([experiment](gpu-driven-experiment.md)) | `INDIRECT_FIRST_INSTANCE` | optional `indirect-first-instance`, present in Chromium on both adapters; the path has not run in a browser | none in WebGL 2 |
-| A fourth bind group and 4 fragment-stage storage buffers | Required by the default `LightAssignment::Clustered`; the viewport falls back to per-fragment without them. Measured on the RTX 3060 Ti ([experiment](forward-plus-experiment.md)) | adapter/limits-dependent | within the WebGPU defaults, 16 on NVIDIA and 10 on SwiftShader in Chromium; the path has not run in a browser | none in WebGL 2 (no fragment storage buffers) |
+| A fourth bind group and 4 fragment-stage storage buffers | Required by the default `LightAssignment::Clustered`; the viewport falls back to per-fragment without them. Measured on the RTX 3060 Ti ([experiment](forward-plus-experiment.md)) | adapter/limits-dependent | within the WebGPU defaults, 16 on NVIDIA and 10 on SwiftShader in Chromium; the showcase (#128) runs it in Chromium and Firefox on NVIDIA, byte-identical to native; its diagnostic readback blocks and has not run | none in WebGL 2 (no fragment storage buffers) |
 | `multi_draw_*_indirect_count` | Not used by the experiment: with one mesh per run it could only remove empty draws. The RTX 3060 Ti reports it; it would need a shared vertex and index buffer to batch runs | `MULTI_DRAW_INDIRECT_COUNT`, Vulkan 1.2+ and DX12 | none: native-only in wgpu | none in WebGL 2 |
 
 Without `MULTI_DRAW_INDIRECT_COUNT`, wgpu may emulate multi-draw as a series of `draw_indirect`
@@ -546,6 +546,147 @@ A page that offers a WebGPU build calls `selectBackend` from
 `@moritzbrantner/three-lighting/backend`: WebGPU first, else this port on WebGL 2 (per-fragment
 lights, CPU culling, CPU-simulated particles; see [Particles (web)](#particles-web)), else `NoGraphicsBackendError`, whose message names
 both reasons for the page to show.
+
+## Browser (WebGPU)
+
+`render-engine-web` (`web/`, #128) runs the engine in a page on the browser's WebGPU. It is a
+separate crate with its own manifest and lockfile, like `oracle/`: never a dependency or feature of
+`render-engine`, so a native build is unchanged. It adds no scene description: the page builds
+its `World` and `Scene` with the same calls as natively (D7), and the engine still reads no files,
+so the page fetches its content and hands it over.
+
+```toml
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+render-engine-web = { git = "https://github.com/moritzbrantner/render-engine", rev = "<commit>" }
+```
+
+```rust
+use render_engine_web::{App, DeviceLost, FrameInfo, Gpu, Options, wgpu};
+
+struct Game { /* lives for the page: CPU-side content, input, UI */ }
+struct OnDevice { world: World, viewport: Viewport }
+
+impl App for Game {
+    type State = OnDevice; // everything on one device
+
+    fn init(&mut self, gpu: &Gpu, (width, height): (u32, u32)) -> OnDevice {
+        let mut world = World::new(&gpu.renderer);
+        // add_mesh, add_texture, add_material, add_instance … from the game's own data
+        OnDevice { world, viewport: Viewport::new(&gpu.renderer, width, height) }
+    }
+
+    fn frame(&mut self, s: &mut OnDevice, gpu: &Gpu, target: &wgpu::TextureView, info: &FrameInfo) {
+        if info.resized {
+            s.viewport.resize(&gpu.renderer, info.width, info.height);
+        }
+        let scene = self.scene(info); // camera at info.width / info.height, lights, sky
+        gpu.renderer.prepare(&mut s.viewport, &s.world, &scene, &[]);
+        let mut encoder = gpu.device.create_command_encoder(&Default::default());
+        gpu.renderer.encode(&mut encoder, &s.viewport, &s.world, target, None);
+        gpu.queue.submit([encoder.finish()]);
+    }
+
+    fn device_lost(&mut self, lost: &DeviceLost) { /* tell the player */ }
+}
+
+let running = render_engine_web::start(canvas, Options::default(), Game::new()).await?;
+```
+
+- **Device.** `Gpu::new` requests a high-performance adapter and a device with the optional
+  features the renderer uses where the adapter has them (timestamps, depth clip control,
+  dual-source blending, filterable float, indirect first instance; `RENDERER_FEATURES`) and
+  WebGPU's default limits, then creates the `Renderer`. Uncaptured validation errors go to the
+  console and are counted (`Gpu::errors`) instead of panicking, so one bad frame does not abort
+  the module. `start` fails if the first device or canvas cannot be created, so `selectBackend`
+  falls through.
+- **Canvas.** Browsers offer `rgba8unorm` or `bgra8unorm` canvases, not sRGB ones. The canvas is
+  configured as the browser's preferred format (`navigator.gpu.getPreferredCanvasFormat()`) with
+  an sRGB view, and the renderer writes that view (`Gpu::color_format`: `Rgba8UnormSrgb` in
+  Chromium, `Bgra8UnormSrgb` in Firefox on Linux). Firefox 159 crashes on an `rgba8unorm` canvas.
+- **Size.** The canvas follows its CSS box × `devicePixelRatio`, capped at
+  `Options::max_pixel_ratio` (2) and the texture limit, checked every frame; `FrameInfo::resized`
+  tells the app to resize its viewport and recompute the camera's aspect.
+- **Frame loop.** `requestAnimationFrame` drives `App::frame`; the loop gets the canvas texture
+  and presents it. `Running::render_now` draws a frame synchronously (to read the canvas back in
+  the same task), `Running::suspend` pauses the loop for work that awaits the GPU, `Running::stop`
+  ends it.
+- **Device loss.** A lost device (GPU process crash or reset, driver update, `Gpu::destroy`) is
+  noticed on the next frame or within 250 ms. The loop drops the app's `State`, calls
+  `App::device_lost`, creates a new device, canvas configuration and renderer, and calls
+  `App::init` again: the game re-uploads from its own data, which is why that data lives in the
+  app, not the state. Five failed attempts end the loop with `App::failed`.
+- **Timing.** `timing::frame_times` is the async `Headless::gpu_frame_times`: GPU timestamps plus
+  `prepare`, `encode` and submit per frame, offscreen, after a warm-up.
+- **Not in the browser yet** ([#129](https://github.com/moritzbrantner/render-engine/issues/129)):
+  glTF and skinned content (no file-free loader path), particles, the blocking diagnostics
+  (`read_alive_particles`, the clustered and GPU-culling readbacks; they would need async forms)
+  and `Culling::GpuIndirect`. The default clustered light assignment runs.
+- **Backend selection.** Offer the build as `selectBackend`'s `webgpu` initialiser. A page with
+  no three.js version of its scene offers only that one, and without WebGPU shows
+  `NoGraphicsBackendError`'s message (the showcase does).
+
+**Showcase.** `web/showcase/` renders the shooter's frames (`tests/fixtures/shooter/`, built by
+`examples/shooter_frame/fixture.rs`) live under an orbiting camera, with the frame, the view and a
+"lose device" button on the page. The page fetches the frame JSON (6 KB for both), so the wasm
+carries no fixtures and shows any promoted frame. Build and open it:
+
+```sh
+bash scripts/build-web.sh        # release profile, wasm-bindgen, wasm-opt -O3; prints the sizes
+python3 -m http.server           # from the repository root; open http://localhost:8000/web/showcase/
+bash scripts/web-showcase.sh     # the evidence below, in Playwright's Chromium and Firefox
+```
+
+**Evidence** (#128; D10's rows for this target). RTX 3060 Ti, driver 595.99.02, Linux 7.0,
+Playwright's Chromium 159.0.8154.6 and Firefox 159.0, headless, on a desktop with other GPU
+clients open; single runs, so timings are advisory.
+
+| Load | Bytes | gzip -9 |
+| --- | ---: | ---: |
+| `shooter_showcase_bg.wasm` (release, LTO, wasm-opt `-O3`) | 1,118,483 | 645,377 |
+| same without wasm-opt | 1,397,543 | 687,031 |
+| JS glue, `main.js`, `index.html`, `backend.js` | 98,759 | 21,140 |
+| Page total (the frame JSON fetched on top: 5,789 bytes) | 1,217,242 | 666,517 |
+| #75's smoke, for comparison (oracle fixtures and IBL compiled in) | 3,034,187 | 2,350,287 |
+
+The two tone-mapping LUTs the engine embeds are 0.37 MB of it, already compressed.
+
+- **Images.** 8 views per browser (both frames: the viewer's eye and orbit 0°, 120°, 240°) at
+  1280 × 720, read back from the canvas: byte-identical to native render-engine (FLIP 0, 0
+  differing pixels) in Chromium and Firefox. The frame after a device loss and recovery is
+  identical too.
+- **Device loss.** Chromium: `Gpu::destroy` and a real GPU process crash (`Browser.crashGpuProcess`)
+  both recover onto a new device with the same image and no errors. Firefox: `Gpu::destroy`
+  recovers (new device, same image when drawn with `render_now`), but the browser then serves the
+  page no animation frames at all, its own included; a plain JS page doing the same does not
+  reproduce it, so the cause is not found. A real GPU reset in Firefox was not tested (Playwright's
+  Firefox has no way to cause one).
+- **Resize.** At device pixel ratio 2 the canvas renders 2560 × 1440 for a 1280 × 720 CSS box,
+  and follows CSS resizes (640 × 360 → 1280 × 720, 333 × 517 → 666 × 1034) without errors, in both
+  browsers.
+
+| GPU / `prepare` / `encode` / submit, ms (medians of 300 frames, 1280 × 720) | Chromium | Firefox | Native (Vulkan) |
+| --- | --- | --- | --- |
+| `tick1422` eye | 0.220 / 0.055 / 0.055 / 0.005 | 0.201 / 0.160 / 0.060 / 0.020 | 0.194 / 0.043 / 0.078 / 0.018 |
+| `tick1422` orbit 0° | 0.225 / 0.040 / 0.055 / 0.005 | 0.215 / 0.120 / 0.060 / 0.020 | 0.208 / 0.032 / 0.078 / 0.017 |
+| `tick1782` eye | 0.283 / 0.085 / 0.055 / 0.005 | 0.267 / 0.200 / 0.060 / 0.020 | 0.254 / 0.062 / 0.079 / 0.018 |
+| `tick1782` orbit 0° | 0.247 / 0.060 / 0.060 / 0.005 | 0.228 / 0.140 / 0.060 / 0.020 | 0.219 / 0.039 / 0.074 / 0.017 |
+
+GPU time is within 5 % (Firefox) and 13 % (Chromium) of native; Chromium's timestamps need
+`--enable-webgpu-developer-features` to be unquantised. `prepare` is 1.3–1.5× native in Chromium
+and 3–4× in Firefox, whose `performance.now()` has 20 µs steps here. `encode` and submit look
+cheaper than native only because the browser's share of the work happens in its GPU process,
+off this clock (as in #75). These scenes are small (36–38 instances, 10 point lights): the CPU
+cost of a game-sized frame in the browser is still unmeasured (#615's bottleneck).
+
+| Startup, ms from navigation start (3 launches) | Chromium | Firefox |
+| --- | ---: | ---: |
+| Page script starts | 31 | 123–127 |
+| wasm fetch, compile and instantiate | 11 | 78–97 |
+| Frame JSON fetch | 2 | 3 |
+| Adapter + device | 88–96 | 99–103 |
+| `Renderer::new` | 16–17 | 13 |
+| World build | 2–3 | 1 |
+| First frame drawn | 412–435 | 567–581 |
 
 ## Web client (three.js)
 
@@ -750,7 +891,9 @@ the native build pays GPU time.
 - GPU-driven visibility and indirect mesh draws as the default: an opt-in experiment
   ([results](gpu-driven-experiment.md), #71) reproduces the reference path but is not adopted (D10).
   Multi-draw batching is not implemented.
-- A supported browser build of the crate: only a measurement smoke exists (see [Native and browser targets](#native-and-browser-targets)).
+- glTF, skinned and particle content, the blocking diagnostics and the opt-in GPU paths in the
+  browser build ([#129](https://github.com/moritzbrantner/render-engine/issues/129); see
+  [Browser (WebGPU)](#browser-webgpu)).
 - Text and textured quads in the HUD overlay: `Scene::overlay` draws solid rectangles only. The
   web client draws its HUD in CSS and needs no port.
 - glTF features outside the core metallic-roughness model: texture transforms, a second UV set,

@@ -65,10 +65,36 @@ pub struct Frame {
     pub rgba: Vec<u8>,
 }
 
+/// The one wgpu instance every [`Headless`] in the process shares (#122).
+///
+/// The Vulkan loader (1.4.341) unloads the drivers without a physical device inside an
+/// instance's first `vkEnumeratePhysicalDevices`, without the lock under which
+/// `vkSetDebugUtilsObjectNameEXT` (wgpu's object labels in debug builds) walks every instance's
+/// driver list. With one instance per context, creating a context while another context
+/// names an object crashed in the loader. One instance, enumerated before it is handed out,
+/// does that unload once, before any device exists.
+///
+/// The lock serializes adapter selection and device creation on it: enumerating the GL backend
+/// makes the instance's one EGL context current, which fails with `BadAccess` when two threads
+/// do it at once.
+fn instance() -> std::sync::MutexGuard<'static, wgpu::Instance> {
+    static INSTANCE: std::sync::OnceLock<std::sync::Mutex<wgpu::Instance>> =
+        std::sync::OnceLock::new();
+    INSTANCE
+        .get_or_init(|| {
+            let instance = wgpu::Instance::new(
+                wgpu::InstanceDescriptor::new_without_display_handle_from_env(),
+            );
+            pollster::block_on(instance.enumerate_adapters(wgpu::Backends::all()));
+            std::sync::Mutex::new(instance)
+        })
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 impl Headless {
     pub fn new() -> Result<Self, Error> {
-        let instance =
-            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        let instance = instance();
         let force_fallback_adapter = std::env::var("WGPU_FORCE_FALLBACK_ADAPTER")
             .is_ok_and(|v| !(v.is_empty() || v == "0" || v == "false"));
         let adapter = match std::env::var("WGPU_ADAPTER_NAME") {
@@ -104,6 +130,7 @@ impl Headless {
             ..Default::default()
         }))
         .map_err(Error::Device)?;
+        drop(instance);
         let renderer = Renderer::new(&device, &queue, COLOR_FORMAT);
         Ok(Self {
             device,
