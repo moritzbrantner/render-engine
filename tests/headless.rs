@@ -870,3 +870,48 @@ fn overlay_quads_cover_their_pixels_after_tone_mapping() {
     let plain = gpu.render(&mut viewport, &world, &s, &instances).unwrap();
     assert_ne!(pixel(&plain, 16, 16), red, "an empty overlay draws nothing");
 }
+
+/// #116: after a few rendered frames, many small meshes and materials of different sizes upload
+/// (through unmapped buffers filled by the queue, as browser WebGPU needs) and all draw.
+#[test]
+fn many_small_meshes_added_after_rendering_draw() {
+    let gpu = Headless::new().expect("a wgpu adapter");
+    let mut world = World::new(gpu.renderer());
+    let mut s = scene(false, Tonemapping::AcesFitted);
+    s.camera.eye = Vec3::new(0.0, 20.0, 0.001);
+    let (w, h) = (128, 128);
+    let mut viewport = Viewport::new(gpu.renderer(), w, h);
+    let lit = |frame: &Frame| {
+        frame
+            .rgba
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .filter(|p| p[0] > 100 && p[1] > 100)
+            .count()
+    };
+    for _ in 0..3 {
+        let frame = gpu.render(&mut viewport, &world, &s, &[]).unwrap();
+        assert_eq!(lit(&frame), 0, "empty scene shows only the clear colour");
+    }
+
+    let instances: Vec<Instance> = (0..150u32)
+        .map(|i| {
+            let mesh = world.add_mesh(&MeshData::shape(Shape::Sphere {
+                radius: 0.3,
+                sectors: 3 + i % 20,
+                stacks: 2 + i % 11,
+            }));
+            let material = world.add_material(&StandardMaterial {
+                base_color: Vec4::new(1.0, 1.0, 1.0 - i as f32 / 300.0, 1.0),
+                ..StandardMaterial::default()
+            });
+            let (x, z) = ((i % 15) as f32 - 7.0, (i / 15) as f32 - 4.5);
+            at(mesh, material, Vec3::new(x, 0.0, z))
+        })
+        .collect();
+    let frame = gpu.render(&mut viewport, &world, &s, &instances).unwrap();
+    // A 0.6 m sphere 20 m away covers about 4x4 pixels: 150 of them light well over 1000.
+    let count = lit(&frame);
+    assert!(count > 1000, "{count} lit pixels");
+}

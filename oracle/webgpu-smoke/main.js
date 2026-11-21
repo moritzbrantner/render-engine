@@ -1,7 +1,8 @@
 // Runs one oracle scenario on the engine compiled to wasm32 in the browser's WebGPU and leaves
 // the result in `window.smokeResult` for run.mjs. Query: scene=<name>, mode=render|time|present|
-// particles|probe|select, frames=n, count=1 (GPU API calls and bytes per frame), spawn, frame
-// (particles), backend=webgpu|webgl2 (select: force one).
+// particles|meshes|probe|select, frames=n, count=1 (GPU API calls and bytes per frame), spawn,
+// frame (particles), meshes=n (meshes: n small meshes added after `frames` rendered frames, #116),
+// backend=webgpu|webgl2 (select: force one).
 //
 // probe: wgpu's WebGL 2 backend under the engine (docs/webgl2-fallback.md), no WebGPU needed.
 // select: the browser backend selection of packages/three-lighting/backend.js: the engine on
@@ -65,10 +66,15 @@ async function main() {
   const scene = q.get('scene');
   const mode = q.get('mode') ?? 'render';
   const result = { wasmMs, startupMs, info, mode, scene };
-  if (mode === 'render' || mode === 'particles') {
+  if (mode === 'render' || mode === 'particles' || mode === 'meshes') {
     const t1 = performance.now();
     if (q.get('count') === '1') for (const k in counters) delete counters[k];
-    const f = mode === 'render' ? await smoke.render(scene) : await smoke.particles(scene, Number(q.get('spawn')), Number(q.get('frame')));
+    const f =
+      mode === 'render'
+        ? await smoke.render(scene)
+        : mode === 'meshes'
+          ? await smoke.many_meshes(scene, Number(q.get('frames') ?? 30), Number(q.get('meshes') ?? 150))
+          : await smoke.particles(scene, Number(q.get('spawn')), Number(q.get('frame')));
     result.firstFrameMs = performance.now() - t1;
     result.timeToFirstFrameMs = performance.now() - t0;
     if (q.get('count') === '1') result.calls = { ...counters };
