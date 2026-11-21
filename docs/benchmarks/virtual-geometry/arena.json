@@ -1,0 +1,2085 @@
+{
+  "scope": "Offline geometry only; no GPU, frame-time, loading or visual-parity claims",
+  "referenceRevision": "b730aac13ab0ea67b75214613eea56c14151f6e5",
+  "engineRevision": "f9a1684dd6a699dd9b49f58e32e7010ac044e699",
+  "environment": {
+    "runtime": "v26.3.0",
+    "platform": "linux",
+    "arch": "x64",
+    "cpu": "AMD Ryzen 7 5700X 8-Core Processor"
+  },
+  "sampling": "One warm build, three timed builds per asset, no texture processing; raw milliseconds",
+  "cutCamera": "Reference cutStats: 1080p, 60 degree vertical FOV; original asset size, distances in source units; verifyClod uses seven sphere-relative cameras and five thresholds",
+  "rows": [
+    {
+      "asset": "scenes/arena.barrier/default.gltf",
+      "inputSha256": "6d8c0907b1a7deca8fece36f62e82baf1406e1642c57a45087472298ee9cc00f",
+      "sourceTriangles": 184,
+      "geometryBufferBytes": 19616,
+      "hierarchyBytes": 11728,
+      "hierarchySha256": "12b9ee65da4949aee981672c7ab957c0dfcd9fb72f5e7d0d4db7efeb6cb8be31",
+      "clusters": 3,
+      "groups": 2,
+      "levels": 1,
+      "buildMs": [
+        1.5838509999999992,
+        1.331555999999999,
+        1.2794480000000021
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 184,
+          "px2": 184,
+          "px4": 184
+        },
+        {
+          "distance": 3,
+          "px1": 184,
+          "px2": 184,
+          "px4": 184
+        },
+        {
+          "distance": 6,
+          "px1": 184,
+          "px2": 184,
+          "px4": 184
+        },
+        {
+          "distance": 12,
+          "px1": 184,
+          "px2": 184,
+          "px4": 68
+        },
+        {
+          "distance": 25,
+          "px1": 184,
+          "px2": 68,
+          "px4": 68
+        },
+        {
+          "distance": 50,
+          "px1": 68,
+          "px2": 68,
+          "px4": 68
+        },
+        {
+          "distance": 100,
+          "px1": 68,
+          "px2": 68,
+          "px4": 68
+        },
+        {
+          "distance": 200,
+          "px1": 68,
+          "px2": 68,
+          "px4": 68
+        }
+      ],
+      "existingLods": []
+    },
+    {
+      "asset": "scenes/arena.ceiling/default.gltf",
+      "inputSha256": "b7072037074bb094ea69230b22d20299081469a2fe5f12e16b0cbd90a8e69657",
+      "sourceTriangles": 170,
+      "geometryBufferBytes": 18700,
+      "hierarchyBytes": 11152,
+      "hierarchySha256": "38101bf07099e36147877874240da323c1fed0a8d10a0e9144c34f7e29c3970d",
+      "clusters": 3,
+      "groups": 2,
+      "levels": 1,
+      "buildMs": [
+        1.0300379999999976,
+        1.043764000000003,
+        1.0067950000000039
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 170,
+          "px2": 170,
+          "px4": 170
+        },
+        {
+          "distance": 3,
+          "px1": 170,
+          "px2": 170,
+          "px4": 170
+        },
+        {
+          "distance": 6,
+          "px1": 170,
+          "px2": 170,
+          "px4": 170
+        },
+        {
+          "distance": 12,
+          "px1": 170,
+          "px2": 170,
+          "px4": 170
+        },
+        {
+          "distance": 25,
+          "px1": 170,
+          "px2": 66,
+          "px4": 66
+        },
+        {
+          "distance": 50,
+          "px1": 66,
+          "px2": 66,
+          "px4": 66
+        },
+        {
+          "distance": 100,
+          "px1": 66,
+          "px2": 66,
+          "px4": 66
+        },
+        {
+          "distance": 200,
+          "px1": 66,
+          "px2": 66,
+          "px4": 66
+        }
+      ],
+      "existingLods": [
+        {
+          "lod": "lod1",
+          "triangles": 18,
+          "geometryBufferBytes": 1980
+        }
+      ]
+    },
+    {
+      "asset": "scenes/arena.container/default.gltf",
+      "inputSha256": "63c1e343563da0bdfa776e9e214f125845452afdef593b7958f26273c6e93ea1",
+      "sourceTriangles": 576,
+      "geometryBufferBytes": 61384,
+      "hierarchyBytes": 37864,
+      "hierarchySha256": "7ceb830fffd81369f16784b3a1876cd68a2d14cc8de80284246eda8d18fe4590",
+      "clusters": 9,
+      "groups": 3,
+      "levels": 2,
+      "buildMs": [
+        3.623778999999999,
+        7.109608999999999,
+        3.3684889999999967
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 576,
+          "px2": 576,
+          "px4": 576
+        },
+        {
+          "distance": 3,
+          "px1": 576,
+          "px2": 576,
+          "px4": 576
+        },
+        {
+          "distance": 6,
+          "px1": 576,
+          "px2": 576,
+          "px4": 576
+        },
+        {
+          "distance": 12,
+          "px1": 576,
+          "px2": 576,
+          "px4": 576
+        },
+        {
+          "distance": 25,
+          "px1": 576,
+          "px2": 576,
+          "px4": 576
+        },
+        {
+          "distance": 50,
+          "px1": 576,
+          "px2": 576,
+          "px4": 576
+        },
+        {
+          "distance": 100,
+          "px1": 576,
+          "px2": 576,
+          "px4": 106
+        },
+        {
+          "distance": 200,
+          "px1": 576,
+          "px2": 106,
+          "px4": 106
+        }
+      ],
+      "existingLods": []
+    },
+    {
+      "asset": "scenes/arena.cover-low/default.gltf",
+      "inputSha256": "0422cfe1fee4b09fbc97612e6acbf38c6238f38cc4cb62c64d2ffdef614db647",
+      "sourceTriangles": 180,
+      "geometryBufferBytes": 19176,
+      "hierarchyBytes": 11296,
+      "hierarchySha256": "777dc530213dd3be5d04390a57e81e0f49bb2dad5d7b9307c225e0d29ae4ab1f",
+      "clusters": 3,
+      "groups": 2,
+      "levels": 1,
+      "buildMs": [
+        0.8930000000000007,
+        0.8433770000000038,
+        0.8993320000000011
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 180,
+          "px2": 180,
+          "px4": 180
+        },
+        {
+          "distance": 3,
+          "px1": 180,
+          "px2": 180,
+          "px4": 180
+        },
+        {
+          "distance": 6,
+          "px1": 180,
+          "px2": 180,
+          "px4": 180
+        },
+        {
+          "distance": 12,
+          "px1": 180,
+          "px2": 180,
+          "px4": 180
+        },
+        {
+          "distance": 25,
+          "px1": 180,
+          "px2": 180,
+          "px4": 52
+        },
+        {
+          "distance": 50,
+          "px1": 180,
+          "px2": 52,
+          "px4": 52
+        },
+        {
+          "distance": 100,
+          "px1": 52,
+          "px2": 52,
+          "px4": 52
+        },
+        {
+          "distance": 200,
+          "px1": 52,
+          "px2": 52,
+          "px4": 52
+        }
+      ],
+      "existingLods": []
+    },
+    {
+      "asset": "scenes/arena.crate/default.gltf",
+      "inputSha256": "1638ef468a864c6e05a3c58027af25dd1d57b0c904eaa4324e43d15afaa59f2a",
+      "sourceTriangles": 156,
+      "geometryBufferBytes": 10920,
+      "hierarchyBytes": 6784,
+      "hierarchySha256": "6d4fd54b54599d1f89ddeb9665de024a0e7756612cf379fa2e760b30b31cb1da",
+      "clusters": 3,
+      "groups": 2,
+      "levels": 1,
+      "buildMs": [
+        0.5814639999999969,
+        0.5639819999999958,
+        0.6423489999999958
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 156,
+          "px2": 156,
+          "px4": 156
+        },
+        {
+          "distance": 3,
+          "px1": 156,
+          "px2": 156,
+          "px4": 156
+        },
+        {
+          "distance": 6,
+          "px1": 156,
+          "px2": 156,
+          "px4": 156
+        },
+        {
+          "distance": 12,
+          "px1": 156,
+          "px2": 156,
+          "px4": 156
+        },
+        {
+          "distance": 25,
+          "px1": 156,
+          "px2": 156,
+          "px4": 12
+        },
+        {
+          "distance": 50,
+          "px1": 12,
+          "px2": 12,
+          "px4": 12
+        },
+        {
+          "distance": 100,
+          "px1": 12,
+          "px2": 12,
+          "px4": 12
+        },
+        {
+          "distance": 200,
+          "px1": 12,
+          "px2": 12,
+          "px4": 12
+        }
+      ],
+      "existingLods": []
+    },
+    {
+      "asset": "scenes/arena.door/default.gltf",
+      "inputSha256": "7b6deb55945101ea5bf8b087eae4af671c82bb0d241dcbed8353f39d61c58ae8",
+      "sourceTriangles": 648,
+      "geometryBufferBytes": 67796,
+      "hierarchyBytes": 44200,
+      "hierarchySha256": "9b9b6001d6f21f479906bee4deb62dd5cd31ecbcebca6888dc07da8029492e9c",
+      "clusters": 13,
+      "groups": 4,
+      "levels": 3,
+      "buildMs": [
+        2.843139999999991,
+        5.729742000000002,
+        2.7935170000000085
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 648,
+          "px2": 648,
+          "px4": 648
+        },
+        {
+          "distance": 3,
+          "px1": 648,
+          "px2": 648,
+          "px4": 648
+        },
+        {
+          "distance": 6,
+          "px1": 648,
+          "px2": 648,
+          "px4": 648
+        },
+        {
+          "distance": 12,
+          "px1": 648,
+          "px2": 648,
+          "px4": 296
+        },
+        {
+          "distance": 25,
+          "px1": 296,
+          "px2": 296,
+          "px4": 296
+        },
+        {
+          "distance": 50,
+          "px1": 296,
+          "px2": 296,
+          "px4": 296
+        },
+        {
+          "distance": 100,
+          "px1": 296,
+          "px2": 296,
+          "px4": 62
+        },
+        {
+          "distance": 200,
+          "px1": 296,
+          "px2": 62,
+          "px4": 62
+        }
+      ],
+      "existingLods": []
+    },
+    {
+      "asset": "scenes/arena.doorway/default.gltf",
+      "inputSha256": "7708de2ed1902c2c264f43c640bfaef9d76a58b4849cfd23c8b97c95e0ca57ed",
+      "sourceTriangles": 624,
+      "geometryBufferBytes": 64792,
+      "hierarchyBytes": 40696,
+      "hierarchySha256": "c1361f70e59ef8bbb5b0942a1417c6513ecb745c7d29ef72d374a944790a310c",
+      "clusters": 10,
+      "groups": 3,
+      "levels": 2,
+      "buildMs": [
+        2.0973570000000024,
+        2.0754659999999916,
+        2.198397
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 624,
+          "px2": 624,
+          "px4": 624
+        },
+        {
+          "distance": 3,
+          "px1": 624,
+          "px2": 624,
+          "px4": 624
+        },
+        {
+          "distance": 6,
+          "px1": 624,
+          "px2": 624,
+          "px4": 624
+        },
+        {
+          "distance": 12,
+          "px1": 624,
+          "px2": 624,
+          "px4": 624
+        },
+        {
+          "distance": 25,
+          "px1": 624,
+          "px2": 624,
+          "px4": 256
+        },
+        {
+          "distance": 50,
+          "px1": 624,
+          "px2": 256,
+          "px4": 256
+        },
+        {
+          "distance": 100,
+          "px1": 256,
+          "px2": 256,
+          "px4": 256
+        },
+        {
+          "distance": 200,
+          "px1": 256,
+          "px2": 127,
+          "px4": 127
+        }
+      ],
+      "existingLods": []
+    },
+    {
+      "asset": "scenes/arena.floor/default.gltf",
+      "inputSha256": "e6fe1da634ab6f0564970a13e1960cb368d4230196cd556f7a8c57f157e88eef",
+      "sourceTriangles": 10,
+      "geometryBufferBytes": 1100,
+      "hierarchyBytes": 664,
+      "hierarchySha256": "ccc8ab024e38f552957a136883109815c70f568feea1f608c2652ce9e6e9e0ed",
+      "clusters": 1,
+      "groups": 1,
+      "levels": 0,
+      "buildMs": [
+        0.2356540000000109,
+        0.23439100000000224,
+        0.17666200000000742
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 10,
+          "px2": 10,
+          "px4": 10
+        },
+        {
+          "distance": 3,
+          "px1": 10,
+          "px2": 10,
+          "px4": 10
+        },
+        {
+          "distance": 6,
+          "px1": 10,
+          "px2": 10,
+          "px4": 10
+        },
+        {
+          "distance": 12,
+          "px1": 10,
+          "px2": 10,
+          "px4": 10
+        },
+        {
+          "distance": 25,
+          "px1": 10,
+          "px2": 10,
+          "px4": 10
+        },
+        {
+          "distance": 50,
+          "px1": 10,
+          "px2": 10,
+          "px4": 10
+        },
+        {
+          "distance": 100,
+          "px1": 10,
+          "px2": 10,
+          "px4": 10
+        },
+        {
+          "distance": 200,
+          "px1": 10,
+          "px2": 10,
+          "px4": 10
+        }
+      ],
+      "existingLods": []
+    },
+    {
+      "asset": "scenes/arena.generator/default.gltf",
+      "inputSha256": "121f4ed3dec8b471187b6175e447e49b2ca9027cee43e0fe86ed35efb3f328c7",
+      "sourceTriangles": 350,
+      "geometryBufferBytes": 36628,
+      "hierarchyBytes": 21880,
+      "hierarchySha256": "1074ad5eff4934cfaebc1ff0e99018dd9114c0a3c55fa9b251b11254b6af318a",
+      "clusters": 5,
+      "groups": 2,
+      "levels": 1,
+      "buildMs": [
+        1.2155079999999998,
+        1.1485310000000055,
+        1.3777529999999985
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 350,
+          "px2": 350,
+          "px4": 350
+        },
+        {
+          "distance": 3,
+          "px1": 350,
+          "px2": 350,
+          "px4": 350
+        },
+        {
+          "distance": 6,
+          "px1": 350,
+          "px2": 350,
+          "px4": 350
+        },
+        {
+          "distance": 12,
+          "px1": 350,
+          "px2": 350,
+          "px4": 350
+        },
+        {
+          "distance": 25,
+          "px1": 350,
+          "px2": 350,
+          "px4": 350
+        },
+        {
+          "distance": 50,
+          "px1": 350,
+          "px2": 350,
+          "px4": 126
+        },
+        {
+          "distance": 100,
+          "px1": 350,
+          "px2": 126,
+          "px4": 126
+        },
+        {
+          "distance": 200,
+          "px1": 126,
+          "px2": 126,
+          "px4": 126
+        }
+      ],
+      "existingLods": [
+        {
+          "lod": "lod1",
+          "triangles": 170,
+          "geometryBufferBytes": 17660
+        }
+      ]
+    },
+    {
+      "asset": "scenes/arena.hull-deck/default.gltf",
+      "inputSha256": "271c7b47c7f226b7eb7f9fd1dfc5a432aa33a60e6c3f78aabc064698d4723a0b",
+      "sourceTriangles": 10,
+      "geometryBufferBytes": 1100,
+      "hierarchyBytes": 664,
+      "hierarchySha256": "e11cc898a9d7b37f2096da03e77d81b262f1eaf209ab407d654e610b751002f4",
+      "clusters": 1,
+      "groups": 1,
+      "levels": 0,
+      "buildMs": [
+        0.16516099999999767,
+        0.15296800000000133,
+        0.16857799999999656
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 10,
+          "px2": 10,
+          "px4": 10
+        },
+        {
+          "distance": 3,
+          "px1": 10,
+          "px2": 10,
+          "px4": 10
+        },
+        {
+          "distance": 6,
+          "px1": 10,
+          "px2": 10,
+          "px4": 10
+        },
+        {
+          "distance": 12,
+          "px1": 10,
+          "px2": 10,
+          "px4": 10
+        },
+        {
+          "distance": 25,
+          "px1": 10,
+          "px2": 10,
+          "px4": 10
+        },
+        {
+          "distance": 50,
+          "px1": 10,
+          "px2": 10,
+          "px4": 10
+        },
+        {
+          "distance": 100,
+          "px1": 10,
+          "px2": 10,
+          "px4": 10
+        },
+        {
+          "distance": 200,
+          "px1": 10,
+          "px2": 10,
+          "px4": 10
+        }
+      ],
+      "existingLods": []
+    },
+    {
+      "asset": "scenes/arena.hull-mast/default.gltf",
+      "inputSha256": "218c1467b64d4a2a7f7a0086e3b836ed3caf2d3d753cbdfd99bf2abbb2c44781",
+      "sourceTriangles": 232,
+      "geometryBufferBytes": 23024,
+      "hierarchyBytes": 14236,
+      "hierarchySha256": "05fac74cdf3c66e93f2954f06398db470d34063fb4ce939ead545cc954208f62",
+      "clusters": 4,
+      "groups": 2,
+      "levels": 1,
+      "buildMs": [
+        0.8420150000000035,
+        0.8151440000000036,
+        0.8092629999999872
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 232,
+          "px2": 232,
+          "px4": 232
+        },
+        {
+          "distance": 3,
+          "px1": 232,
+          "px2": 232,
+          "px4": 232
+        },
+        {
+          "distance": 6,
+          "px1": 232,
+          "px2": 232,
+          "px4": 232
+        },
+        {
+          "distance": 12,
+          "px1": 232,
+          "px2": 232,
+          "px4": 232
+        },
+        {
+          "distance": 25,
+          "px1": 232,
+          "px2": 232,
+          "px4": 106
+        },
+        {
+          "distance": 50,
+          "px1": 232,
+          "px2": 106,
+          "px4": 106
+        },
+        {
+          "distance": 100,
+          "px1": 106,
+          "px2": 106,
+          "px4": 106
+        },
+        {
+          "distance": 200,
+          "px1": 106,
+          "px2": 106,
+          "px4": 106
+        }
+      ],
+      "existingLods": []
+    },
+    {
+      "asset": "scenes/arena.hull-rib/default.gltf",
+      "inputSha256": "5b097a4b73fd7e1b98e343d13cfb39a0284968885cdf4f9cbabfdb303e7351b2",
+      "sourceTriangles": 176,
+      "geometryBufferBytes": 19152,
+      "hierarchyBytes": 11680,
+      "hierarchySha256": "505d5a1627b5bfcfb27e5c6521eb78fa114fce6db66f71514ec66a5a75764d80",
+      "clusters": 3,
+      "groups": 2,
+      "levels": 1,
+      "buildMs": [
+        0.6938559999999825,
+        0.7091250000000002,
+        1.753811000000013
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 176,
+          "px2": 176,
+          "px4": 176
+        },
+        {
+          "distance": 3,
+          "px1": 176,
+          "px2": 176,
+          "px4": 176
+        },
+        {
+          "distance": 6,
+          "px1": 176,
+          "px2": 176,
+          "px4": 176
+        },
+        {
+          "distance": 12,
+          "px1": 176,
+          "px2": 176,
+          "px4": 176
+        },
+        {
+          "distance": 25,
+          "px1": 176,
+          "px2": 176,
+          "px4": 88
+        },
+        {
+          "distance": 50,
+          "px1": 88,
+          "px2": 88,
+          "px4": 88
+        },
+        {
+          "distance": 100,
+          "px1": 88,
+          "px2": 88,
+          "px4": 88
+        },
+        {
+          "distance": 200,
+          "px1": 88,
+          "px2": 88,
+          "px4": 88
+        }
+      ],
+      "existingLods": [
+        {
+          "lod": "lod1",
+          "triangles": 56,
+          "geometryBufferBytes": 5952
+        }
+      ]
+    },
+    {
+      "asset": "scenes/arena.hull-shoulder/default.gltf",
+      "inputSha256": "2e41eb18afae638b582d246b3e3486ff66630c930153a1852729b97e39b9e01a",
+      "sourceTriangles": 10,
+      "geometryBufferBytes": 1204,
+      "hierarchyBytes": 712,
+      "hierarchySha256": "93515ee530b35d316fe398f70c702c4479b94e9a2b1214e42810e975b4abaca7",
+      "clusters": 1,
+      "groups": 1,
+      "levels": 0,
+      "buildMs": [
+        0.17498900000001072,
+        0.14645600000000059,
+        0.14030399999998622
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 10,
+          "px2": 10,
+          "px4": 10
+        },
+        {
+          "distance": 3,
+          "px1": 10,
+          "px2": 10,
+          "px4": 10
+        },
+        {
+          "distance": 6,
+          "px1": 10,
+          "px2": 10,
+          "px4": 10
+        },
+        {
+          "distance": 12,
+          "px1": 10,
+          "px2": 10,
+          "px4": 10
+        },
+        {
+          "distance": 25,
+          "px1": 10,
+          "px2": 10,
+          "px4": 10
+        },
+        {
+          "distance": 50,
+          "px1": 10,
+          "px2": 10,
+          "px4": 10
+        },
+        {
+          "distance": 100,
+          "px1": 10,
+          "px2": 10,
+          "px4": 10
+        },
+        {
+          "distance": 200,
+          "px1": 10,
+          "px2": 10,
+          "px4": 10
+        }
+      ],
+      "existingLods": []
+    },
+    {
+      "asset": "scenes/arena.hull-side/default.gltf",
+      "inputSha256": "e57c6dfe69573268b93983d9a067ddd98870e42e28a75dce2a72e662a7a2ad3a",
+      "sourceTriangles": 176,
+      "geometryBufferBytes": 19204,
+      "hierarchyBytes": 11560,
+      "hierarchySha256": "e0e2ffa49626f30305b326948b0016669055736dc0fcb7bafe1d836f2803ad98",
+      "clusters": 3,
+      "groups": 2,
+      "levels": 1,
+      "buildMs": [
+        0.6812120000000164,
+        0.6927239999999983,
+        0.8306429999999807
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 176,
+          "px2": 176,
+          "px4": 176
+        },
+        {
+          "distance": 3,
+          "px1": 176,
+          "px2": 176,
+          "px4": 176
+        },
+        {
+          "distance": 6,
+          "px1": 176,
+          "px2": 176,
+          "px4": 176
+        },
+        {
+          "distance": 12,
+          "px1": 176,
+          "px2": 176,
+          "px4": 176
+        },
+        {
+          "distance": 25,
+          "px1": 176,
+          "px2": 176,
+          "px4": 76
+        },
+        {
+          "distance": 50,
+          "px1": 176,
+          "px2": 76,
+          "px4": 76
+        },
+        {
+          "distance": 100,
+          "px1": 76,
+          "px2": 76,
+          "px4": 76
+        },
+        {
+          "distance": 200,
+          "px1": 76,
+          "px2": 76,
+          "px4": 76
+        }
+      ],
+      "existingLods": [
+        {
+          "lod": "lod1",
+          "triangles": 52,
+          "geometryBufferBytes": 5720
+        }
+      ]
+    },
+    {
+      "asset": "scenes/arena.jump-pad/default.gltf",
+      "inputSha256": "96a3058cfd5f85ff9cf690d8513f05236b983c55aaca4a8bf3ed3946fd846723",
+      "sourceTriangles": 74,
+      "geometryBufferBytes": 7568,
+      "hierarchyBytes": 4240,
+      "hierarchySha256": "7626a7740ef678b9f9c2ba8b0ff5f0a52c98d4c278910740b58bfca4bdad9ec2",
+      "clusters": 1,
+      "groups": 1,
+      "levels": 0,
+      "buildMs": [
+        0.27116000000000895,
+        0.2708499999999958,
+        0.2522250000000099
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 74,
+          "px2": 74,
+          "px4": 74
+        },
+        {
+          "distance": 3,
+          "px1": 74,
+          "px2": 74,
+          "px4": 74
+        },
+        {
+          "distance": 6,
+          "px1": 74,
+          "px2": 74,
+          "px4": 74
+        },
+        {
+          "distance": 12,
+          "px1": 74,
+          "px2": 74,
+          "px4": 74
+        },
+        {
+          "distance": 25,
+          "px1": 74,
+          "px2": 74,
+          "px4": 74
+        },
+        {
+          "distance": 50,
+          "px1": 74,
+          "px2": 74,
+          "px4": 74
+        },
+        {
+          "distance": 100,
+          "px1": 74,
+          "px2": 74,
+          "px4": 74
+        },
+        {
+          "distance": 200,
+          "px1": 74,
+          "px2": 74,
+          "px4": 74
+        }
+      ],
+      "existingLods": []
+    },
+    {
+      "asset": "scenes/arena.pillar/default.gltf",
+      "inputSha256": "62d60522b2df4b439034de5cb0ac1a7532f7145e0e9a275d30139edb96f94c11",
+      "sourceTriangles": 408,
+      "geometryBufferBytes": 44360,
+      "hierarchyBytes": 27280,
+      "hierarchySha256": "9ca1d9523d98f91f480f6e423f989f329be7aec2e6d939b7a76b471aec289890",
+      "clusters": 8,
+      "groups": 3,
+      "levels": 2,
+      "buildMs": [
+        1.4635350000000074,
+        1.9746560000000102,
+        1.537193000000002
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 408,
+          "px2": 408,
+          "px4": 408
+        },
+        {
+          "distance": 3,
+          "px1": 408,
+          "px2": 408,
+          "px4": 408
+        },
+        {
+          "distance": 6,
+          "px1": 408,
+          "px2": 408,
+          "px4": 408
+        },
+        {
+          "distance": 12,
+          "px1": 408,
+          "px2": 408,
+          "px4": 408
+        },
+        {
+          "distance": 25,
+          "px1": 408,
+          "px2": 408,
+          "px4": 408
+        },
+        {
+          "distance": 50,
+          "px1": 408,
+          "px2": 408,
+          "px4": 408
+        },
+        {
+          "distance": 100,
+          "px1": 408,
+          "px2": 408,
+          "px4": 87
+        },
+        {
+          "distance": 200,
+          "px1": 408,
+          "px2": 87,
+          "px4": 87
+        }
+      ],
+      "existingLods": [
+        {
+          "lod": "lod1",
+          "triangles": 200,
+          "geometryBufferBytes": 21480
+        }
+      ]
+    },
+    {
+      "asset": "scenes/arena.pipes/default.gltf",
+      "inputSha256": "cc7c42ce6c69dded2e790fbfab2e5cf0ee2ed6211c6c9545630e64b1c8f07269",
+      "sourceTriangles": 296,
+      "geometryBufferBytes": 29648,
+      "hierarchyBytes": 18052,
+      "hierarchySha256": "b5fb3801875d8de3a886ec21c4490bd749903ea7c82313fb1cbc058bed082dd9",
+      "clusters": 4,
+      "groups": 2,
+      "levels": 1,
+      "buildMs": [
+        0.9613589999999874,
+        0.9432260000000099,
+        1.0456979999999874
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 296,
+          "px2": 296,
+          "px4": 296
+        },
+        {
+          "distance": 3,
+          "px1": 296,
+          "px2": 296,
+          "px4": 296
+        },
+        {
+          "distance": 6,
+          "px1": 296,
+          "px2": 296,
+          "px4": 296
+        },
+        {
+          "distance": 12,
+          "px1": 296,
+          "px2": 296,
+          "px4": 296
+        },
+        {
+          "distance": 25,
+          "px1": 296,
+          "px2": 296,
+          "px4": 120
+        },
+        {
+          "distance": 50,
+          "px1": 296,
+          "px2": 120,
+          "px4": 120
+        },
+        {
+          "distance": 100,
+          "px1": 120,
+          "px2": 120,
+          "px4": 120
+        },
+        {
+          "distance": 200,
+          "px1": 120,
+          "px2": 120,
+          "px4": 120
+        }
+      ],
+      "existingLods": []
+    },
+    {
+      "asset": "scenes/arena.platform/default.gltf",
+      "inputSha256": "1ee3523facf45cec2fb93eb5baed148c1b2e5834c459a01bc3d5f12bd43232c8",
+      "sourceTriangles": 242,
+      "geometryBufferBytes": 26100,
+      "hierarchyBytes": 15268,
+      "hierarchySha256": "7f1d488f79b6b680d7a21d2f0935c45386d2b0a9d61fffa7b8de854b824b64ca",
+      "clusters": 4,
+      "groups": 2,
+      "levels": 1,
+      "buildMs": [
+        0.834399999999988,
+        0.8076500000000237,
+        0.8101549999999804
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 242,
+          "px2": 242,
+          "px4": 242
+        },
+        {
+          "distance": 3,
+          "px1": 242,
+          "px2": 242,
+          "px4": 242
+        },
+        {
+          "distance": 6,
+          "px1": 242,
+          "px2": 242,
+          "px4": 242
+        },
+        {
+          "distance": 12,
+          "px1": 242,
+          "px2": 242,
+          "px4": 242
+        },
+        {
+          "distance": 25,
+          "px1": 242,
+          "px2": 66,
+          "px4": 66
+        },
+        {
+          "distance": 50,
+          "px1": 66,
+          "px2": 66,
+          "px4": 66
+        },
+        {
+          "distance": 100,
+          "px1": 66,
+          "px2": 66,
+          "px4": 66
+        },
+        {
+          "distance": 200,
+          "px1": 66,
+          "px2": 66,
+          "px4": 66
+        }
+      ],
+      "existingLods": [
+        {
+          "lod": "lod1",
+          "triangles": 98,
+          "geometryBufferBytes": 10260
+        }
+      ]
+    },
+    {
+      "asset": "scenes/arena.platform-half/default.gltf",
+      "inputSha256": "3700dfbb6b679a268955b71d5af4566d98539633627ffcc181e59ef5aba9d704",
+      "sourceTriangles": 242,
+      "geometryBufferBytes": 26100,
+      "hierarchyBytes": 15268,
+      "hierarchySha256": "0f152b2af42365dcb7c9259ca4e3023adca51696303e8f32001d65728bf66c3f",
+      "clusters": 4,
+      "groups": 2,
+      "levels": 1,
+      "buildMs": [
+        0.962270999999987,
+        0.910964000000007,
+        0.843387000000007
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 242,
+          "px2": 242,
+          "px4": 242
+        },
+        {
+          "distance": 3,
+          "px1": 242,
+          "px2": 242,
+          "px4": 242
+        },
+        {
+          "distance": 6,
+          "px1": 242,
+          "px2": 242,
+          "px4": 242
+        },
+        {
+          "distance": 12,
+          "px1": 242,
+          "px2": 242,
+          "px4": 66
+        },
+        {
+          "distance": 25,
+          "px1": 242,
+          "px2": 66,
+          "px4": 66
+        },
+        {
+          "distance": 50,
+          "px1": 66,
+          "px2": 66,
+          "px4": 66
+        },
+        {
+          "distance": 100,
+          "px1": 66,
+          "px2": 66,
+          "px4": 66
+        },
+        {
+          "distance": 200,
+          "px1": 66,
+          "px2": 66,
+          "px4": 66
+        }
+      ],
+      "existingLods": [
+        {
+          "lod": "lod1",
+          "triangles": 98,
+          "geometryBufferBytes": 10260
+        }
+      ]
+    },
+    {
+      "asset": "scenes/arena.ramp/default.gltf",
+      "inputSha256": "d5b8e9cbd4bf10547f926a63ac9edb56db060babcf50ea58494c01e4c1c5b082",
+      "sourceTriangles": 384,
+      "geometryBufferBytes": 42760,
+      "hierarchyBytes": 26668,
+      "hierarchySha256": "819792856b65eabbd3c0365b4fe6660c9791350a5f24e34c8537231d33f5bae9",
+      "clusters": 8,
+      "groups": 3,
+      "levels": 2,
+      "buildMs": [
+        1.3349019999999996,
+        1.3273980000000165,
+        1.4800960000000032
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 384,
+          "px2": 384,
+          "px4": 384
+        },
+        {
+          "distance": 3,
+          "px1": 384,
+          "px2": 384,
+          "px4": 384
+        },
+        {
+          "distance": 6,
+          "px1": 384,
+          "px2": 384,
+          "px4": 384
+        },
+        {
+          "distance": 12,
+          "px1": 384,
+          "px2": 384,
+          "px4": 384
+        },
+        {
+          "distance": 25,
+          "px1": 384,
+          "px2": 384,
+          "px4": 156
+        },
+        {
+          "distance": 50,
+          "px1": 384,
+          "px2": 156,
+          "px4": 156
+        },
+        {
+          "distance": 100,
+          "px1": 156,
+          "px2": 156,
+          "px4": 156
+        },
+        {
+          "distance": 200,
+          "px1": 156,
+          "px2": 156,
+          "px4": 96
+        }
+      ],
+      "existingLods": []
+    },
+    {
+      "asset": "scenes/arena.ramp-tall/default.gltf",
+      "inputSha256": "a062d7feb9c292c37dd464cd9d4257ac2c1c3e24b7cd68f456dc971ad7ffb4ef",
+      "sourceTriangles": 628,
+      "geometryBufferBytes": 69912,
+      "hierarchyBytes": 44512,
+      "hierarchySha256": "0f3869c035dc445f3d83b3664d0105406e36f6ab8aece7e129d43bb9bbee4327",
+      "clusters": 13,
+      "groups": 4,
+      "levels": 3,
+      "buildMs": [
+        2.24807100000001,
+        2.270091999999977,
+        2.342899000000017
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 628,
+          "px2": 628,
+          "px4": 628
+        },
+        {
+          "distance": 3,
+          "px1": 628,
+          "px2": 628,
+          "px4": 628
+        },
+        {
+          "distance": 6,
+          "px1": 628,
+          "px2": 628,
+          "px4": 628
+        },
+        {
+          "distance": 12,
+          "px1": 628,
+          "px2": 628,
+          "px4": 628
+        },
+        {
+          "distance": 25,
+          "px1": 628,
+          "px2": 628,
+          "px4": 628
+        },
+        {
+          "distance": 50,
+          "px1": 628,
+          "px2": 628,
+          "px4": 268
+        },
+        {
+          "distance": 100,
+          "px1": 628,
+          "px2": 268,
+          "px4": 268
+        },
+        {
+          "distance": 200,
+          "px1": 268,
+          "px2": 268,
+          "px4": 268
+        }
+      ],
+      "existingLods": []
+    },
+    {
+      "asset": "scenes/arena.support/default.gltf",
+      "inputSha256": "d887cbc8ae5f1ba900e71b042fc8c17b761e407eeb2cf18690f995568404efbf",
+      "sourceTriangles": 134,
+      "geometryBufferBytes": 14532,
+      "hierarchyBytes": 8656,
+      "hierarchySha256": "7d7fcbf3b4bbd710af547c94a1ff246ae24b9ebc5323a5c2d7d9940904a86778",
+      "clusters": 3,
+      "groups": 2,
+      "levels": 1,
+      "buildMs": [
+        0.4789210000000139,
+        0.6154380000000117,
+        0.7881029999999782
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 134,
+          "px2": 134,
+          "px4": 134
+        },
+        {
+          "distance": 3,
+          "px1": 134,
+          "px2": 134,
+          "px4": 134
+        },
+        {
+          "distance": 6,
+          "px1": 134,
+          "px2": 134,
+          "px4": 134
+        },
+        {
+          "distance": 12,
+          "px1": 134,
+          "px2": 134,
+          "px4": 134
+        },
+        {
+          "distance": 25,
+          "px1": 134,
+          "px2": 134,
+          "px4": 46
+        },
+        {
+          "distance": 50,
+          "px1": 134,
+          "px2": 46,
+          "px4": 46
+        },
+        {
+          "distance": 100,
+          "px1": 46,
+          "px2": 46,
+          "px4": 46
+        },
+        {
+          "distance": 200,
+          "px1": 46,
+          "px2": 46,
+          "px4": 46
+        }
+      ],
+      "existingLods": [
+        {
+          "lod": "lod1",
+          "triangles": 46,
+          "geometryBufferBytes": 4852
+        }
+      ]
+    },
+    {
+      "asset": "scenes/arena.walkway/default.gltf",
+      "inputSha256": "5649408fbbe0bfd44fb1098106fc59b092297b2779f0dbf4e9fa9bc272e487b3",
+      "sourceTriangles": 200,
+      "geometryBufferBytes": 21792,
+      "hierarchyBytes": 13156,
+      "hierarchySha256": "d2f1ceafdd259e353f3cbc35a041b0ad29693610c5ee02cea54d32a9ea294083",
+      "clusters": 4,
+      "groups": 2,
+      "levels": 1,
+      "buildMs": [
+        0.7069599999999809,
+        0.6643810000000201,
+        0.6856000000000222
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 200,
+          "px2": 200,
+          "px4": 200
+        },
+        {
+          "distance": 3,
+          "px1": 200,
+          "px2": 200,
+          "px4": 200
+        },
+        {
+          "distance": 6,
+          "px1": 200,
+          "px2": 200,
+          "px4": 200
+        },
+        {
+          "distance": 12,
+          "px1": 200,
+          "px2": 200,
+          "px4": 200
+        },
+        {
+          "distance": 25,
+          "px1": 200,
+          "px2": 200,
+          "px4": 88
+        },
+        {
+          "distance": 50,
+          "px1": 200,
+          "px2": 88,
+          "px4": 88
+        },
+        {
+          "distance": 100,
+          "px1": 88,
+          "px2": 88,
+          "px4": 88
+        },
+        {
+          "distance": 200,
+          "px1": 88,
+          "px2": 88,
+          "px4": 88
+        }
+      ],
+      "existingLods": [
+        {
+          "lod": "lod1",
+          "triangles": 72,
+          "geometryBufferBytes": 7920
+        }
+      ]
+    },
+    {
+      "asset": "scenes/arena.wall/default.gltf",
+      "inputSha256": "6bfe1323d67e22af3de055458d845282b399a566164a71147c7ceca542829d0f",
+      "sourceTriangles": 306,
+      "geometryBufferBytes": 31684,
+      "hierarchyBytes": 20152,
+      "hierarchySha256": "d203b79aed981c2503997739674294cfc6dc386552368c8753d1e812d87d590d",
+      "clusters": 6,
+      "groups": 3,
+      "levels": 2,
+      "buildMs": [
+        1.0386250000000246,
+        1.029217000000017,
+        1.038583999999986
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 306,
+          "px2": 306,
+          "px4": 306
+        },
+        {
+          "distance": 3,
+          "px1": 306,
+          "px2": 306,
+          "px4": 306
+        },
+        {
+          "distance": 6,
+          "px1": 306,
+          "px2": 306,
+          "px4": 306
+        },
+        {
+          "distance": 12,
+          "px1": 306,
+          "px2": 306,
+          "px4": 306
+        },
+        {
+          "distance": 25,
+          "px1": 306,
+          "px2": 306,
+          "px4": 130
+        },
+        {
+          "distance": 50,
+          "px1": 306,
+          "px2": 130,
+          "px4": 130
+        },
+        {
+          "distance": 100,
+          "px1": 130,
+          "px2": 130,
+          "px4": 71
+        },
+        {
+          "distance": 200,
+          "px1": 130,
+          "px2": 71,
+          "px4": 71
+        }
+      ],
+      "existingLods": []
+    },
+    {
+      "asset": "scenes/arena.wall-corner/default.gltf",
+      "inputSha256": "1fc22d348714dce000685bf0cb3cf4ae14811a75ab767535194b404096eaec93",
+      "sourceTriangles": 276,
+      "geometryBufferBytes": 30152,
+      "hierarchyBytes": 17764,
+      "hierarchySha256": "47691cac6597b62ed3e3fbbae8039da0541f6dec46180cee3ab25c3d0817d1d9",
+      "clusters": 4,
+      "groups": 2,
+      "levels": 1,
+      "buildMs": [
+        0.837947000000014,
+        0.8204040000000248,
+        0.8103049999999996
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 276,
+          "px2": 276,
+          "px4": 276
+        },
+        {
+          "distance": 3,
+          "px1": 276,
+          "px2": 276,
+          "px4": 276
+        },
+        {
+          "distance": 6,
+          "px1": 276,
+          "px2": 276,
+          "px4": 276
+        },
+        {
+          "distance": 12,
+          "px1": 276,
+          "px2": 276,
+          "px4": 276
+        },
+        {
+          "distance": 25,
+          "px1": 276,
+          "px2": 276,
+          "px4": 276
+        },
+        {
+          "distance": 50,
+          "px1": 276,
+          "px2": 276,
+          "px4": 92
+        },
+        {
+          "distance": 100,
+          "px1": 276,
+          "px2": 92,
+          "px4": 92
+        },
+        {
+          "distance": 200,
+          "px1": 92,
+          "px2": 92,
+          "px4": 92
+        }
+      ],
+      "existingLods": []
+    },
+    {
+      "asset": "scenes/arena.wall-corner-tall/default.gltf",
+      "inputSha256": "8bb4c3d353c67b83344ad019b8116a7e04af7f6bb153aa4dc3fdb5996a47a55a",
+      "sourceTriangles": 348,
+      "geometryBufferBytes": 38072,
+      "hierarchyBytes": 22408,
+      "hierarchySha256": "3df67bdd7a63d25c56a2658e50376ac2cd4d612eaea70bdad55b3ef7a865bc7b",
+      "clusters": 5,
+      "groups": 2,
+      "levels": 1,
+      "buildMs": [
+        1.1723059999999919,
+        1.7832850000000064,
+        1.0419609999999864
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 348,
+          "px2": 348,
+          "px4": 348
+        },
+        {
+          "distance": 3,
+          "px1": 348,
+          "px2": 348,
+          "px4": 348
+        },
+        {
+          "distance": 6,
+          "px1": 348,
+          "px2": 348,
+          "px4": 348
+        },
+        {
+          "distance": 12,
+          "px1": 348,
+          "px2": 348,
+          "px4": 348
+        },
+        {
+          "distance": 25,
+          "px1": 348,
+          "px2": 348,
+          "px4": 348
+        },
+        {
+          "distance": 50,
+          "px1": 348,
+          "px2": 348,
+          "px4": 116
+        },
+        {
+          "distance": 100,
+          "px1": 348,
+          "px2": 116,
+          "px4": 116
+        },
+        {
+          "distance": 200,
+          "px1": 116,
+          "px2": 116,
+          "px4": 116
+        }
+      ],
+      "existingLods": []
+    },
+    {
+      "asset": "scenes/arena.wall-half/default.gltf",
+      "inputSha256": "6ef2dc3cbda24a42065ac24bf9f8fbbcca9193bf34eec03f3a2fd330fe52d658",
+      "sourceTriangles": 244,
+      "geometryBufferBytes": 24864,
+      "hierarchyBytes": 14644,
+      "hierarchySha256": "7c7a92b9a943232b7bf11b12336e50fb151a4f24e730416804f027e57ebf916c",
+      "clusters": 4,
+      "groups": 2,
+      "levels": 1,
+      "buildMs": [
+        0.7960279999999784,
+        0.7651400000000024,
+        0.887630999999999
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 244,
+          "px2": 244,
+          "px4": 244
+        },
+        {
+          "distance": 3,
+          "px1": 244,
+          "px2": 244,
+          "px4": 244
+        },
+        {
+          "distance": 6,
+          "px1": 244,
+          "px2": 244,
+          "px4": 244
+        },
+        {
+          "distance": 12,
+          "px1": 244,
+          "px2": 244,
+          "px4": 244
+        },
+        {
+          "distance": 25,
+          "px1": 244,
+          "px2": 244,
+          "px4": 60
+        },
+        {
+          "distance": 50,
+          "px1": 244,
+          "px2": 60,
+          "px4": 60
+        },
+        {
+          "distance": 100,
+          "px1": 60,
+          "px2": 60,
+          "px4": 60
+        },
+        {
+          "distance": 200,
+          "px1": 60,
+          "px2": 60,
+          "px4": 60
+        }
+      ],
+      "existingLods": []
+    },
+    {
+      "asset": "scenes/arena.wall-tall/default.gltf",
+      "inputSha256": "b670ab85060581eb07529521ba8731872ca5ecdf35f5cc4b8fea9e597173ae40",
+      "sourceTriangles": 346,
+      "geometryBufferBytes": 35564,
+      "hierarchyBytes": 22828,
+      "hierarchySha256": "261ecf7ee48714476f65511a78e83f5ec4df9d05b7828d627fe27b4feaa9c037",
+      "clusters": 7,
+      "groups": 3,
+      "levels": 2,
+      "buildMs": [
+        1.171814999999981,
+        1.170092000000011,
+        1.1990460000000098
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 346,
+          "px2": 346,
+          "px4": 346
+        },
+        {
+          "distance": 3,
+          "px1": 346,
+          "px2": 346,
+          "px4": 346
+        },
+        {
+          "distance": 6,
+          "px1": 346,
+          "px2": 346,
+          "px4": 346
+        },
+        {
+          "distance": 12,
+          "px1": 346,
+          "px2": 346,
+          "px4": 346
+        },
+        {
+          "distance": 25,
+          "px1": 346,
+          "px2": 346,
+          "px4": 162
+        },
+        {
+          "distance": 50,
+          "px1": 346,
+          "px2": 162,
+          "px4": 162
+        },
+        {
+          "distance": 100,
+          "px1": 162,
+          "px2": 162,
+          "px4": 79
+        },
+        {
+          "distance": 200,
+          "px1": 162,
+          "px2": 79,
+          "px4": 79
+        }
+      ],
+      "existingLods": []
+    }
+  ]
+}

@@ -151,6 +151,8 @@ fn culling_is_linear_in_instances_and_views_and_uploads_follow_visibility() {
             assert_eq!(w.views, 1, "{at}");
             assert_eq!(w.bounds_tests, u64::from(n), "{at}");
             assert_eq!(w.visible, k, "{at}");
+            assert_eq!(w.cpu_triangles, u64::from(k) * 12, "{at}");
+            assert_eq!(w.cpu_shadow_triangles, 0, "{at}");
             // One draw per material, however many instances share it.
             assert_eq!(w.draws, 2, "{at}");
             assert_eq!((w.shadow_visible, w.shadow_draws), (0, 0), "{at}");
@@ -187,6 +189,9 @@ fn culling_is_linear_in_instances_and_views_and_uploads_follow_visibility() {
         assert_eq!(w.views, 1 + cascades, "N = {n}");
         assert_eq!(w.bounds_tests, u64::from(n * (1 + cascades)), "N = {n}");
         assert_eq!(w.visible, SPARSE, "N = {n}");
+        assert_eq!(w.cpu_triangles, u64::from(SPARSE) * 12);
+        assert_eq!(w.cpu_shadow_triangles, u64::from(w.shadow_visible) * 12);
+        assert!(w.cpu_shadow_triangles > 0);
     }
     // A shadowed point light adds six cube faces plus one range test per instance.
     for n in [SIZES[0], SIZES[1]] {

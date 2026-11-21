@@ -1,0 +1,963 @@
+[
+  {
+    "asset": "crag.kit.outcrop-buttress-1",
+    "placements": [
+      "basin-north-buttress",
+      "basin-south-buttress",
+      "brook-spur-north-buttress"
+    ],
+    "scope": "Actual consumer placements, rotations and nonuniform scales; interpolated between two consumer review poses. Scenery subset only, without terrain/units/game loop; not a whole-game A/B.",
+    "rows": [
+      {
+        "mode": "source",
+        "instances": 3,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.126041,
+          "median": 0.110488,
+          "p95": 0.154741
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.136128,
+          "median": 0.109536,
+          "p95": 0.124928
+        }
+      },
+      {
+        "mode": "lod1",
+        "instances": 3,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.18007900000000002,
+          "median": 0.110338,
+          "p95": 0.129894
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.135168,
+          "median": 0.098304,
+          "p95": 0.113632
+        }
+      },
+      {
+        "mode": "lod2",
+        "instances": 3,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.151866,
+          "median": 0.108704,
+          "p95": 0.119986
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.10944,
+          "median": 0.09216,
+          "p95": 0.104288
+        }
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 3,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.323763,
+          "median": 0.203462,
+          "p95": 0.250882
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.119808,
+          "median": 0.100352,
+          "p95": 0.111616
+        }
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 3,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.368123,
+          "median": 0.19368400000000002,
+          "p95": 0.22725800000000002
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.11776,
+          "median": 0.101344,
+          "p95": 0.111616
+        }
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 3,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.319892,
+          "median": 0.190148,
+          "p95": 0.230795
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.132064,
+          "median": 0.098144,
+          "p95": 0.111616
+        }
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 3,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.193247,
+          "median": 0.191209,
+          "p95": 0.23179599999999997
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.120832,
+          "median": 0.09808,
+          "p95": 0.111616
+        }
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 3,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.271331,
+          "median": 0.195197,
+          "p95": 0.227889
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.115712,
+          "median": 0.100352,
+          "p95": 0.11152
+        }
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 3,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.191995,
+          "median": 0.200487,
+          "p95": 0.262674
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.125824,
+          "median": 0.101312,
+          "p95": 0.111616
+        }
+      },
+      {
+        "mode": "lod2",
+        "instances": 3,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.166714,
+          "median": 0.11113899999999999,
+          "p95": 0.131968
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.516096,
+          "median": 0.09216,
+          "p95": 0.104416
+        }
+      },
+      {
+        "mode": "lod1",
+        "instances": 3,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.198818,
+          "median": 0.11978599999999999,
+          "p95": 0.20203100000000002
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.118784,
+          "median": 0.098304,
+          "p95": 0.113568
+        }
+      },
+      {
+        "mode": "source",
+        "instances": 3,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.15386,
+          "median": 0.10926599999999999,
+          "p95": 0.124294
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.129984,
+          "median": 0.109472,
+          "p95": 0.1248
+        }
+      }
+    ]
+  },
+  {
+    "asset": "crag.kit.outcrop-buttress-2",
+    "placements": [
+      "basin-west-buttress",
+      "brook-spur-middle-buttress"
+    ],
+    "scope": "Actual consumer placements, rotations and nonuniform scales; interpolated between two consumer review poses. Scenery subset only, without terrain/units/game loop; not a whole-game A/B.",
+    "rows": [
+      {
+        "mode": "source",
+        "instances": 2,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.154394,
+          "median": 0.10647999999999999,
+          "p95": 0.177775
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.293888,
+          "median": 0.08192,
+          "p95": 0.102368
+        }
+      },
+      {
+        "mode": "lod1",
+        "instances": 2,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.160362,
+          "median": 0.10450699999999999,
+          "p95": 0.115667
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.099328,
+          "median": 0.080896,
+          "p95": 0.095136
+        }
+      },
+      {
+        "mode": "lod2",
+        "instances": 2,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.095463,
+          "median": 0.10517800000000001,
+          "p95": 0.1171
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.132096,
+          "median": 0.080832,
+          "p95": 0.091136
+        }
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 2,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.208031,
+          "median": 0.155653,
+          "p95": 0.187733
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.132096,
+          "median": 0.08176,
+          "p95": 0.09728
+        }
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 2,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.201099,
+          "median": 0.155873,
+          "p95": 0.182944
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.246784,
+          "median": 0.08192,
+          "p95": 0.09728
+        }
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 2,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.193053,
+          "median": 0.151836,
+          "p95": 0.18065
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.099328,
+          "median": 0.081888,
+          "p95": 0.097152
+        }
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 2,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.126401,
+          "median": 0.163548,
+          "p95": 0.19398500000000002
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.102368,
+          "median": 0.081888,
+          "p95": 0.096256
+        }
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 2,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.321144,
+          "median": 0.157136,
+          "p95": 0.187113
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.102368,
+          "median": 0.08192,
+          "p95": 0.09728
+        }
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 2,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.202341,
+          "median": 0.15659499999999998,
+          "p95": 0.188715
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.098304,
+          "median": 0.081888,
+          "p95": 0.09728
+        }
+      },
+      {
+        "mode": "lod2",
+        "instances": 2,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.112295,
+          "median": 0.105258,
+          "p95": 0.11722
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.101376,
+          "median": 0.080832,
+          "p95": 0.09216
+        }
+      },
+      {
+        "mode": "lod1",
+        "instances": 2,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.178666,
+          "median": 0.10611,
+          "p95": 0.125576
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.096224,
+          "median": 0.079872,
+          "p95": 0.094112
+        }
+      },
+      {
+        "mode": "source",
+        "instances": 2,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.108638,
+          "median": 0.105499,
+          "p95": 0.11725100000000001
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.103392,
+          "median": 0.080864,
+          "p95": 0.099328
+        }
+      }
+    ]
+  },
+  {
+    "asset": "crag.kit.outcrop-spire",
+    "placements": [
+      "basin-crag-1",
+      "basin-crag-2",
+      "basin-crag-3",
+      "brook-spur-south-spire"
+    ],
+    "scope": "Actual consumer placements, rotations and nonuniform scales; interpolated between two consumer review poses. Scenery subset only, without terrain/units/game loop; not a whole-game A/B.",
+    "rows": [
+      {
+        "mode": "source",
+        "instances": 4,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.546138,
+          "median": 0.10697200000000001,
+          "p95": 0.13304
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.326656,
+          "median": 0.08192,
+          "p95": 0.12288
+        }
+      },
+      {
+        "mode": "lod1",
+        "instances": 4,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.118848,
+          "median": 0.104597,
+          "p95": 0.119434
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.358304,
+          "median": 0.0808,
+          "p95": 0.106464
+        }
+      },
+      {
+        "mode": "lod2",
+        "instances": 4,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.187273,
+          "median": 0.104597,
+          "p95": 0.12055700000000001
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.099232,
+          "median": 0.079872,
+          "p95": 0.097184
+        }
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 4,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.118707,
+          "median": 0.166594,
+          "p95": 0.198443
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.118784,
+          "median": 0.082816,
+          "p95": 0.111488
+        }
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 4,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.214283,
+          "median": 0.161394,
+          "p95": 0.192863
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.112576,
+          "median": 0.081856,
+          "p95": 0.109568
+        }
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 4,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.154926,
+          "median": 0.155593,
+          "p95": 0.184317
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.10752,
+          "median": 0.081888,
+          "p95": 0.104384
+        }
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 4,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.115621,
+          "median": 0.155362,
+          "p95": 0.181853
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.10752,
+          "median": 0.08192,
+          "p95": 0.104384
+        }
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 4,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.210306,
+          "median": 0.15987099999999999,
+          "p95": 0.18867499999999998
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.11776,
+          "median": 0.080896,
+          "p95": 0.109568
+        }
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 4,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.213562,
+          "median": 0.164409,
+          "p95": 0.197632
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.11776,
+          "median": 0.08192,
+          "p95": 0.111616
+        }
+      },
+      {
+        "mode": "lod2",
+        "instances": 4,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.142111,
+          "median": 0.109306,
+          "p95": 0.156054
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.237568,
+          "median": 0.080832,
+          "p95": 0.096256
+        }
+      },
+      {
+        "mode": "lod1",
+        "instances": 4,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.29406400000000005,
+          "median": 0.104727,
+          "p95": 0.118342
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.128,
+          "median": 0.080896,
+          "p95": 0.105472
+        }
+      },
+      {
+        "mode": "source",
+        "instances": 4,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.147658,
+          "median": 0.104887,
+          "p95": 0.12212
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.125952,
+          "median": 0.081888,
+          "p95": 0.122816
+        }
+      }
+    ]
+  },
+  {
+    "asset": "crag.kit.outcrop-talus-1",
+    "placements": [
+      "basin-north-talus-1",
+      "basin-west-talus-1",
+      "basin-south-talus-1",
+      "brook-spur-middle-talus-1",
+      "brook-spur-south-talus-1",
+      "brook-spur-north-talus-1"
+    ],
+    "scope": "Actual consumer placements, rotations and nonuniform scales; interpolated between two consumer review poses. Scenery subset only, without terrain/units/game loop; not a whole-game A/B.",
+    "rows": [
+      {
+        "mode": "source",
+        "instances": 6,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.278347,
+          "median": 0.105388,
+          "p95": 0.131938
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.122656,
+          "median": 0.092032,
+          "p95": 0.09728
+        }
+      },
+      {
+        "mode": "lod1",
+        "instances": 6,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.191701,
+          "median": 0.104075,
+          "p95": 0.15439
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.33072,
+          "median": 0.089088,
+          "p95": 0.09216
+        }
+      },
+      {
+        "mode": "lod2",
+        "instances": 6,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.12776,
+          "median": 0.102603,
+          "p95": 0.114696
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.094208,
+          "median": 0.086016,
+          "p95": 0.089088
+        }
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 6,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.271911,
+          "median": 0.14743699999999998,
+          "p95": 0.183666
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.09728,
+          "median": 0.09008,
+          "p95": 0.094208
+        }
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 6,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.26988799999999996,
+          "median": 0.15262699999999998,
+          "p95": 0.199897
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.122624,
+          "median": 0.090112,
+          "p95": 0.094176
+        }
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 6,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.137303,
+          "median": 0.13299000000000002,
+          "p95": 0.159069
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.12176,
+          "median": 0.088064,
+          "p95": 0.093088
+        }
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 6,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.172986,
+          "median": 0.132619,
+          "p95": 0.158298
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.108512,
+          "median": 0.088064,
+          "p95": 0.093024
+        }
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 6,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.179207,
+          "median": 0.150323,
+          "p95": 0.166844
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.098304,
+          "median": 0.090112,
+          "p95": 0.094112
+        }
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 6,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.18006899999999998,
+          "median": 0.147728,
+          "p95": 0.168888
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.10128,
+          "median": 0.090112,
+          "p95": 0.094208
+        }
+      },
+      {
+        "mode": "lod2",
+        "instances": 6,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.129377,
+          "median": 0.104306,
+          "p95": 0.119304
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.123872,
+          "median": 0.086944,
+          "p95": 0.090048
+        }
+      },
+      {
+        "mode": "lod1",
+        "instances": 6,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.103728,
+          "median": 0.105839,
+          "p95": 0.130205
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.132032,
+          "median": 0.089024,
+          "p95": 0.093088
+        }
+      },
+      {
+        "mode": "source",
+        "instances": 6,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.47672,
+          "median": 0.105619,
+          "p95": 0.138862
+        },
+        "gpu_pass_sum_ms": {
+          "max": 1.440704,
+          "median": 0.09216,
+          "p95": 0.09728
+        }
+      }
+    ]
+  },
+  {
+    "asset": "crag.kit.outcrop-talus-2",
+    "placements": [
+      "basin-north-talus-2",
+      "basin-west-talus-2",
+      "basin-south-talus-2",
+      "brook-spur-middle-talus-2",
+      "brook-spur-south-talus-2",
+      "brook-spur-north-talus-2"
+    ],
+    "scope": "Actual consumer placements, rotations and nonuniform scales; interpolated between two consumer review poses. Scenery subset only, without terrain/units/game loop; not a whole-game A/B.",
+    "rows": [
+      {
+        "mode": "source",
+        "instances": 6,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 3.083292,
+          "median": 0.118493,
+          "p95": 0.193825
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.371648,
+          "median": 0.089088,
+          "p95": 0.097152
+        }
+      },
+      {
+        "mode": "lod1",
+        "instances": 6,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.164079,
+          "median": 0.104647,
+          "p95": 0.1168
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.120832,
+          "median": 0.087936,
+          "p95": 0.091072
+        }
+      },
+      {
+        "mode": "lod2",
+        "instances": 6,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.102015,
+          "median": 0.104947,
+          "p95": 0.11905400000000001
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.09312,
+          "median": 0.085952,
+          "p95": 0.088064
+        }
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 6,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.185028,
+          "median": 0.134613,
+          "p95": 0.150754
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.095104,
+          "median": 0.088928,
+          "p95": 0.092992
+        }
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 6,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.185729,
+          "median": 0.143289,
+          "p95": 0.16081299999999998
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.0952,
+          "median": 0.088064,
+          "p95": 0.093152
+        }
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 6,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.1331840000000004,
+          "median": 0.137679,
+          "p95": 0.151304
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.094144,
+          "median": 0.088,
+          "p95": 0.091008
+        }
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 6,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.173346,
+          "median": 0.137419,
+          "p95": 0.151275
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.096192,
+          "median": 0.088,
+          "p95": 0.090912
+        }
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 6,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.132954,
+          "median": 0.136978,
+          "p95": 0.208763
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.111616,
+          "median": 0.088064,
+          "p95": 0.093152
+        }
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 6,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.23938099999999998,
+          "median": 0.136056,
+          "p95": 0.159049
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.099328,
+          "median": 0.088064,
+          "p95": 0.094112
+        }
+      },
+      {
+        "mode": "lod2",
+        "instances": 6,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.1135379999999997,
+          "median": 0.104647,
+          "p95": 0.115717
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.094208,
+          "median": 0.086016,
+          "p95": 0.088992
+        }
+      },
+      {
+        "mode": "lod1",
+        "instances": 6,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.15734599999999999,
+          "median": 0.10624,
+          "p95": 0.120306
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.094176,
+          "median": 0.08704,
+          "p95": 0.091136
+        }
+      },
+      {
+        "mode": "source",
+        "instances": 6,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.121382,
+          "median": 0.109847,
+          "p95": 0.148089
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.097216,
+          "median": 0.089088,
+          "p95": 0.096128
+        }
+      }
+    ]
+  }
+]

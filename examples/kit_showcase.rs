@@ -36,6 +36,9 @@ use std::{
     time::Instant,
 };
 
+#[path = "kit_showcase/virtual_geometry.rs"]
+mod virtual_geometry;
+
 /// `--hard`: every emitter without its depth fade, for before/after comparisons.
 static HARD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -1503,6 +1506,10 @@ fn scaling(gpu: &Headless, a: &Assets, out: &Path) -> Json {
 
 fn main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().is_some_and(|a| a == "--virtual-geometry") {
+        virtual_geometry::run(&args[1..]);
+        return;
+    }
     if let Some(at) = args.iter().position(|a| a == "--hard") {
         args.remove(at);
         HARD.store(true, std::sync::atomic::Ordering::Relaxed);

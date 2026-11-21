@@ -1,0 +1,1581 @@
+{
+  "scope": "Offline geometry only; no GPU, frame-time, loading or visual-parity claims",
+  "referenceRevision": "b730aac13ab0ea67b75214613eea56c14151f6e5",
+  "engineRevision": "f9a1684dd6a699dd9b49f58e32e7010ac044e699",
+  "environment": {
+    "runtime": "v26.3.0",
+    "platform": "linux",
+    "arch": "x64",
+    "cpu": "AMD Ryzen 7 5700X 8-Core Processor"
+  },
+  "sampling": "One warm build, three timed builds per asset, no texture processing; raw milliseconds",
+  "cutCamera": "Reference cutStats: 1080p, 60 degree vertical FOV; original asset size, distances in source units; verifyClod uses seven sphere-relative cameras and five thresholds",
+  "rows": [
+    {
+      "asset": "scenes/crag.kit.cap-1/default.gltf",
+      "inputSha256": "16b2774e55cff0c3adf26fc225b961aff5070afeb7d90405271b30ab7640b671",
+      "sourceTriangles": 2320,
+      "geometryBufferBytes": 84200,
+      "hierarchyBytes": 86452,
+      "hierarchySha256": "dfd26b797294a8bb436ba584dd76d3f8c047021ef3fd7eb7028683224a144108",
+      "clusters": 40,
+      "groups": 7,
+      "levels": 5,
+      "buildMs": [
+        16.71448399999999,
+        12.070475000000002,
+        15.015687
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 2320,
+          "px2": 2320,
+          "px4": 2320
+        },
+        {
+          "distance": 3,
+          "px1": 2320,
+          "px2": 2320,
+          "px4": 2320
+        },
+        {
+          "distance": 6,
+          "px1": 2320,
+          "px2": 1808,
+          "px4": 1159
+        },
+        {
+          "distance": 12,
+          "px1": 1159,
+          "px2": 1159,
+          "px4": 578
+        },
+        {
+          "distance": 25,
+          "px1": 578,
+          "px2": 288,
+          "px4": 144
+        },
+        {
+          "distance": 50,
+          "px1": 288,
+          "px2": 144,
+          "px4": 71
+        },
+        {
+          "distance": 100,
+          "px1": 144,
+          "px2": 71,
+          "px4": 71
+        },
+        {
+          "distance": 200,
+          "px1": 71,
+          "px2": 71,
+          "px4": 71
+        }
+      ],
+      "existingLods": [
+        {
+          "lod": "lod1",
+          "triangles": 384,
+          "geometryBufferBytes": 15688
+        },
+        {
+          "lod": "lod2",
+          "triangles": 84,
+          "geometryBufferBytes": 3976
+        }
+      ]
+    },
+    {
+      "asset": "scenes/crag.kit.cap-2/default.gltf",
+      "inputSha256": "46e7e7016563df6406e13f7e1895158bf3c0351063c0536996b81d6223c7cbc2",
+      "sourceTriangles": 2320,
+      "geometryBufferBytes": 84816,
+      "hierarchyBytes": 86692,
+      "hierarchySha256": "a9f3d180f283d3cd9435fd7946f653c12692188a842867844caf185c162f69a5",
+      "clusters": 40,
+      "groups": 7,
+      "levels": 5,
+      "buildMs": [
+        11.12829099999999,
+        11.098606000000018,
+        7.876312000000013
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 2320,
+          "px2": 2320,
+          "px4": 2320
+        },
+        {
+          "distance": 3,
+          "px1": 2320,
+          "px2": 2320,
+          "px4": 2320
+        },
+        {
+          "distance": 6,
+          "px1": 2320,
+          "px2": 1807,
+          "px4": 1159
+        },
+        {
+          "distance": 12,
+          "px1": 1159,
+          "px2": 578,
+          "px4": 578
+        },
+        {
+          "distance": 25,
+          "px1": 578,
+          "px2": 288,
+          "px4": 143
+        },
+        {
+          "distance": 50,
+          "px1": 288,
+          "px2": 143,
+          "px4": 70
+        },
+        {
+          "distance": 100,
+          "px1": 143,
+          "px2": 70,
+          "px4": 70
+        },
+        {
+          "distance": 200,
+          "px1": 70,
+          "px2": 70,
+          "px4": 70
+        }
+      ],
+      "existingLods": [
+        {
+          "lod": "lod1",
+          "triangles": 384,
+          "geometryBufferBytes": 16136
+        },
+        {
+          "lod": "lod2",
+          "triangles": 84,
+          "geometryBufferBytes": 3976
+        }
+      ]
+    },
+    {
+      "asset": "scenes/crag.kit.cap-corner/default.gltf",
+      "inputSha256": "36d2d7ce162ca6380caa7c39ed2668eb3f20713f5ed9a44862a3a226c8547391",
+      "sourceTriangles": 682,
+      "geometryBufferBytes": 29684,
+      "hierarchyBytes": 26788,
+      "hierarchySha256": "7e3ce7461010d22b0379e7a74144c0eb6fcb6d52033a8a48bf0913f09bad3bc0",
+      "clusters": 12,
+      "groups": 4,
+      "levels": 3,
+      "buildMs": [
+        2.3339719999999886,
+        2.1631810000000087,
+        2.405545999999987
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 682,
+          "px2": 682,
+          "px4": 682
+        },
+        {
+          "distance": 3,
+          "px1": 682,
+          "px2": 682,
+          "px4": 682
+        },
+        {
+          "distance": 6,
+          "px1": 682,
+          "px2": 682,
+          "px4": 682
+        },
+        {
+          "distance": 12,
+          "px1": 682,
+          "px2": 340,
+          "px4": 340
+        },
+        {
+          "distance": 25,
+          "px1": 340,
+          "px2": 340,
+          "px4": 169
+        },
+        {
+          "distance": 50,
+          "px1": 340,
+          "px2": 169,
+          "px4": 83
+        },
+        {
+          "distance": 100,
+          "px1": 169,
+          "px2": 83,
+          "px4": 83
+        },
+        {
+          "distance": 200,
+          "px1": 83,
+          "px2": 83,
+          "px4": 83
+        }
+      ],
+      "existingLods": [
+        {
+          "lod": "lod1",
+          "triangles": 190,
+          "geometryBufferBytes": 9428
+        },
+        {
+          "lod": "lod2",
+          "triangles": 64,
+          "geometryBufferBytes": 3744
+        }
+      ]
+    },
+    {
+      "asset": "scenes/crag.kit.corner-climb-1/default.gltf",
+      "inputSha256": "1e61a918cc4f768782c0b25065ae74d6222d032565ea8399d683cdb069c745cc",
+      "sourceTriangles": 2400,
+      "geometryBufferBytes": 96608,
+      "hierarchyBytes": 93448,
+      "hierarchySha256": "a5752de1d5a4f9cb11412ebcbf516243cdf7e033190b1f58b15983ee7c0b40d1",
+      "clusters": 40,
+      "groups": 7,
+      "levels": 5,
+      "buildMs": [
+        9.805962999999991,
+        10.257192000000003,
+        6.773647000000011
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 2400,
+          "px2": 2400,
+          "px4": 2400
+        },
+        {
+          "distance": 3,
+          "px1": 2400,
+          "px2": 2400,
+          "px4": 2400
+        },
+        {
+          "distance": 6,
+          "px1": 2400,
+          "px2": 2400,
+          "px4": 1968
+        },
+        {
+          "distance": 12,
+          "px1": 2400,
+          "px2": 1199,
+          "px4": 1199
+        },
+        {
+          "distance": 25,
+          "px1": 1199,
+          "px2": 598,
+          "px4": 298
+        },
+        {
+          "distance": 50,
+          "px1": 598,
+          "px2": 298,
+          "px4": 148
+        },
+        {
+          "distance": 100,
+          "px1": 298,
+          "px2": 148,
+          "px4": 74
+        },
+        {
+          "distance": 200,
+          "px1": 148,
+          "px2": 74,
+          "px4": 74
+        }
+      ],
+      "existingLods": [
+        {
+          "lod": "lod1",
+          "triangles": 384,
+          "geometryBufferBytes": 16304
+        },
+        {
+          "lod": "lod2",
+          "triangles": 84,
+          "geometryBufferBytes": 3920
+        }
+      ]
+    },
+    {
+      "asset": "scenes/crag.kit.corner-climb-2/default.gltf",
+      "inputSha256": "c7542e920ade525adeb03eb9efd7abe64374d782c6d940c9b82a1cb2d7c027c1",
+      "sourceTriangles": 2400,
+      "geometryBufferBytes": 96944,
+      "hierarchyBytes": 93604,
+      "hierarchySha256": "d82a2bbe4e11ab458b6a4010594de06ec1c5f4b5b778eec427da87ab5dba31eb",
+      "clusters": 40,
+      "groups": 7,
+      "levels": 5,
+      "buildMs": [
+        7.375739999999979,
+        6.970015999999987,
+        7.20001000000002
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 2400,
+          "px2": 2400,
+          "px4": 2400
+        },
+        {
+          "distance": 3,
+          "px1": 2400,
+          "px2": 2400,
+          "px4": 2400
+        },
+        {
+          "distance": 6,
+          "px1": 2400,
+          "px2": 2400,
+          "px4": 2400
+        },
+        {
+          "distance": 12,
+          "px1": 2400,
+          "px2": 1711,
+          "px4": 1198
+        },
+        {
+          "distance": 25,
+          "px1": 1711,
+          "px2": 1198,
+          "px4": 599
+        },
+        {
+          "distance": 50,
+          "px1": 1198,
+          "px2": 599,
+          "px4": 149
+        },
+        {
+          "distance": 100,
+          "px1": 599,
+          "px2": 149,
+          "px4": 74
+        },
+        {
+          "distance": 200,
+          "px1": 149,
+          "px2": 74,
+          "px4": 74
+        }
+      ],
+      "existingLods": [
+        {
+          "lod": "lod1",
+          "triangles": 384,
+          "geometryBufferBytes": 17144
+        },
+        {
+          "lod": "lod2",
+          "triangles": 84,
+          "geometryBufferBytes": 3864
+        }
+      ]
+    },
+    {
+      "asset": "scenes/crag.kit.corner-sheer-1/default.gltf",
+      "inputSha256": "9c1b7bf1f811fb83c8191c8ac16c03a7d0db91372ec5fa7b32e7f631827e2003",
+      "sourceTriangles": 2400,
+      "geometryBufferBytes": 88824,
+      "hierarchyBytes": 90112,
+      "hierarchySha256": "051d82fc93953b11920a29d122b17b801c201b8e0b3a804da22b074de0ac7c21",
+      "clusters": 40,
+      "groups": 7,
+      "levels": 5,
+      "buildMs": [
+        7.390848000000005,
+        12.523187000000007,
+        8.807765000000018
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 2400,
+          "px2": 2400,
+          "px4": 2400
+        },
+        {
+          "distance": 3,
+          "px1": 2400,
+          "px2": 2400,
+          "px4": 1887
+        },
+        {
+          "distance": 6,
+          "px1": 2400,
+          "px2": 1198,
+          "px4": 1198
+        },
+        {
+          "distance": 12,
+          "px1": 1198,
+          "px2": 598,
+          "px4": 299
+        },
+        {
+          "distance": 25,
+          "px1": 598,
+          "px2": 299,
+          "px4": 149
+        },
+        {
+          "distance": 50,
+          "px1": 299,
+          "px2": 149,
+          "px4": 73
+        },
+        {
+          "distance": 100,
+          "px1": 149,
+          "px2": 73,
+          "px4": 73
+        },
+        {
+          "distance": 200,
+          "px1": 73,
+          "px2": 73,
+          "px4": 73
+        }
+      ],
+      "existingLods": [
+        {
+          "lod": "lod1",
+          "triangles": 384,
+          "geometryBufferBytes": 15744
+        },
+        {
+          "lod": "lod2",
+          "triangles": 84,
+          "geometryBufferBytes": 3640
+        }
+      ]
+    },
+    {
+      "asset": "scenes/crag.kit.corner-sheer-2/default.gltf",
+      "inputSha256": "5c4b6a7bc42e30174d96063e600bab9e71bfa1d00a5a7771e41f2fdb442339fa",
+      "sourceTriangles": 2400,
+      "geometryBufferBytes": 89440,
+      "hierarchyBytes": 90376,
+      "hierarchySha256": "cb043ad7a7daf30af1670278f57cfcf98a326148cf7f955fdcd11e3aff23b919",
+      "clusters": 40,
+      "groups": 7,
+      "levels": 5,
+      "buildMs": [
+        6.5767060000000015,
+        7.293886000000043,
+        6.640847000000008
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 2400,
+          "px2": 2400,
+          "px4": 2400
+        },
+        {
+          "distance": 3,
+          "px1": 2400,
+          "px2": 2400,
+          "px4": 2400
+        },
+        {
+          "distance": 6,
+          "px1": 2400,
+          "px2": 2015,
+          "px4": 1198
+        },
+        {
+          "distance": 12,
+          "px1": 1198,
+          "px2": 1198,
+          "px4": 598
+        },
+        {
+          "distance": 25,
+          "px1": 598,
+          "px2": 598,
+          "px4": 148
+        },
+        {
+          "distance": 50,
+          "px1": 299,
+          "px2": 148,
+          "px4": 74
+        },
+        {
+          "distance": 100,
+          "px1": 148,
+          "px2": 74,
+          "px4": 74
+        },
+        {
+          "distance": 200,
+          "px1": 74,
+          "px2": 74,
+          "px4": 74
+        }
+      ],
+      "existingLods": [
+        {
+          "lod": "lod1",
+          "triangles": 384,
+          "geometryBufferBytes": 14792
+        },
+        {
+          "lod": "lod2",
+          "triangles": 84,
+          "geometryBufferBytes": 3808
+        }
+      ]
+    },
+    {
+      "asset": "scenes/crag.kit.face-climb-1/default.gltf",
+      "inputSha256": "2ab3333e05ff2f21df491e9150087ac5c74cf423a7f55664d0253a074d1488a5",
+      "sourceTriangles": 3200,
+      "geometryBufferBytes": 134168,
+      "hierarchyBytes": 126844,
+      "hierarchySha256": "a9ede6cf11fb3c94ed88dc646aa1f93901448a2aa21bebb2676ac75aef5dd044",
+      "clusters": 52,
+      "groups": 7,
+      "levels": 5,
+      "buildMs": [
+        10.063638000000026,
+        8.961183000000005,
+        9.992333999999971
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 3200,
+          "px2": 3200,
+          "px4": 3200
+        },
+        {
+          "distance": 3,
+          "px1": 3200,
+          "px2": 3200,
+          "px4": 3200
+        },
+        {
+          "distance": 6,
+          "px1": 3200,
+          "px2": 3200,
+          "px4": 2303
+        },
+        {
+          "distance": 12,
+          "px1": 3200,
+          "px2": 1598,
+          "px4": 799
+        },
+        {
+          "distance": 25,
+          "px1": 1598,
+          "px2": 799,
+          "px4": 399
+        },
+        {
+          "distance": 50,
+          "px1": 799,
+          "px2": 399,
+          "px4": 199
+        },
+        {
+          "distance": 100,
+          "px1": 399,
+          "px2": 199,
+          "px4": 99
+        },
+        {
+          "distance": 200,
+          "px1": 199,
+          "px2": 99,
+          "px4": 99
+        }
+      ],
+      "existingLods": [
+        {
+          "lod": "lod1",
+          "triangles": 512,
+          "geometryBufferBytes": 21832
+        },
+        {
+          "lod": "lod2",
+          "triangles": 98,
+          "geometryBufferBytes": 5068
+        }
+      ]
+    },
+    {
+      "asset": "scenes/crag.kit.face-climb-2/default.gltf",
+      "inputSha256": "e117213a3ecaedbbcb6a914e79527855939191893453dd19ca858087563c64ba",
+      "sourceTriangles": 3200,
+      "geometryBufferBytes": 133160,
+      "hierarchyBytes": 126412,
+      "hierarchySha256": "7216d42c873cd396aba4e823b9c7c162abe0b02b3f32bc89707af0b2dc9f13ce",
+      "clusters": 52,
+      "groups": 7,
+      "levels": 5,
+      "buildMs": [
+        8.53763600000002,
+        9.145520000000033,
+        8.739806999999985
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 3200,
+          "px2": 3200,
+          "px4": 3200
+        },
+        {
+          "distance": 3,
+          "px1": 3200,
+          "px2": 3200,
+          "px4": 3200
+        },
+        {
+          "distance": 6,
+          "px1": 3200,
+          "px2": 3200,
+          "px4": 1599
+        },
+        {
+          "distance": 12,
+          "px1": 3200,
+          "px2": 1599,
+          "px4": 799
+        },
+        {
+          "distance": 25,
+          "px1": 1599,
+          "px2": 799,
+          "px4": 398
+        },
+        {
+          "distance": 50,
+          "px1": 799,
+          "px2": 398,
+          "px4": 199
+        },
+        {
+          "distance": 100,
+          "px1": 398,
+          "px2": 199,
+          "px4": 99
+        },
+        {
+          "distance": 200,
+          "px1": 199,
+          "px2": 99,
+          "px4": 99
+        }
+      ],
+      "existingLods": [
+        {
+          "lod": "lod1",
+          "triangles": 512,
+          "geometryBufferBytes": 25528
+        },
+        {
+          "lod": "lod2",
+          "triangles": 98,
+          "geometryBufferBytes": 5460
+        }
+      ]
+    },
+    {
+      "asset": "scenes/crag.kit.face-climb-3/default.gltf",
+      "inputSha256": "f71925497be8af30f79a0c678be7a3a5f4e53c546a1455093195769dfba0b4e9",
+      "sourceTriangles": 3200,
+      "geometryBufferBytes": 136296,
+      "hierarchyBytes": 127732,
+      "hierarchySha256": "46058b133358143cd372ab12ffe8a30eef36dd66de06e31949c676b3e2ed4d41",
+      "clusters": 52,
+      "groups": 7,
+      "levels": 5,
+      "buildMs": [
+        8.229686999999956,
+        9.05789500000003,
+        8.302444000000037
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 3200,
+          "px2": 3200,
+          "px4": 3200
+        },
+        {
+          "distance": 3,
+          "px1": 3200,
+          "px2": 3200,
+          "px4": 3200
+        },
+        {
+          "distance": 6,
+          "px1": 3200,
+          "px2": 3200,
+          "px4": 1598
+        },
+        {
+          "distance": 12,
+          "px1": 2431,
+          "px2": 1598,
+          "px4": 798
+        },
+        {
+          "distance": 25,
+          "px1": 1598,
+          "px2": 798,
+          "px4": 399
+        },
+        {
+          "distance": 50,
+          "px1": 798,
+          "px2": 399,
+          "px4": 198
+        },
+        {
+          "distance": 100,
+          "px1": 399,
+          "px2": 198,
+          "px4": 99
+        },
+        {
+          "distance": 200,
+          "px1": 198,
+          "px2": 99,
+          "px4": 99
+        }
+      ],
+      "existingLods": [
+        {
+          "lod": "lod1",
+          "triangles": 512,
+          "geometryBufferBytes": 25416
+        },
+        {
+          "lod": "lod2",
+          "triangles": 98,
+          "geometryBufferBytes": 4900
+        }
+      ]
+    },
+    {
+      "asset": "scenes/crag.kit.face-sheer-1/default.gltf",
+      "inputSha256": "ed03f82702d21e5210a6b303c074f8203dad0899aa25415f5235672e894eeccd",
+      "sourceTriangles": 3200,
+      "geometryBufferBytes": 121456,
+      "hierarchyBytes": 121384,
+      "hierarchySha256": "0bbf9fd9888238cab9962f9c635ca7f275fc0ac6ff2ff05e19bfbe9d2a233deb",
+      "clusters": 52,
+      "groups": 7,
+      "levels": 5,
+      "buildMs": [
+        8.116664000000014,
+        9.067935000000034,
+        7.973926000000006
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 3200,
+          "px2": 3200,
+          "px4": 3200
+        },
+        {
+          "distance": 3,
+          "px1": 3200,
+          "px2": 3200,
+          "px4": 3200
+        },
+        {
+          "distance": 6,
+          "px1": 3200,
+          "px2": 1598,
+          "px4": 798
+        },
+        {
+          "distance": 12,
+          "px1": 1598,
+          "px2": 798,
+          "px4": 399
+        },
+        {
+          "distance": 25,
+          "px1": 798,
+          "px2": 399,
+          "px4": 199
+        },
+        {
+          "distance": 50,
+          "px1": 399,
+          "px2": 199,
+          "px4": 99
+        },
+        {
+          "distance": 100,
+          "px1": 199,
+          "px2": 99,
+          "px4": 99
+        },
+        {
+          "distance": 200,
+          "px1": 99,
+          "px2": 99,
+          "px4": 99
+        }
+      ],
+      "existingLods": [
+        {
+          "lod": "lod1",
+          "triangles": 512,
+          "geometryBufferBytes": 21216
+        },
+        {
+          "lod": "lod2",
+          "triangles": 98,
+          "geometryBufferBytes": 4620
+        }
+      ]
+    },
+    {
+      "asset": "scenes/crag.kit.face-sheer-2/default.gltf",
+      "inputSha256": "0b37a73ffcf265e4e50fe14cdc4c9b19811ca0636665b54c69f81a97c30dfa31",
+      "sourceTriangles": 3200,
+      "geometryBufferBytes": 122128,
+      "hierarchyBytes": 121672,
+      "hierarchySha256": "8aecf3b235a7a8ab55bae5e64a29318459f8f57c778cbb9f04587afec4c53265",
+      "clusters": 52,
+      "groups": 7,
+      "levels": 5,
+      "buildMs": [
+        8.192306999999914,
+        9.100886999999943,
+        8.670616999999993
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 3200,
+          "px2": 3200,
+          "px4": 3200
+        },
+        {
+          "distance": 3,
+          "px1": 3200,
+          "px2": 3200,
+          "px4": 3200
+        },
+        {
+          "distance": 6,
+          "px1": 3200,
+          "px2": 1599,
+          "px4": 1599
+        },
+        {
+          "distance": 12,
+          "px1": 1599,
+          "px2": 798,
+          "px4": 399
+        },
+        {
+          "distance": 25,
+          "px1": 798,
+          "px2": 399,
+          "px4": 198
+        },
+        {
+          "distance": 50,
+          "px1": 399,
+          "px2": 198,
+          "px4": 99
+        },
+        {
+          "distance": 100,
+          "px1": 198,
+          "px2": 99,
+          "px4": 99
+        },
+        {
+          "distance": 200,
+          "px1": 99,
+          "px2": 99,
+          "px4": 99
+        }
+      ],
+      "existingLods": [
+        {
+          "lod": "lod1",
+          "triangles": 512,
+          "geometryBufferBytes": 21496
+        },
+        {
+          "lod": "lod2",
+          "triangles": 98,
+          "geometryBufferBytes": 4676
+        }
+      ]
+    },
+    {
+      "asset": "scenes/crag.kit.face-sheer-3/default.gltf",
+      "inputSha256": "af604b7dc557f4b61adbabde8814326b366e2d8cb56986435688f64e528363ed",
+      "sourceTriangles": 3200,
+      "geometryBufferBytes": 121680,
+      "hierarchyBytes": 121480,
+      "hierarchySha256": "81a092a26c83cb01503ddc7627c85a94b806517e06134e95019c76de13427f8f",
+      "clusters": 52,
+      "groups": 7,
+      "levels": 5,
+      "buildMs": [
+        9.56481999999994,
+        7.90996599999994,
+        7.879928999999947
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 3200,
+          "px2": 3200,
+          "px4": 3200
+        },
+        {
+          "distance": 3,
+          "px1": 3200,
+          "px2": 3200,
+          "px4": 3200
+        },
+        {
+          "distance": 6,
+          "px1": 3200,
+          "px2": 1598,
+          "px4": 1598
+        },
+        {
+          "distance": 12,
+          "px1": 1598,
+          "px2": 799,
+          "px4": 399
+        },
+        {
+          "distance": 25,
+          "px1": 799,
+          "px2": 399,
+          "px4": 198
+        },
+        {
+          "distance": 50,
+          "px1": 399,
+          "px2": 198,
+          "px4": 99
+        },
+        {
+          "distance": 100,
+          "px1": 99,
+          "px2": 99,
+          "px4": 99
+        },
+        {
+          "distance": 200,
+          "px1": 99,
+          "px2": 99,
+          "px4": 99
+        }
+      ],
+      "existingLods": [
+        {
+          "lod": "lod1",
+          "triangles": 512,
+          "geometryBufferBytes": 22168
+        },
+        {
+          "lod": "lod2",
+          "triangles": 98,
+          "geometryBufferBytes": 4844
+        }
+      ]
+    },
+    {
+      "asset": "scenes/crag.kit.outcrop-buttress-1/default.gltf",
+      "inputSha256": "2c3fa7be6c509eaf50de7ee4f4f94f9ed1e0c4e56a69944f848431cc67a79150",
+      "sourceTriangles": 8999,
+      "geometryBufferBytes": 449644,
+      "hierarchyBytes": 534652,
+      "hierarchySha256": "b7e933cd1c2830a6dfb1a13d8fcf160a1dce00e8986f99e2bf7ed31d943dcbcf",
+      "clusters": 176,
+      "groups": 18,
+      "levels": 7,
+      "buildMs": [
+        42.74301600000001,
+        40.085915,
+        42.64922899999999
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 8999,
+          "px2": 8999,
+          "px4": 8999
+        },
+        {
+          "distance": 3,
+          "px1": 8999,
+          "px2": 8999,
+          "px4": 8999
+        },
+        {
+          "distance": 6,
+          "px1": 8999,
+          "px2": 8999,
+          "px4": 8999
+        },
+        {
+          "distance": 12,
+          "px1": 8159,
+          "px2": 8159,
+          "px4": 8159
+        },
+        {
+          "distance": 25,
+          "px1": 8159,
+          "px2": 8159,
+          "px4": 8159
+        },
+        {
+          "distance": 50,
+          "px1": 8159,
+          "px2": 8159,
+          "px4": 8159
+        },
+        {
+          "distance": 100,
+          "px1": 8159,
+          "px2": 8159,
+          "px4": 6002
+        },
+        {
+          "distance": 200,
+          "px1": 8159,
+          "px2": 6002,
+          "px4": 5450
+        }
+      ],
+      "existingLods": [
+        {
+          "lod": "lod1",
+          "triangles": 2727,
+          "geometryBufferBytes": 138796
+        },
+        {
+          "lod": "lod2",
+          "triangles": 755,
+          "geometryBufferBytes": 46516
+        }
+      ]
+    },
+    {
+      "asset": "scenes/crag.kit.outcrop-buttress-2/default.gltf",
+      "inputSha256": "45bd26b9b68b7c82c0d0e1cdf98432a9d822c293dd1eb4fd34b59843295655e6",
+      "sourceTriangles": 7500,
+      "geometryBufferBytes": 377992,
+      "hierarchyBytes": 453616,
+      "hierarchySha256": "05823855c761d5920146c2139559badaddff06d7714a84657c3397bcf968a181",
+      "clusters": 153,
+      "groups": 16,
+      "levels": 7,
+      "buildMs": [
+        31.47936900000002,
+        30.64022,
+        29.976612000000046
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 7500,
+          "px2": 7500,
+          "px4": 7500
+        },
+        {
+          "distance": 3,
+          "px1": 7500,
+          "px2": 7500,
+          "px4": 7500
+        },
+        {
+          "distance": 6,
+          "px1": 7500,
+          "px2": 7500,
+          "px4": 7500
+        },
+        {
+          "distance": 12,
+          "px1": 7500,
+          "px2": 7500,
+          "px4": 7500
+        },
+        {
+          "distance": 25,
+          "px1": 7500,
+          "px2": 7500,
+          "px4": 7500
+        },
+        {
+          "distance": 50,
+          "px1": 7500,
+          "px2": 7500,
+          "px4": 7217
+        },
+        {
+          "distance": 100,
+          "px1": 7500,
+          "px2": 7217,
+          "px4": 4622
+        },
+        {
+          "distance": 200,
+          "px1": 7217,
+          "px2": 4622,
+          "px4": 2285
+        }
+      ],
+      "existingLods": [
+        {
+          "lod": "lod1",
+          "triangles": 2222,
+          "geometryBufferBytes": 106964
+        },
+        {
+          "lod": "lod2",
+          "triangles": 619,
+          "geometryBufferBytes": 37636
+        }
+      ]
+    },
+    {
+      "asset": "scenes/crag.kit.outcrop-spire/default.gltf",
+      "inputSha256": "0981de31506c11acc770e9b1fdf679073a7300c8d55514b3544e8caf27566beb",
+      "sourceTriangles": 6999,
+      "geometryBufferBytes": 363404,
+      "hierarchyBytes": 432076,
+      "hierarchySha256": "38e5324fb3738f03c76b862c1cff185fc4ad5b8eaa1fdb80f9b39a7967cb8bfb",
+      "clusters": 145,
+      "groups": 16,
+      "levels": 7,
+      "buildMs": [
+        26.495661000000155,
+        26.752453999999943,
+        26.67762300000004
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 6999,
+          "px2": 6999,
+          "px4": 6999
+        },
+        {
+          "distance": 3,
+          "px1": 6999,
+          "px2": 6999,
+          "px4": 6999
+        },
+        {
+          "distance": 6,
+          "px1": 6999,
+          "px2": 6999,
+          "px4": 6999
+        },
+        {
+          "distance": 12,
+          "px1": 6999,
+          "px2": 6999,
+          "px4": 6999
+        },
+        {
+          "distance": 25,
+          "px1": 6999,
+          "px2": 6999,
+          "px4": 6999
+        },
+        {
+          "distance": 50,
+          "px1": 6999,
+          "px2": 6803,
+          "px4": 6497
+        },
+        {
+          "distance": 100,
+          "px1": 6803,
+          "px2": 6497,
+          "px4": 4214
+        },
+        {
+          "distance": 200,
+          "px1": 5765,
+          "px2": 4214,
+          "px4": 2685
+        }
+      ],
+      "existingLods": [
+        {
+          "lod": "lod1",
+          "triangles": 2161,
+          "geometryBufferBytes": 110696
+        },
+        {
+          "lod": "lod2",
+          "triangles": 601,
+          "geometryBufferBytes": 38520
+        }
+      ]
+    },
+    {
+      "asset": "scenes/crag.kit.outcrop-talus-1/default.gltf",
+      "inputSha256": "468d5bbffb93ea2f2d9fe1d911727861f7f1981d618e3584c8c8ea6f599fbf56",
+      "sourceTriangles": 3500,
+      "geometryBufferBytes": 187624,
+      "hierarchyBytes": 217672,
+      "hierarchySha256": "f44688d99ca39775eaaab205abdc39975805bb1f25cee22d1588c521419f4bfa",
+      "clusters": 70,
+      "groups": 9,
+      "levels": 5,
+      "buildMs": [
+        14.57561899999996,
+        15.151994000000059,
+        14.543368999999984
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 3500,
+          "px2": 3500,
+          "px4": 3500
+        },
+        {
+          "distance": 3,
+          "px1": 3500,
+          "px2": 3500,
+          "px4": 3500
+        },
+        {
+          "distance": 6,
+          "px1": 3500,
+          "px2": 3500,
+          "px4": 3500
+        },
+        {
+          "distance": 12,
+          "px1": 3500,
+          "px2": 3500,
+          "px4": 3500
+        },
+        {
+          "distance": 25,
+          "px1": 3500,
+          "px2": 3164,
+          "px4": 3164
+        },
+        {
+          "distance": 50,
+          "px1": 3164,
+          "px2": 3164,
+          "px4": 3164
+        },
+        {
+          "distance": 100,
+          "px1": 3164,
+          "px2": 3164,
+          "px4": 1020
+        },
+        {
+          "distance": 200,
+          "px1": 3164,
+          "px2": 1020,
+          "px4": 125
+        }
+      ],
+      "existingLods": [
+        {
+          "lod": "lod1",
+          "triangles": 997,
+          "geometryBufferBytes": 48960
+        },
+        {
+          "lod": "lod2",
+          "triangles": 274,
+          "geometryBufferBytes": 16428
+        }
+      ]
+    },
+    {
+      "asset": "scenes/crag.kit.outcrop-talus-2/default.gltf",
+      "inputSha256": "1faa92dc18ee482f2619a214fee7d9f87b4e61a1b8adc37b9f22a3944b71ea6c",
+      "sourceTriangles": 2499,
+      "geometryBufferBytes": 148820,
+      "hierarchyBytes": 163756,
+      "hierarchySha256": "d291374f668b4099487a913d2cac17ae22fd67e9a18613c3c3bf1fa83ee41558",
+      "clusters": 54,
+      "groups": 7,
+      "levels": 5,
+      "buildMs": [
+        10.482646000000159,
+        12.284877999999935,
+        10.62106700000004
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 2499,
+          "px2": 2499,
+          "px4": 2499
+        },
+        {
+          "distance": 3,
+          "px1": 2499,
+          "px2": 2499,
+          "px4": 1951
+        },
+        {
+          "distance": 6,
+          "px1": 1951,
+          "px2": 1951,
+          "px4": 1951
+        },
+        {
+          "distance": 12,
+          "px1": 1951,
+          "px2": 1951,
+          "px4": 1951
+        },
+        {
+          "distance": 25,
+          "px1": 1951,
+          "px2": 1951,
+          "px4": 1951
+        },
+        {
+          "distance": 50,
+          "px1": 1951,
+          "px2": 1951,
+          "px4": 1951
+        },
+        {
+          "distance": 100,
+          "px1": 1951,
+          "px2": 1951,
+          "px4": 1951
+        },
+        {
+          "distance": 200,
+          "px1": 1951,
+          "px2": 1951,
+          "px4": 88
+        }
+      ],
+      "existingLods": [
+        {
+          "lod": "lod1",
+          "triangles": 708,
+          "geometryBufferBytes": 37112
+        },
+        {
+          "lod": "lod2",
+          "triangles": 192,
+          "geometryBufferBytes": 12480
+        }
+      ]
+    },
+    {
+      "asset": "scenes/crag.kit.rock-macro/default.gltf",
+      "inputSha256": "48bad9fc60af973a2159a2a80b04b4607eead73cab47aebc84ddf4d17dcb66ce",
+      "sourceTriangles": 2,
+      "geometryBufferBytes": 140,
+      "hierarchyBytes": 184,
+      "hierarchySha256": "e88743380c02904c685779e6c2022ed8d2308bd94429497a3dea25a2d5b04e2c",
+      "clusters": 1,
+      "groups": 1,
+      "levels": 0,
+      "buildMs": [
+        0.11282200000005105,
+        0.139882999999827,
+        0.16270600000007107
+      ],
+      "verification": {
+        "ok": true,
+        "extraOpenEdges": 0,
+        "monotonicityViolations": 0
+      },
+      "cuts": [
+        {
+          "distance": 1.5,
+          "px1": 2,
+          "px2": 2,
+          "px4": 2
+        },
+        {
+          "distance": 3,
+          "px1": 2,
+          "px2": 2,
+          "px4": 2
+        },
+        {
+          "distance": 6,
+          "px1": 2,
+          "px2": 2,
+          "px4": 2
+        },
+        {
+          "distance": 12,
+          "px1": 2,
+          "px2": 2,
+          "px4": 2
+        },
+        {
+          "distance": 25,
+          "px1": 2,
+          "px2": 2,
+          "px4": 2
+        },
+        {
+          "distance": 50,
+          "px1": 2,
+          "px2": 2,
+          "px4": 2
+        },
+        {
+          "distance": 100,
+          "px1": 2,
+          "px2": 2,
+          "px4": 2
+        },
+        {
+          "distance": 200,
+          "px1": 2,
+          "px2": 2,
+          "px4": 2
+        }
+      ],
+      "existingLods": []
+    }
+  ]
+}

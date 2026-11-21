@@ -1,0 +1,117 @@
+--- scripts/profile-browser.py
++++ scripts/profile-browser.py
+@@ -52,8 +52,8 @@
+ 
+ from playwright.sync_api import TimeoutError as PlaywrightTimeout, expect, sync_playwright
+ 
+-ROOT = Path(__file__).resolve().parents[1]
+-GPU_ARGS = ["--enable-gpu", "--use-angle=gl", "--ignore-gpu-blocklist"]
++ROOT = Path("/home/moenarch/moritzbrantner/mmorpg")
++GPU_ARGS = ["--enable-gpu", "--ignore-gpu-blocklist", "--use-angle=vulkan", "--enable-features=Vulkan", "--use-vulkan=native"]
+ SWEEP = [(1280, 720, 1), (1920, 1080, 1), (1920, 1080, 2), (2560, 1440, 2)]
+ TRACE_CATEGORIES = [
+     "toplevel", "devtools.timeline", "disabled-by-default-devtools.timeline", "blink.user_timing",
+@@ -194,6 +194,7 @@
+         self.context = browser.new_context(viewport={"width": width, "height": height}, device_scale_factor=scale)
+         self.context.add_init_script(INIT_SCRIPT)
+         self.page = self.context.new_page()
++        self.page.set_default_timeout(120_000)
+         self.errors = []
+         self.page.on("pageerror", lambda error: self.errors.append(str(error)))
+         # Bytes served per Outpost kit bundle file (the local server sends Content-Length).
+@@ -202,7 +203,7 @@
+             response.url, int(response.headers.get("content-length", "0"))))
+         started = time.monotonic()
+         self.page.goto(url + "?debug&profile" + (f"&activity={activity}" if activity else ""))
+-        expect(self.enter_button()).to_be_enabled(timeout=60_000)
++        expect(self.enter_button()).to_be_enabled(timeout=120_000)
+         self.cold_selection_s = round(time.monotonic() - started, 2)
+ 
+     def enter_button(self):
+@@ -211,10 +212,12 @@
+         return self.page.get_by_role("button", name=re.compile(name))
+ 
+     def frames(self, count):
+-        self.page.evaluate("""count => new Promise(resolve => {
+-          function next() { if (--count <= 0) resolve(); else requestAnimationFrame(next); }
++        self.page.evaluate("""count => {
++          window.__geometryProfileRemaining = count;
++          function next() { if (--window.__geometryProfileRemaining > 0) requestAnimationFrame(next); }
+           requestAnimationFrame(next);
+-        })""", count)
++        }""", count)
++        self.page.wait_for_function("window.__geometryProfileRemaining <= 0", timeout=30_000)
+ 
+     def take(self):
+         return {"frames": self.page.evaluate("window.__valeProfile.take()"), **self.page.evaluate("window.__probe.take()")}
+@@ -227,19 +230,9 @@
+         }""")
+ 
+     def enter_world(self):
+-        self.page.locator("#world").focus()
+-        self.enter_button().focus()
+-        self.page.keyboard.press("Enter")
+-        expect(self.page.locator("#character-select")).to_be_hidden(timeout=60_000)
+-        expect(self.page.locator(".hud")).to_be_visible()
+-        if self.activity == "battle-royale":
+-            # The fortress kit (#591) is the arena's art; profile it, not the graybox it replaces.
+-            # A bundle that cannot load leaves the graybox, which is profiled instead.
+-            try:
+-                self.page.wait_for_function("() => window.__valeDebug.fortress()?.loaded", timeout=60_000)
+-            except PlaywrightTimeout:
+-                print("The fortress kit did not load; profiling the graybox", file=sys.stderr)
+-        self.page.locator("#world").focus()
++        self.enter_button().click(timeout=120_000)
++        expect(self.page.locator("#character-select")).to_be_hidden(timeout=120_000)
++        expect(self.page.locator(".hud")).to_be_visible(timeout=120_000)
+ 
+     def warm(self, seconds=3.0):
+         self.page.wait_for_timeout(seconds * 1000)
+@@ -582,30 +575,45 @@
+             session.enter_world()
+             session.frames(10)
+         else:
+-            report["scenarios"]["selection-keys"] = selection_keys(session)
++            print('PROFILE report["scenarios"]["selection-keys"] ', flush=True)
++            session.enter_world()
++            report["scenarios"]["selection-keys"] = {"notRun": "Geometry profile uses normal button entry, not keyboard acceptance"}
+         report["display"] = {"viewport": [1440, 900], "deviceScaleFactor": 1, **session.renderer()}
+         session.warm()
+         if not args.activity:
+             kit = session.page.evaluate("window.__valeDebug.outpost()") or {}
+             report["outpostKit"] = {"loaded": kit.get("loaded"), "wornMaterials": kit.get("worn"), "textureBytes": kit.get("textureBytes"),
+                                     "downloadBytes": sum(session.outpost_files.values()), "downloadFiles": len(session.outpost_files)}
++        print('PROFILE report["scenarios"]["idle"] ', flush=True)
+         report["scenarios"]["idle"] = summarize(session.record(args.seconds), args.seconds)
++        print('PROFILE report["scenarios"]["idle"]["cpuProfile"] ', flush=True)
+         report["scenarios"]["idle"]["cpuProfile"] = cpu_profile(session, lambda: session.page.wait_for_timeout(args.seconds * 1000))
+         trace = None
+         if args.trace:
+             args.trace.mkdir(parents=True, exist_ok=True)
+             trace = args.trace / "move-rotate.trace.json"
++        print('PROFILE report["scenarios"]["move-rotate"] ', flush=True)
+         report["scenarios"]["move-rotate"] = move_rotate(session, args.seconds, trace, browser)
+         if trace:
++            print('PROFILE report["scenarios"]["move-rotate"]["trace"] ', flush=True)
+             report["scenarios"]["move-rotate"]["trace"] = {"path": str(trace), **analyze_trace(trace)}
+-        report["scenarios"]["key-to-motion"] = key_to_motion(session)
++        print('PROFILE report["scenarios"]["key-to-motion"] ', flush=True)
++        report["scenarios"]["key-to-motion"] = {"notRun": "Input latency is outside this geometry comparison"}
+         views = [("overview", overview)] if args.activity else [
+             ("dense-woods", "woods"), ("dense-hub", "hub"),
+             ("western-lake", "lake"), ("overview", overview),
+         ]
+         for name, viewpoint in views:
++            print('PROFILE report["scenarios"][name] ', flush=True)
+             report["scenarios"][name] = view(session, viewpoint, args.seconds)
+         report["pageErrors"] = session.errors
++        close_settings = session.page.get_by_role("button", name="Close", exact=True)
++        if close_settings.is_visible():
++            close_settings.click()
++            session.frames(10)
++        session.page.evaluate("window.__valeDebug.flyTo('vale')")
++        session.frames(60)
++        session.page.locator("#world").screenshot(path="/home/moenarch/moritzbrantner/render-engine/target/virtual-geometry/mmorpg-gameplay.png")
+         session.close()
+         if not args.no_sweep:
+             for width, height, scale in SWEEP:

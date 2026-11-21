@@ -1,0 +1,4946 @@
+[
+  {
+    "workload": "buttress-final",
+    "adapter": "AdapterInfo { name: \"NVIDIA GeForce RTX 3060 Ti\", vendor: 4318, device: 9353, device_type: DiscreteGpu, device_pci_bus_id: \"0000:07:00.0\", driver: \"NVIDIA\", driver_info: \"595.99.02\", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 32, transient_saves_memory: Some(false), limit_bucket: None }",
+    "scope": "Repeated real-asset scaling experiment, not gameplay. CPU selection + prepare + encode + submit; GPU pass sum, no waits in CPU span. Shadows retain off-camera instances. Fixed authored LODs are quality candidates, not assumed equivalent. All modes resident during measurement; upload counter is cluster mesh buffers only, not total residency.",
+    "rawSha256": "a07c0b4974b36ee1dc9b342bee4c70aab04d893c2e0da4e01f02ced3aa10ebeb",
+    "rows": [
+      {
+        "mode": "source",
+        "instances": 1,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.47329000000000004,
+          "median": 0.188725,
+          "p95": 0.342243
+        },
+        "selection_ms": {
+          "max": 0.001122,
+          "median": 0.000141,
+          "p95": 0.00023999999999999998
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.175104,
+          "median": 0.151488,
+          "p95": 0.160768
+        },
+        "viewport_gpu_buffer_bytes": 3072,
+        "viewport_cpu_scratch_bytes": 43200,
+        "cluster_mesh_upload_bytes": 1925736,
+        "source_triangles_per_asset": 8999
+      },
+      {
+        "mode": "lod1",
+        "instances": 1,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 3.539758,
+          "median": 0.206088,
+          "p95": 0.31383
+        },
+        "selection_ms": {
+          "max": 0.000992,
+          "median": 0.000171,
+          "p95": 0.00031
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.164864,
+          "median": 0.138048,
+          "p95": 0.144384
+        },
+        "viewport_gpu_buffer_bytes": 3072,
+        "viewport_cpu_scratch_bytes": 43200,
+        "cluster_mesh_upload_bytes": 1925736,
+        "source_triangles_per_asset": 8999
+      },
+      {
+        "mode": "lod2",
+        "instances": 1,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.503537,
+          "median": 0.190879,
+          "p95": 0.301768
+        },
+        "selection_ms": {
+          "max": 0.000591,
+          "median": 0.00016,
+          "p95": 0.000271
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.125952,
+          "median": 0.118784,
+          "p95": 0.12288
+        },
+        "viewport_gpu_buffer_bytes": 3072,
+        "viewport_cpu_scratch_bytes": 43200,
+        "cluster_mesh_upload_bytes": 1925736,
+        "source_triangles_per_asset": 8999
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 1,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 3.103297,
+          "median": 0.33472999999999997,
+          "p95": 0.501223
+        },
+        "selection_ms": {
+          "max": 0.001392,
+          "median": 0.000792,
+          "p95": 0.001152
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.172032,
+          "median": 0.136192,
+          "p95": 0.147456
+        },
+        "viewport_gpu_buffer_bytes": 20992,
+        "viewport_cpu_scratch_bytes": 87168,
+        "cluster_mesh_upload_bytes": 1925736,
+        "source_triangles_per_asset": 8999
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 1,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.840362,
+          "median": 0.476887,
+          "p95": 0.6341129999999999
+        },
+        "selection_ms": {
+          "max": 0.001613,
+          "median": 0.0009519999999999999,
+          "p95": 0.0012330000000000002
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.18112,
+          "median": 0.136192,
+          "p95": 0.147424
+        },
+        "viewport_gpu_buffer_bytes": 20992,
+        "viewport_cpu_scratch_bytes": 87168,
+        "cluster_mesh_upload_bytes": 1925736,
+        "source_triangles_per_asset": 8999
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 1,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.456859,
+          "median": 0.23884899999999998,
+          "p95": 0.418908
+        },
+        "selection_ms": {
+          "max": 0.0074540000000000006,
+          "median": 0.000531,
+          "p95": 0.000931
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.155648,
+          "median": 0.136192,
+          "p95": 0.146432
+        },
+        "viewport_gpu_buffer_bytes": 20992,
+        "viewport_cpu_scratch_bytes": 87168,
+        "cluster_mesh_upload_bytes": 1925736,
+        "source_triangles_per_asset": 8999
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 1,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.413881,
+          "median": 0.44672,
+          "p95": 0.490592
+        },
+        "selection_ms": {
+          "max": 0.012373,
+          "median": 0.000902,
+          "p95": 0.001022
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.151552,
+          "median": 0.137216,
+          "p95": 0.146432
+        },
+        "viewport_gpu_buffer_bytes": 20992,
+        "viewport_cpu_scratch_bytes": 87168,
+        "cluster_mesh_upload_bytes": 1925736,
+        "source_triangles_per_asset": 8999
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 1,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.5149310000000002,
+          "median": 0.273905,
+          "p95": 0.45424400000000004
+        },
+        "selection_ms": {
+          "max": 0.009157,
+          "median": 0.0006309999999999999,
+          "p95": 0.001092
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.149504,
+          "median": 0.136192,
+          "p95": 0.146432
+        },
+        "viewport_gpu_buffer_bytes": 20992,
+        "viewport_cpu_scratch_bytes": 87168,
+        "cluster_mesh_upload_bytes": 1925736,
+        "source_triangles_per_asset": 8999
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 1,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.5149999999999997,
+          "median": 0.401275,
+          "p95": 0.476025
+        },
+        "selection_ms": {
+          "max": 0.0011719999999999999,
+          "median": 0.000882,
+          "p95": 0.001002
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.15248,
+          "median": 0.136192,
+          "p95": 0.1464
+        },
+        "viewport_gpu_buffer_bytes": 20992,
+        "viewport_cpu_scratch_bytes": 87168,
+        "cluster_mesh_upload_bytes": 1925736,
+        "source_triangles_per_asset": 8999
+      },
+      {
+        "mode": "lod2",
+        "instances": 1,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.306186,
+          "median": 0.166884,
+          "p95": 0.209354
+        },
+        "selection_ms": {
+          "max": 0.000311,
+          "median": 0.00015,
+          "p95": 0.00023
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.128,
+          "median": 0.118592,
+          "p95": 0.122752
+        },
+        "viewport_gpu_buffer_bytes": 3072,
+        "viewport_cpu_scratch_bytes": 43200,
+        "cluster_mesh_upload_bytes": 1925736,
+        "source_triangles_per_asset": 8999
+      },
+      {
+        "mode": "lod1",
+        "instances": 1,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.248219,
+          "median": 0.120396,
+          "p95": 0.19500699999999999
+        },
+        "selection_ms": {
+          "max": 0.00033099999999999997,
+          "median": 0.00011,
+          "p95": 0.00019
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.150432,
+          "median": 0.13712,
+          "p95": 0.14336
+        },
+        "viewport_gpu_buffer_bytes": 3072,
+        "viewport_cpu_scratch_bytes": 43200,
+        "cluster_mesh_upload_bytes": 1925736,
+        "source_triangles_per_asset": 8999
+      },
+      {
+        "mode": "source",
+        "instances": 1,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 1.1827050000000001,
+          "median": 0.183385,
+          "p95": 0.34608099999999997
+        },
+        "selection_ms": {
+          "max": 0.070222,
+          "median": 0.00014000000000000001,
+          "p95": 0.00021
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.164832,
+          "median": 0.150528,
+          "p95": 0.159744
+        },
+        "viewport_gpu_buffer_bytes": 3072,
+        "viewport_cpu_scratch_bytes": 43200,
+        "cluster_mesh_upload_bytes": 1925736,
+        "source_triangles_per_asset": 8999
+      },
+      {
+        "mode": "source",
+        "instances": 64,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.438837,
+          "median": 0.198073,
+          "p95": 0.367882
+        },
+        "selection_ms": {
+          "max": 0.003537,
+          "median": 0.000471,
+          "p95": 0.001082
+        },
+        "gpu_pass_sum_ms": {
+          "max": 1.247232,
+          "median": 0.969632,
+          "p95": 1.155072
+        },
+        "viewport_gpu_buffer_bytes": 11776,
+        "viewport_cpu_scratch_bytes": 54720,
+        "cluster_mesh_upload_bytes": 1925736,
+        "source_triangles_per_asset": 8999
+      },
+      {
+        "mode": "lod1",
+        "instances": 64,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.2445310000000003,
+          "median": 0.15302800000000003,
+          "p95": 0.314822
+        },
+        "selection_ms": {
+          "max": 0.002345,
+          "median": 0.00037099999999999996,
+          "p95": 0.0009220000000000001
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.85088,
+          "median": 0.646048,
+          "p95": 0.77712
+        },
+        "viewport_gpu_buffer_bytes": 11776,
+        "viewport_cpu_scratch_bytes": 54720,
+        "cluster_mesh_upload_bytes": 1925736,
+        "source_triangles_per_asset": 8999
+      },
+      {
+        "mode": "lod2",
+        "instances": 64,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.881438,
+          "median": 0.18074,
+          "p95": 0.32433
+        },
+        "selection_ms": {
+          "max": 0.015549,
+          "median": 0.000441,
+          "p95": 0.0012029999999999999
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.52224,
+          "median": 0.407488,
+          "p95": 0.480224
+        },
+        "viewport_gpu_buffer_bytes": 11776,
+        "viewport_cpu_scratch_bytes": 54720,
+        "cluster_mesh_upload_bytes": 1925736,
+        "source_triangles_per_asset": 8999
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 64,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.794155,
+          "median": 0.771972,
+          "p95": 1.4913750000000001
+        },
+        "selection_ms": {
+          "max": 0.05346,
+          "median": 0.021099,
+          "p95": 0.04239
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.733184,
+          "median": 0.63488,
+          "p95": 0.712608
+        },
+        "viewport_gpu_buffer_bytes": 1116672,
+        "viewport_cpu_scratch_bytes": 1635456,
+        "cluster_mesh_upload_bytes": 1925736,
+        "source_triangles_per_asset": 8999
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 64,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 3.753821,
+          "median": 1.102684,
+          "p95": 1.5170940000000002
+        },
+        "selection_ms": {
+          "max": 0.056546,
+          "median": 0.027592,
+          "p95": 0.044413
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.714752,
+          "median": 0.626688,
+          "p95": 0.698368
+        },
+        "viewport_gpu_buffer_bytes": 1116672,
+        "viewport_cpu_scratch_bytes": 1635456,
+        "cluster_mesh_upload_bytes": 1925736,
+        "source_triangles_per_asset": 8999
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 64,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 1.879936,
+          "median": 1.312599,
+          "p95": 1.427254
+        },
+        "selection_ms": {
+          "max": 0.05342,
+          "median": 0.039966,
+          "p95": 0.042039
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.70144,
+          "median": 0.608256,
+          "p95": 0.675808
+        },
+        "viewport_gpu_buffer_bytes": 592384,
+        "viewport_cpu_scratch_bytes": 849024,
+        "cluster_mesh_upload_bytes": 1925736,
+        "source_triangles_per_asset": 8999
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 64,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 1.742518,
+          "median": 0.932614,
+          "p95": 1.4549969999999999
+        },
+        "selection_ms": {
+          "max": 0.121068,
+          "median": 0.024236,
+          "p95": 0.042159
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.71984,
+          "median": 0.610304,
+          "p95": 0.67888
+        },
+        "viewport_gpu_buffer_bytes": 592384,
+        "viewport_cpu_scratch_bytes": 849024,
+        "cluster_mesh_upload_bytes": 1925736,
+        "source_triangles_per_asset": 8999
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 64,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.436794,
+          "median": 0.835271,
+          "p95": 1.510221
+        },
+        "selection_ms": {
+          "max": 0.06372000000000001,
+          "median": 0.022553,
+          "p95": 0.042861
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.718848,
+          "median": 0.625664,
+          "p95": 0.698368
+        },
+        "viewport_gpu_buffer_bytes": 1116672,
+        "viewport_cpu_scratch_bytes": 1635456,
+        "cluster_mesh_upload_bytes": 1925736,
+        "source_triangles_per_asset": 8999
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 64,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 3.580124,
+          "median": 1.32907,
+          "p95": 1.55766
+        },
+        "selection_ms": {
+          "max": 0.06372000000000001,
+          "median": 0.039273999999999996,
+          "p95": 0.045065
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.73728,
+          "median": 0.635872,
+          "p95": 0.71168
+        },
+        "viewport_gpu_buffer_bytes": 1116672,
+        "viewport_cpu_scratch_bytes": 1635456,
+        "cluster_mesh_upload_bytes": 1925736,
+        "source_triangles_per_asset": 8999
+      },
+      {
+        "mode": "lod2",
+        "instances": 64,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.465517,
+          "median": 0.147057,
+          "p95": 0.241043
+        },
+        "selection_ms": {
+          "max": 0.001342,
+          "median": 0.000381,
+          "p95": 0.000772
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.523264,
+          "median": 0.407552,
+          "p95": 0.483232
+        },
+        "viewport_gpu_buffer_bytes": 11776,
+        "viewport_cpu_scratch_bytes": 54720,
+        "cluster_mesh_upload_bytes": 1925736,
+        "source_triangles_per_asset": 8999
+      },
+      {
+        "mode": "lod1",
+        "instances": 64,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.38292000000000004,
+          "median": 0.134793,
+          "p95": 0.23404
+        },
+        "selection_ms": {
+          "max": 0.001473,
+          "median": 0.000351,
+          "p95": 0.000701
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.846848,
+          "median": 0.646048,
+          "p95": 0.77824
+        },
+        "viewport_gpu_buffer_bytes": 11776,
+        "viewport_cpu_scratch_bytes": 54720,
+        "cluster_mesh_upload_bytes": 1925736,
+        "source_triangles_per_asset": 8999
+      },
+      {
+        "mode": "source",
+        "instances": 64,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.808032,
+          "median": 0.16092299999999998,
+          "p95": 0.308981
+        },
+        "selection_ms": {
+          "max": 0.002154,
+          "median": 0.000341,
+          "p95": 0.000751
+        },
+        "gpu_pass_sum_ms": {
+          "max": 1.249216,
+          "median": 0.969696,
+          "p95": 1.16224
+        },
+        "viewport_gpu_buffer_bytes": 11776,
+        "viewport_cpu_scratch_bytes": 54720,
+        "cluster_mesh_upload_bytes": 1925736,
+        "source_triangles_per_asset": 8999
+      },
+      {
+        "mode": "source",
+        "instances": 256,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.430943,
+          "median": 0.16656400000000002,
+          "p95": 0.326013
+        },
+        "selection_ms": {
+          "max": 0.003316,
+          "median": 0.000972,
+          "p95": 0.002255
+        },
+        "gpu_pass_sum_ms": {
+          "max": 2.240512,
+          "median": 1.768448,
+          "p95": 2.142208
+        },
+        "viewport_gpu_buffer_bytes": 37376,
+        "viewport_cpu_scratch_bytes": 91584,
+        "cluster_mesh_upload_bytes": 1925736,
+        "source_triangles_per_asset": 8999
+      },
+      {
+        "mode": "lod1",
+        "instances": 256,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.43551,
+          "median": 0.137929,
+          "p95": 0.242105
+        },
+        "selection_ms": {
+          "max": 0.0030960000000000002,
+          "median": 0.000892,
+          "p95": 0.001643
+        },
+        "gpu_pass_sum_ms": {
+          "max": 1.321952,
+          "median": 0.986112,
+          "p95": 1.250304
+        },
+        "viewport_gpu_buffer_bytes": 37376,
+        "viewport_cpu_scratch_bytes": 91584,
+        "cluster_mesh_upload_bytes": 1925736,
+        "source_triangles_per_asset": 8999
+      },
+      {
+        "mode": "lod2",
+        "instances": 256,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.1706529999999997,
+          "median": 0.130315,
+          "p95": 0.242146
+        },
+        "selection_ms": {
+          "max": 0.003387,
+          "median": 0.000982,
+          "p95": 0.001644
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.69632,
+          "median": 0.516096,
+          "p95": 0.658432
+        },
+        "viewport_gpu_buffer_bytes": 37376,
+        "viewport_cpu_scratch_bytes": 91584,
+        "cluster_mesh_upload_bytes": 1925736,
+        "source_triangles_per_asset": 8999
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 256,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 4.6441360000000005,
+          "median": 2.492238,
+          "p95": 4.0686230000000005
+        },
+        "selection_ms": {
+          "max": 0.201148,
+          "median": 0.086914,
+          "p95": 0.167465
+        },
+        "gpu_pass_sum_ms": {
+          "max": 1.276928,
+          "median": 1.09056,
+          "p95": 1.189888
+        },
+        "viewport_gpu_buffer_bytes": 4327936,
+        "viewport_cpu_scratch_bytes": 6354048,
+        "cluster_mesh_upload_bytes": 1925736,
+        "source_triangles_per_asset": 8999
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 256,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 4.065486999999999,
+          "median": 2.2516049999999996,
+          "p95": 3.73179
+        },
+        "selection_ms": {
+          "max": 0.204184,
+          "median": 0.083637,
+          "p95": 0.161363
+        },
+        "gpu_pass_sum_ms": {
+          "max": 1.544192,
+          "median": 1.002496,
+          "p95": 1.122304
+        },
+        "viewport_gpu_buffer_bytes": 2230784,
+        "viewport_cpu_scratch_bytes": 3208320,
+        "cluster_mesh_upload_bytes": 1925736,
+        "source_triangles_per_asset": 8999
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 256,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 3.016363,
+          "median": 1.623373,
+          "p95": 2.512756
+        },
+        "selection_ms": {
+          "max": 0.210786,
+          "median": 0.073097,
+          "p95": 0.134373
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.94208,
+          "median": 0.81408,
+          "p95": 0.90512
+        },
+        "viewport_gpu_buffer_bytes": 2165248,
+        "viewport_cpu_scratch_bytes": 3208320,
+        "cluster_mesh_upload_bytes": 1925736,
+        "source_triangles_per_asset": 8999
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 256,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 3.86528,
+          "median": 2.181123,
+          "p95": 3.143322
+        },
+        "selection_ms": {
+          "max": 0.520058,
+          "median": 0.116289,
+          "p95": 0.159911
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.945088,
+          "median": 0.81408,
+          "p95": 0.90512
+        },
+        "viewport_gpu_buffer_bytes": 2165248,
+        "viewport_cpu_scratch_bytes": 3208320,
+        "cluster_mesh_upload_bytes": 1925736,
+        "source_triangles_per_asset": 8999
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 256,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 4.537374000000001,
+          "median": 3.38089,
+          "p95": 4.321549
+        },
+        "selection_ms": {
+          "max": 0.517623,
+          "median": 0.147157,
+          "p95": 0.187853
+        },
+        "gpu_pass_sum_ms": {
+          "max": 1.313792,
+          "median": 1.001472,
+          "p95": 1.100704
+        },
+        "viewport_gpu_buffer_bytes": 2230784,
+        "viewport_cpu_scratch_bytes": 3208320,
+        "cluster_mesh_upload_bytes": 1925736,
+        "source_triangles_per_asset": 8999
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 256,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 7.6034120000000005,
+          "median": 3.9783329999999997,
+          "p95": 4.594901999999999
+        },
+        "selection_ms": {
+          "max": 0.253006,
+          "median": 0.165301,
+          "p95": 0.178976
+        },
+        "gpu_pass_sum_ms": {
+          "max": 1.442816,
+          "median": 1.140736,
+          "p95": 1.385472
+        },
+        "viewport_gpu_buffer_bytes": 4327936,
+        "viewport_cpu_scratch_bytes": 6354048,
+        "cluster_mesh_upload_bytes": 1925736,
+        "source_triangles_per_asset": 8999
+      },
+      {
+        "mode": "lod2",
+        "instances": 256,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 4.028998,
+          "median": 0.243258,
+          "p95": 0.370066
+        },
+        "selection_ms": {
+          "max": 0.003116,
+          "median": 0.001613,
+          "p95": 0.001843
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.698368,
+          "median": 0.515072,
+          "p95": 0.658432
+        },
+        "viewport_gpu_buffer_bytes": 37376,
+        "viewport_cpu_scratch_bytes": 91584,
+        "cluster_mesh_upload_bytes": 1925736,
+        "source_triangles_per_asset": 8999
+      },
+      {
+        "mode": "lod1",
+        "instances": 256,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.462492,
+          "median": 0.230714,
+          "p95": 0.437623
+        },
+        "selection_ms": {
+          "max": 0.018966,
+          "median": 0.001372,
+          "p95": 0.0036969999999999998
+        },
+        "gpu_pass_sum_ms": {
+          "max": 1.64864,
+          "median": 0.976832,
+          "p95": 1.264576
+        },
+        "viewport_gpu_buffer_bytes": 37376,
+        "viewport_cpu_scratch_bytes": 91584,
+        "cluster_mesh_upload_bytes": 1925736,
+        "source_triangles_per_asset": 8999
+      },
+      {
+        "mode": "source",
+        "instances": 256,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.5537039999999998,
+          "median": 0.28052699999999997,
+          "p95": 0.491886
+        },
+        "selection_ms": {
+          "max": 0.016881999999999998,
+          "median": 0.001533,
+          "p95": 0.0034470000000000004
+        },
+        "gpu_pass_sum_ms": {
+          "max": 2.24256,
+          "median": 1.768448,
+          "p95": 2.142144
+        },
+        "viewport_gpu_buffer_bytes": 37376,
+        "viewport_cpu_scratch_bytes": 91584,
+        "cluster_mesh_upload_bytes": 1925736,
+        "source_triangles_per_asset": 8999
+      }
+    ]
+  },
+  {
+    "workload": "arena.container",
+    "adapter": "AdapterInfo { name: \"NVIDIA GeForce RTX 3060 Ti\", vendor: 4318, device: 9353, device_type: DiscreteGpu, device_pci_bus_id: \"0000:07:00.0\", driver: \"NVIDIA\", driver_info: \"595.99.02\", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 32, transient_saves_memory: Some(false), limit_bucket: None }",
+    "scope": "Repeated real-asset scaling experiment, not gameplay. CPU selection + prepare + encode + submit; GPU pass sum, no waits in CPU span. Shadows retain off-camera instances. Fixed authored LODs are quality candidates, not assumed equivalent. All modes resident during measurement; upload counter is cluster mesh buffers only, not total residency.",
+    "rawSha256": "88dcc215236f0e112dd91ba50cd1196094d41904c0aad59a796134f45f0e2519",
+    "rows": [
+      {
+        "mode": "source",
+        "instances": 1,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.4794840000000002,
+          "median": 0.174238,
+          "p95": 0.212771
+        },
+        "selection_ms": {
+          "max": 0.001072,
+          "median": 0.000161,
+          "p95": 0.000241
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.11664,
+          "median": 0.093152,
+          "p95": 0.09616
+        },
+        "viewport_gpu_buffer_bytes": 3072,
+        "viewport_cpu_scratch_bytes": 43040,
+        "cluster_mesh_upload_bytes": 92968,
+        "source_triangles_per_asset": 576
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 1,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.552871,
+          "median": 0.202541,
+          "p95": 0.23680500000000002
+        },
+        "selection_ms": {
+          "max": 0.000731,
+          "median": 0.00025,
+          "p95": 0.000341
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.10032,
+          "median": 0.093184,
+          "p95": 0.096256
+        },
+        "viewport_gpu_buffer_bytes": 3840,
+        "viewport_cpu_scratch_bytes": 44928,
+        "cluster_mesh_upload_bytes": 92968,
+        "source_triangles_per_asset": 576
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 1,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.7401620000000001,
+          "median": 0.197171,
+          "p95": 0.236675
+        },
+        "selection_ms": {
+          "max": 0.000671,
+          "median": 0.000271,
+          "p95": 0.00037099999999999996
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.10032,
+          "median": 0.093024,
+          "p95": 0.0952
+        },
+        "viewport_gpu_buffer_bytes": 3840,
+        "viewport_cpu_scratch_bytes": 44928,
+        "cluster_mesh_upload_bytes": 92968,
+        "source_triangles_per_asset": 576
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 1,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.9879979999999999,
+          "median": 0.19450599999999998,
+          "p95": 0.242897
+        },
+        "selection_ms": {
+          "max": 0.000642,
+          "median": 0.00023999999999999998,
+          "p95": 0.000361
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.11968,
+          "median": 0.093056,
+          "p95": 0.095232
+        },
+        "viewport_gpu_buffer_bytes": 3840,
+        "viewport_cpu_scratch_bytes": 44928,
+        "cluster_mesh_upload_bytes": 92968,
+        "source_triangles_per_asset": 576
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 1,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.8620410000000001,
+          "median": 0.249198,
+          "p95": 0.312738
+        },
+        "selection_ms": {
+          "max": 0.000341,
+          "median": 0.000241,
+          "p95": 0.000311
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.119776,
+          "median": 0.09216,
+          "p95": 0.09616
+        },
+        "viewport_gpu_buffer_bytes": 3840,
+        "viewport_cpu_scratch_bytes": 44928,
+        "cluster_mesh_upload_bytes": 92968,
+        "source_triangles_per_asset": 576
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 1,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.339569,
+          "median": 0.21780899999999997,
+          "p95": 0.270329
+        },
+        "selection_ms": {
+          "max": 0.00043099999999999996,
+          "median": 0.00023999999999999998,
+          "p95": 0.000301
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.100192,
+          "median": 0.09216,
+          "p95": 0.095232
+        },
+        "viewport_gpu_buffer_bytes": 3840,
+        "viewport_cpu_scratch_bytes": 44928,
+        "cluster_mesh_upload_bytes": 92968,
+        "source_triangles_per_asset": 576
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 1,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.38789,
+          "median": 0.214794,
+          "p95": 0.285938
+        },
+        "selection_ms": {
+          "max": 0.000541,
+          "median": 0.00025,
+          "p95": 0.00033
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.099264,
+          "median": 0.09216,
+          "p95": 0.0952
+        },
+        "viewport_gpu_buffer_bytes": 3840,
+        "viewport_cpu_scratch_bytes": 44928,
+        "cluster_mesh_upload_bytes": 92968,
+        "source_triangles_per_asset": 576
+      },
+      {
+        "mode": "source",
+        "instances": 1,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.1530199999999997,
+          "median": 0.102944,
+          "p95": 0.176412
+        },
+        "selection_ms": {
+          "max": 0.00022,
+          "median": 0.00011,
+          "p95": 0.00016999999999999999
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.098304,
+          "median": 0.09216,
+          "p95": 0.095136
+        },
+        "viewport_gpu_buffer_bytes": 3072,
+        "viewport_cpu_scratch_bytes": 43040,
+        "cluster_mesh_upload_bytes": 92968,
+        "source_triangles_per_asset": 576
+      },
+      {
+        "mode": "source",
+        "instances": 64,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.678508,
+          "median": 0.125947,
+          "p95": 0.188625
+        },
+        "selection_ms": {
+          "max": 0.003437,
+          "median": 0.000341,
+          "p95": 0.000651
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.198592,
+          "median": 0.173024,
+          "p95": 0.1904
+        },
+        "viewport_gpu_buffer_bytes": 11776,
+        "viewport_cpu_scratch_bytes": 54560,
+        "cluster_mesh_upload_bytes": 92968,
+        "source_triangles_per_asset": 576
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 64,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 1.234993,
+          "median": 0.27075899999999997,
+          "p95": 0.38793999999999995
+        },
+        "selection_ms": {
+          "max": 0.069801,
+          "median": 0.003296,
+          "p95": 0.0034869999999999996
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.190144,
+          "median": 0.172,
+          "p95": 0.185184
+        },
+        "viewport_gpu_buffer_bytes": 72192,
+        "viewport_cpu_scratch_bytes": 141696,
+        "cluster_mesh_upload_bytes": 92968,
+        "source_triangles_per_asset": 576
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 64,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 3.313723,
+          "median": 0.322797,
+          "p95": 0.37569600000000003
+        },
+        "selection_ms": {
+          "max": 0.003677,
+          "median": 0.002976,
+          "p95": 0.003206
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.175008,
+          "median": 0.160736,
+          "p95": 0.169984
+        },
+        "viewport_gpu_buffer_bytes": 39424,
+        "viewport_cpu_scratch_bytes": 92544,
+        "cluster_mesh_upload_bytes": 92968,
+        "source_triangles_per_asset": 576
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 64,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.493099,
+          "median": 0.232788,
+          "p95": 0.278604
+        },
+        "selection_ms": {
+          "max": 0.003146,
+          "median": 0.002715,
+          "p95": 0.0028959999999999997
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.159584,
+          "median": 0.145408,
+          "p95": 0.15248
+        },
+        "viewport_gpu_buffer_bytes": 20992,
+        "viewport_cpu_scratch_bytes": 69248,
+        "cluster_mesh_upload_bytes": 92968,
+        "source_triangles_per_asset": 576
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 64,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 1.296018,
+          "median": 0.307087,
+          "p95": 0.38850100000000004
+        },
+        "selection_ms": {
+          "max": 0.421954,
+          "median": 0.002715,
+          "p95": 0.003015
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.156672,
+          "median": 0.145408,
+          "p95": 0.15248
+        },
+        "viewport_gpu_buffer_bytes": 20992,
+        "viewport_cpu_scratch_bytes": 69248,
+        "cluster_mesh_upload_bytes": 92968,
+        "source_triangles_per_asset": 576
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 64,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.423158,
+          "median": 0.142738,
+          "p95": 0.201248
+        },
+        "selection_ms": {
+          "max": 0.065874,
+          "median": 0.001833,
+          "p95": 0.002645
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.172032,
+          "median": 0.160704,
+          "p95": 0.16896
+        },
+        "viewport_gpu_buffer_bytes": 39424,
+        "viewport_cpu_scratch_bytes": 92544,
+        "cluster_mesh_upload_bytes": 92968,
+        "source_triangles_per_asset": 576
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 64,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.827769,
+          "median": 0.158247,
+          "p95": 0.227909
+        },
+        "selection_ms": {
+          "max": 0.003006,
+          "median": 0.001964,
+          "p95": 0.002695
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.188416,
+          "median": 0.172928,
+          "p95": 0.183232
+        },
+        "viewport_gpu_buffer_bytes": 72192,
+        "viewport_cpu_scratch_bytes": 141696,
+        "cluster_mesh_upload_bytes": 92968,
+        "source_triangles_per_asset": 576
+      },
+      {
+        "mode": "source",
+        "instances": 64,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.183134,
+          "median": 0.110929,
+          "p95": 0.14612499999999998
+        },
+        "selection_ms": {
+          "max": 0.000521,
+          "median": 0.00033099999999999997,
+          "p95": 0.000491
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.196608,
+          "median": 0.173984,
+          "p95": 0.191424
+        },
+        "viewport_gpu_buffer_bytes": 11776,
+        "viewport_cpu_scratch_bytes": 54560,
+        "cluster_mesh_upload_bytes": 92968,
+        "source_triangles_per_asset": 576
+      },
+      {
+        "mode": "source",
+        "instances": 256,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.6850099999999997,
+          "median": 0.26841499999999996,
+          "p95": 0.40797799999999995
+        },
+        "selection_ms": {
+          "max": 0.134303,
+          "median": 0.001533,
+          "p95": 0.001683
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.251904,
+          "median": 0.217088,
+          "p95": 0.241504
+        },
+        "viewport_gpu_buffer_bytes": 37376,
+        "viewport_cpu_scratch_bytes": 91424,
+        "cluster_mesh_upload_bytes": 92968,
+        "source_triangles_per_asset": 576
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 256,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.252887,
+          "median": 0.216848,
+          "p95": 0.24416900000000002
+        },
+        "selection_ms": {
+          "max": 0.01569,
+          "median": 0.006282,
+          "p95": 0.007605
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.220096,
+          "median": 0.195584,
+          "p95": 0.214016
+        },
+        "viewport_gpu_buffer_bytes": 141824,
+        "viewport_cpu_scratch_bytes": 240000,
+        "cluster_mesh_upload_bytes": 92968,
+        "source_triangles_per_asset": 576
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 256,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.547241,
+          "median": 0.316786,
+          "p95": 0.37079700000000004
+        },
+        "selection_ms": {
+          "max": 0.022993000000000003,
+          "median": 0.009869,
+          "p95": 0.010249
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.235456,
+          "median": 0.179168,
+          "p95": 0.192512
+        },
+        "viewport_gpu_buffer_bytes": 72192,
+        "viewport_cpu_scratch_bytes": 141696,
+        "cluster_mesh_upload_bytes": 92968,
+        "source_triangles_per_asset": 576
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 256,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 1.3740350000000001,
+          "median": 0.286178,
+          "p95": 0.381738
+        },
+        "selection_ms": {
+          "max": 0.07463,
+          "median": 0.009056999999999999,
+          "p95": 0.009598
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.177152,
+          "median": 0.16272,
+          "p95": 0.172992
+        },
+        "viewport_gpu_buffer_bytes": 72192,
+        "viewport_cpu_scratch_bytes": 142976,
+        "cluster_mesh_upload_bytes": 92968,
+        "source_triangles_per_asset": 576
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 256,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.362692,
+          "median": 0.251714,
+          "p95": 0.316776
+        },
+        "selection_ms": {
+          "max": 0.021922,
+          "median": 0.008727,
+          "p95": 0.009779000000000001
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.178112,
+          "median": 0.162816,
+          "p95": 0.173952
+        },
+        "viewport_gpu_buffer_bytes": 72192,
+        "viewport_cpu_scratch_bytes": 142976,
+        "cluster_mesh_upload_bytes": 92968,
+        "source_triangles_per_asset": 576
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 256,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.438464,
+          "median": 0.295727,
+          "p95": 0.380445
+        },
+        "selection_ms": {
+          "max": 0.07822699999999999,
+          "median": 0.009428,
+          "p95": 0.010008
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.196608,
+          "median": 0.179104,
+          "p95": 0.191488
+        },
+        "viewport_gpu_buffer_bytes": 72192,
+        "viewport_cpu_scratch_bytes": 141696,
+        "cluster_mesh_upload_bytes": 92968,
+        "source_triangles_per_asset": 576
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 256,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 3.289498,
+          "median": 0.241254,
+          "p95": 0.434387
+        },
+        "selection_ms": {
+          "max": 0.015099000000000001,
+          "median": 0.006462,
+          "p95": 0.010059
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.22016,
+          "median": 0.196544,
+          "p95": 0.21392
+        },
+        "viewport_gpu_buffer_bytes": 141824,
+        "viewport_cpu_scratch_bytes": 240000,
+        "cluster_mesh_upload_bytes": 92968,
+        "source_triangles_per_asset": 576
+      },
+      {
+        "mode": "source",
+        "instances": 256,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 3.350342,
+          "median": 0.20214000000000001,
+          "p95": 0.306928
+        },
+        "selection_ms": {
+          "max": 0.079269,
+          "median": 0.001452,
+          "p95": 0.001824
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.916448,
+          "median": 0.217088,
+          "p95": 0.24576
+        },
+        "viewport_gpu_buffer_bytes": 37376,
+        "viewport_cpu_scratch_bytes": 91424,
+        "cluster_mesh_upload_bytes": 92968,
+        "source_triangles_per_asset": 576
+      }
+    ]
+  },
+  {
+    "workload": "shrine.kit.arch",
+    "adapter": "AdapterInfo { name: \"NVIDIA GeForce RTX 3060 Ti\", vendor: 4318, device: 9353, device_type: DiscreteGpu, device_pci_bus_id: \"0000:07:00.0\", driver: \"NVIDIA\", driver_info: \"595.99.02\", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 32, transient_saves_memory: Some(false), limit_bucket: None }",
+    "scope": "Repeated real-asset scaling experiment, not gameplay. CPU selection + prepare + encode + submit; GPU pass sum, no waits in CPU span. Shadows retain off-camera instances. Fixed authored LODs are quality candidates, not assumed equivalent. All modes resident during measurement; upload counter is cluster mesh buffers only, not total residency.",
+    "rawSha256": "c7e3c71a8107f7a49c12eafba0d77e97869a6d6b8325b95a90775006157be7c8",
+    "rows": [
+      {
+        "mode": "source",
+        "instances": 1,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 1.3170879999999998,
+          "median": 0.177925,
+          "p95": 0.240001
+        },
+        "selection_ms": {
+          "max": 0.00037099999999999996,
+          "median": 0.00014000000000000001,
+          "p95": 0.00028000000000000003
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.569344,
+          "median": 0.095232,
+          "p95": 0.102304
+        },
+        "viewport_gpu_buffer_bytes": 3072,
+        "viewport_cpu_scratch_bytes": 43040,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 1,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.3537179999999998,
+          "median": 0.28896299999999997,
+          "p95": 0.32763600000000004
+        },
+        "selection_ms": {
+          "max": 0.009167,
+          "median": 0.000932,
+          "p95": 0.001132
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.096224,
+          "median": 0.090112,
+          "p95": 0.09312
+        },
+        "viewport_gpu_buffer_bytes": 11776,
+        "viewport_cpu_scratch_bytes": 64640,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 1,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.25408,
+          "median": 0.28129899999999997,
+          "p95": 0.32097400000000004
+        },
+        "selection_ms": {
+          "max": 0.009056999999999999,
+          "median": 0.0009209999999999999,
+          "p95": 0.001032
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.09728,
+          "median": 0.090112,
+          "p95": 0.093088
+        },
+        "viewport_gpu_buffer_bytes": 11776,
+        "viewport_cpu_scratch_bytes": 64640,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 1,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.367852,
+          "median": 0.243778,
+          "p95": 0.31750799999999996
+        },
+        "selection_ms": {
+          "max": 0.001212,
+          "median": 0.000892,
+          "p95": 0.001042
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.09616,
+          "median": 0.089088,
+          "p95": 0.092064
+        },
+        "viewport_gpu_buffer_bytes": 7168,
+        "viewport_cpu_scratch_bytes": 53376,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 1,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.38795,
+          "median": 0.23366,
+          "p95": 0.318469
+        },
+        "selection_ms": {
+          "max": 0.001183,
+          "median": 0.0008619999999999999,
+          "p95": 0.001002
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.096224,
+          "median": 0.089088,
+          "p95": 0.091136
+        },
+        "viewport_gpu_buffer_bytes": 7168,
+        "viewport_cpu_scratch_bytes": 53376,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 1,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.727008,
+          "median": 0.29766,
+          "p95": 0.37903299999999995
+        },
+        "selection_ms": {
+          "max": 0.001433,
+          "median": 0.0009620000000000001,
+          "p95": 0.001223
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.098112,
+          "median": 0.09008,
+          "p95": 0.093088
+        },
+        "viewport_gpu_buffer_bytes": 11776,
+        "viewport_cpu_scratch_bytes": 64640,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 1,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.645694,
+          "median": 0.291258,
+          "p95": 0.337374
+        },
+        "selection_ms": {
+          "max": 0.06470100000000001,
+          "median": 0.000951,
+          "p95": 0.001102
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.097216,
+          "median": 0.090112,
+          "p95": 0.093088
+        },
+        "viewport_gpu_buffer_bytes": 11776,
+        "viewport_cpu_scratch_bytes": 64640,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "source",
+        "instances": 1,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.492308,
+          "median": 0.19132000000000002,
+          "p95": 0.267383
+        },
+        "selection_ms": {
+          "max": 0.000381,
+          "median": 0.00015099999999999998,
+          "p95": 0.00022
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.105472,
+          "median": 0.095232,
+          "p95": 0.101344
+        },
+        "viewport_gpu_buffer_bytes": 3072,
+        "viewport_cpu_scratch_bytes": 43040,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "source",
+        "instances": 64,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.485825,
+          "median": 0.210175,
+          "p95": 0.38322
+        },
+        "selection_ms": {
+          "max": 0.004509,
+          "median": 0.000491,
+          "p95": 0.0013319999999999999
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.587776,
+          "median": 0.55184,
+          "p95": 0.579584
+        },
+        "viewport_gpu_buffer_bytes": 11776,
+        "viewport_cpu_scratch_bytes": 54560,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 64,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.5590040000000003,
+          "median": 0.455767,
+          "p95": 0.7454719999999999
+        },
+        "selection_ms": {
+          "max": 0.069912,
+          "median": 0.024927,
+          "p95": 0.049082
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.203616,
+          "median": 0.181216,
+          "p95": 0.195584
+        },
+        "viewport_gpu_buffer_bytes": 281088,
+        "viewport_cpu_scratch_bytes": 445568,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 64,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.719754,
+          "median": 0.539936,
+          "p95": 0.6516449999999999
+        },
+        "selection_ms": {
+          "max": 0.053331,
+          "median": 0.042961,
+          "p95": 0.046507
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.18528,
+          "median": 0.162816,
+          "p95": 0.175104
+        },
+        "viewport_gpu_buffer_bytes": 281088,
+        "viewport_cpu_scratch_bytes": 445568,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 64,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.5940169999999999,
+          "median": 0.429037,
+          "p95": 0.526861
+        },
+        "selection_ms": {
+          "max": 0.055946,
+          "median": 0.041007,
+          "p95": 0.047539
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.155616,
+          "median": 0.139168,
+          "p95": 0.14848
+        },
+        "viewport_gpu_buffer_bytes": 141824,
+        "viewport_cpu_scratch_bytes": 248960,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 64,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.5487130000000002,
+          "median": 0.279756,
+          "p95": 0.519096
+        },
+        "selection_ms": {
+          "max": 0.052067999999999996,
+          "median": 0.019938,
+          "p95": 0.044554
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.155456,
+          "median": 0.139168,
+          "p95": 0.14848
+        },
+        "viewport_gpu_buffer_bytes": 141824,
+        "viewport_cpu_scratch_bytes": 248960,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 64,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 3.9720609999999996,
+          "median": 0.37221,
+          "p95": 0.63265
+        },
+        "selection_ms": {
+          "max": 0.057869,
+          "median": 0.02129,
+          "p95": 0.044984
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.181248,
+          "median": 0.162816,
+          "p95": 0.17504
+        },
+        "viewport_gpu_buffer_bytes": 281088,
+        "viewport_cpu_scratch_bytes": 445568,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 64,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.630196,
+          "median": 0.385415,
+          "p95": 0.425601
+        },
+        "selection_ms": {
+          "max": 0.043261,
+          "median": 0.02125,
+          "p95": 0.030106
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.205792,
+          "median": 0.180224,
+          "p95": 0.195584
+        },
+        "viewport_gpu_buffer_bytes": 281088,
+        "viewport_cpu_scratch_bytes": 445568,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "source",
+        "instances": 64,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.740052,
+          "median": 0.18504900000000002,
+          "p95": 0.31407
+        },
+        "selection_ms": {
+          "max": 0.001022,
+          "median": 0.00048100000000000004,
+          "p95": 0.000692
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.584704,
+          "median": 0.552896,
+          "p95": 0.580544
+        },
+        "viewport_gpu_buffer_bytes": 11776,
+        "viewport_cpu_scratch_bytes": 54560,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "source",
+        "instances": 256,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.7847280000000003,
+          "median": 0.23377,
+          "p95": 0.424127
+        },
+        "selection_ms": {
+          "max": 0.004819,
+          "median": 0.001442,
+          "p95": 0.002515
+        },
+        "gpu_pass_sum_ms": {
+          "max": 1.28512,
+          "median": 1.206176,
+          "p95": 1.267648
+        },
+        "viewport_gpu_buffer_bytes": 37376,
+        "viewport_cpu_scratch_bytes": 91424,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 256,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 3.7547420000000002,
+          "median": 1.395345,
+          "p95": 1.6092870000000001
+        },
+        "selection_ms": {
+          "max": 0.231366,
+          "median": 0.169088,
+          "p95": 0.19164099999999998
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.297984,
+          "median": 0.271296,
+          "p95": 0.292736
+        },
+        "viewport_gpu_buffer_bytes": 1083904,
+        "viewport_cpu_scratch_bytes": 1625216,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 256,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 1.229132,
+          "median": 0.758948,
+          "p95": 1.105769
+        },
+        "selection_ms": {
+          "max": 0.207681,
+          "median": 0.092203,
+          "p95": 0.170181
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.2304,
+          "median": 0.206752,
+          "p95": 0.224256
+        },
+        "viewport_gpu_buffer_bytes": 559616,
+        "viewport_cpu_scratch_bytes": 838784,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 256,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.906966,
+          "median": 0.383111,
+          "p95": 0.7862779999999999
+        },
+        "selection_ms": {
+          "max": 0.20751,
+          "median": 0.07959999999999999,
+          "p95": 0.17981799999999998
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.173056,
+          "median": 0.149504,
+          "p95": 0.161792
+        },
+        "viewport_gpu_buffer_bytes": 281088,
+        "viewport_cpu_scratch_bytes": 445568,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 256,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 1.699667,
+          "median": 0.688615,
+          "p95": 0.818359
+        },
+        "selection_ms": {
+          "max": 0.196209,
+          "median": 0.172044,
+          "p95": 0.18500799999999998
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.19456,
+          "median": 0.150432,
+          "p95": 0.162816
+        },
+        "viewport_gpu_buffer_bytes": 281088,
+        "viewport_cpu_scratch_bytes": 445568,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 256,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 1.742327,
+          "median": 1.0035580000000002,
+          "p95": 1.212781
+        },
+        "selection_ms": {
+          "max": 0.2288,
+          "median": 0.166924,
+          "p95": 0.18498799999999999
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.243712,
+          "median": 0.205824,
+          "p95": 0.224256
+        },
+        "viewport_gpu_buffer_bytes": 559616,
+        "viewport_cpu_scratch_bytes": 838784,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 256,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.846825,
+          "median": 1.452161,
+          "p95": 1.6166209999999999
+        },
+        "selection_ms": {
+          "max": 0.21245,
+          "median": 0.17665199999999998,
+          "p95": 0.196209
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.34304,
+          "median": 0.27136,
+          "p95": 0.313344
+        },
+        "viewport_gpu_buffer_bytes": 1083904,
+        "viewport_cpu_scratch_bytes": 1625216,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "source",
+        "instances": 256,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.7218400000000003,
+          "median": 0.240953,
+          "p95": 0.438234
+        },
+        "selection_ms": {
+          "max": 0.022112,
+          "median": 0.001463,
+          "p95": 0.0032459999999999998
+        },
+        "gpu_pass_sum_ms": {
+          "max": 1.897376,
+          "median": 1.222528,
+          "p95": 1.628128
+        },
+        "viewport_gpu_buffer_bytes": 37376,
+        "viewport_cpu_scratch_bytes": 91424,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      }
+    ]
+  },
+  {
+    "workload": "shrine.kit.cave-end",
+    "adapter": "AdapterInfo { name: \"NVIDIA GeForce RTX 3060 Ti\", vendor: 4318, device: 9353, device_type: DiscreteGpu, device_pci_bus_id: \"0000:07:00.0\", driver: \"NVIDIA\", driver_info: \"595.99.02\", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 32, transient_saves_memory: Some(false), limit_bucket: None }",
+    "scope": "Repeated real-asset scaling experiment, not gameplay. CPU selection + prepare + encode + submit; GPU pass sum, no waits in CPU span. Shadows retain off-camera instances. Fixed authored LODs are quality candidates, not assumed equivalent. All modes resident during measurement; upload counter is cluster mesh buffers only, not total residency.",
+    "rawSha256": "726c787d52cab06839fa53b3a7ed178e6fc5c97969026db18de46a168e0820ed",
+    "rows": [
+      {
+        "mode": "source",
+        "instances": 1,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 3.173419,
+          "median": 0.165672,
+          "p95": 0.238929
+        },
+        "selection_ms": {
+          "max": 0.000991,
+          "median": 0.000141,
+          "p95": 0.000221
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.265216,
+          "median": 0.1024,
+          "p95": 0.107488
+        },
+        "viewport_gpu_buffer_bytes": 3072,
+        "viewport_cpu_scratch_bytes": 43200,
+        "cluster_mesh_upload_bytes": 1273116,
+        "source_triangles_per_asset": 7968
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 1,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.1967119999999998,
+          "median": 0.186411,
+          "p95": 0.358224
+        },
+        "selection_ms": {
+          "max": 0.001052,
+          "median": 0.00043099999999999996,
+          "p95": 0.000882
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.130048,
+          "median": 0.103424,
+          "p95": 0.107456
+        },
+        "viewport_gpu_buffer_bytes": 11776,
+        "viewport_cpu_scratch_bytes": 64640,
+        "cluster_mesh_upload_bytes": 1273116,
+        "source_triangles_per_asset": 7968
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 1,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.49549200000000004,
+          "median": 0.26068,
+          "p95": 0.330812
+        },
+        "selection_ms": {
+          "max": 0.0009620000000000001,
+          "median": 0.000671,
+          "p95": 0.000841
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.121728,
+          "median": 0.099328,
+          "p95": 0.106496
+        },
+        "viewport_gpu_buffer_bytes": 7168,
+        "viewport_cpu_scratch_bytes": 53376,
+        "cluster_mesh_upload_bytes": 1273116,
+        "source_triangles_per_asset": 7968
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 1,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.522013,
+          "median": 0.25988900000000004,
+          "p95": 0.320312
+        },
+        "selection_ms": {
+          "max": 0.000892,
+          "median": 0.000671,
+          "p95": 0.000791
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.131936,
+          "median": 0.099264,
+          "p95": 0.10336
+        },
+        "viewport_gpu_buffer_bytes": 7168,
+        "viewport_cpu_scratch_bytes": 53376,
+        "cluster_mesh_upload_bytes": 1273116,
+        "source_triangles_per_asset": 7968
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 1,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.7270689999999997,
+          "median": 0.348706,
+          "p95": 0.403559
+        },
+        "selection_ms": {
+          "max": 0.001012,
+          "median": 0.000701,
+          "p95": 0.0008420000000000001
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.132096,
+          "median": 0.099328,
+          "p95": 0.10752
+        },
+        "viewport_gpu_buffer_bytes": 7168,
+        "viewport_cpu_scratch_bytes": 53376,
+        "cluster_mesh_upload_bytes": 1273116,
+        "source_triangles_per_asset": 7968
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 1,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.533886,
+          "median": 0.280317,
+          "p95": 0.34876599999999996
+        },
+        "selection_ms": {
+          "max": 0.001212,
+          "median": 0.0007109999999999999,
+          "p95": 0.000892
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.122752,
+          "median": 0.099328,
+          "p95": 0.103232
+        },
+        "viewport_gpu_buffer_bytes": 7168,
+        "viewport_cpu_scratch_bytes": 53376,
+        "cluster_mesh_upload_bytes": 1273116,
+        "source_triangles_per_asset": 7968
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 1,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.475274,
+          "median": 0.320964,
+          "p95": 0.400914
+        },
+        "selection_ms": {
+          "max": 0.001142,
+          "median": 0.000721,
+          "p95": 0.0009519999999999999
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.11264,
+          "median": 0.104448,
+          "p95": 0.10848
+        },
+        "viewport_gpu_buffer_bytes": 11776,
+        "viewport_cpu_scratch_bytes": 64640,
+        "cluster_mesh_upload_bytes": 1273116,
+        "source_triangles_per_asset": 7968
+      },
+      {
+        "mode": "source",
+        "instances": 1,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 3.098759,
+          "median": 0.179808,
+          "p95": 0.228199
+        },
+        "selection_ms": {
+          "max": 0.000762,
+          "median": 0.00015099999999999998,
+          "p95": 0.00039000000000000005
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.112608,
+          "median": 0.104352,
+          "p95": 0.10752
+        },
+        "viewport_gpu_buffer_bytes": 3072,
+        "viewport_cpu_scratch_bytes": 43200,
+        "cluster_mesh_upload_bytes": 1273116,
+        "source_triangles_per_asset": 7968
+      },
+      {
+        "mode": "source",
+        "instances": 64,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.40084400000000003,
+          "median": 0.139452,
+          "p95": 0.25255500000000003
+        },
+        "selection_ms": {
+          "max": 0.001553,
+          "median": 0.00038,
+          "p95": 0.000672
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.436224,
+          "median": 0.382976,
+          "p95": 0.410592
+        },
+        "viewport_gpu_buffer_bytes": 11776,
+        "viewport_cpu_scratch_bytes": 54720,
+        "cluster_mesh_upload_bytes": 1273116,
+        "source_triangles_per_asset": 7968
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 64,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.585282,
+          "median": 0.75502,
+          "p95": 0.9110630000000001
+        },
+        "selection_ms": {
+          "max": 0.05297,
+          "median": 0.02656,
+          "p95": 0.030006
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.301984,
+          "median": 0.262048,
+          "p95": 0.292832
+        },
+        "viewport_gpu_buffer_bytes": 297472,
+        "viewport_cpu_scratch_bytes": 455808,
+        "cluster_mesh_upload_bytes": 1273116,
+        "source_triangles_per_asset": 7968
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 64,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.901377,
+          "median": 0.539084,
+          "p95": 0.66413
+        },
+        "selection_ms": {
+          "max": 0.039374,
+          "median": 0.024647,
+          "p95": 0.02655
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.267264,
+          "median": 0.231328,
+          "p95": 0.25488
+        },
+        "viewport_gpu_buffer_bytes": 281088,
+        "viewport_cpu_scratch_bytes": 455808,
+        "cluster_mesh_upload_bytes": 1273116,
+        "source_triangles_per_asset": 7968
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 64,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.672316,
+          "median": 0.389573,
+          "p95": 0.529195
+        },
+        "selection_ms": {
+          "max": 0.034335000000000004,
+          "median": 0.017813,
+          "p95": 0.025919
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.246752,
+          "median": 0.216064,
+          "p95": 0.237568
+        },
+        "viewport_gpu_buffer_bytes": 150016,
+        "viewport_cpu_scratch_bytes": 248960,
+        "cluster_mesh_upload_bytes": 1273116,
+        "source_triangles_per_asset": 7968
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 64,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 3.039407,
+          "median": 0.48606499999999997,
+          "p95": 0.652728
+        },
+        "selection_ms": {
+          "max": 0.038182,
+          "median": 0.023504,
+          "p95": 0.025959
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.246656,
+          "median": 0.216064,
+          "p95": 0.237568
+        },
+        "viewport_gpu_buffer_bytes": 150016,
+        "viewport_cpu_scratch_bytes": 248960,
+        "cluster_mesh_upload_bytes": 1273116,
+        "source_triangles_per_asset": 7968
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 64,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.4452190000000003,
+          "median": 0.36556700000000003,
+          "p95": 0.652167
+        },
+        "selection_ms": {
+          "max": 0.035436999999999996,
+          "median": 0.013596,
+          "p95": 0.026089
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.262112,
+          "median": 0.230368,
+          "p95": 0.253856
+        },
+        "viewport_gpu_buffer_bytes": 281088,
+        "viewport_cpu_scratch_bytes": 455808,
+        "cluster_mesh_upload_bytes": 1273116,
+        "source_triangles_per_asset": 7968
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 64,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.542021,
+          "median": 0.628883,
+          "p95": 0.860689
+        },
+        "selection_ms": {
+          "max": 0.039334,
+          "median": 0.022893,
+          "p95": 0.028444
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.295936,
+          "median": 0.260096,
+          "p95": 0.291808
+        },
+        "viewport_gpu_buffer_bytes": 297472,
+        "viewport_cpu_scratch_bytes": 455808,
+        "cluster_mesh_upload_bytes": 1273116,
+        "source_triangles_per_asset": 7968
+      },
+      {
+        "mode": "source",
+        "instances": 64,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 1.330333,
+          "median": 0.24956899999999999,
+          "p95": 0.378542
+        },
+        "selection_ms": {
+          "max": 0.002705,
+          "median": 0.000531,
+          "p95": 0.001132
+        },
+        "gpu_pass_sum_ms": {
+          "max": 1.452032,
+          "median": 0.383904,
+          "p95": 0.414592
+        },
+        "viewport_gpu_buffer_bytes": 11776,
+        "viewport_cpu_scratch_bytes": 54720,
+        "cluster_mesh_upload_bytes": 1273116,
+        "source_triangles_per_asset": 7968
+      },
+      {
+        "mode": "source",
+        "instances": 256,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.377011,
+          "median": 0.21085700000000002,
+          "p95": 0.312919
+        },
+        "selection_ms": {
+          "max": 0.003296,
+          "median": 0.001442,
+          "p95": 0.002224
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.77824,
+          "median": 0.683008,
+          "p95": 0.74544
+        },
+        "viewport_gpu_buffer_bytes": 37376,
+        "viewport_cpu_scratch_bytes": 91584,
+        "cluster_mesh_upload_bytes": 1273116,
+        "source_triangles_per_asset": 7968
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 256,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 1.7092850000000002,
+          "median": 1.2201149999999998,
+          "p95": 1.62184
+        },
+        "selection_ms": {
+          "max": 0.550325,
+          "median": 0.08724399999999999,
+          "p95": 0.108704
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.411648,
+          "median": 0.34608,
+          "p95": 0.391136
+        },
+        "viewport_gpu_buffer_bytes": 1083904,
+        "viewport_cpu_scratch_bytes": 1635456,
+        "cluster_mesh_upload_bytes": 1273116,
+        "source_triangles_per_asset": 7968
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 256,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 8.20345,
+          "median": 0.698183,
+          "p95": 1.234502
+        },
+        "selection_ms": {
+          "max": 0.110608,
+          "median": 0.047549,
+          "p95": 0.100449
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.365568,
+          "median": 0.313152,
+          "p95": 0.346112
+        },
+        "viewport_gpu_buffer_bytes": 559616,
+        "viewport_cpu_scratch_bytes": 849024,
+        "cluster_mesh_upload_bytes": 1273116,
+        "source_triangles_per_asset": 7968
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 256,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 3.266594,
+          "median": 0.7569229999999999,
+          "p95": 0.876479
+        },
+        "selection_ms": {
+          "max": 0.110668,
+          "median": 0.086132,
+          "p95": 0.10034799999999999
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.29792,
+          "median": 0.252928,
+          "p95": 0.284416
+        },
+        "viewport_gpu_buffer_bytes": 543232,
+        "viewport_cpu_scratch_bytes": 838784,
+        "cluster_mesh_upload_bytes": 1273116,
+        "source_triangles_per_asset": 7968
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 256,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 3.937126,
+          "median": 0.7462639999999999,
+          "p95": 0.942503
+        },
+        "selection_ms": {
+          "max": 0.180199,
+          "median": 0.086182,
+          "p95": 0.102452
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.299008,
+          "median": 0.253856,
+          "p95": 0.284608
+        },
+        "viewport_gpu_buffer_bytes": 543232,
+        "viewport_cpu_scratch_bytes": 838784,
+        "cluster_mesh_upload_bytes": 1273116,
+        "source_triangles_per_asset": 7968
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 256,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 1.600471,
+          "median": 0.860228,
+          "p95": 1.3179990000000001
+        },
+        "selection_ms": {
+          "max": 0.13321,
+          "median": 0.05876,
+          "p95": 0.102052
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.367616,
+          "median": 0.31232,
+          "p95": 0.346112
+        },
+        "viewport_gpu_buffer_bytes": 559616,
+        "viewport_cpu_scratch_bytes": 849024,
+        "cluster_mesh_upload_bytes": 1273116,
+        "source_triangles_per_asset": 7968
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 256,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.964726,
+          "median": 0.8612799999999999,
+          "p95": 1.601302
+        },
+        "selection_ms": {
+          "max": 0.156494,
+          "median": 0.051877,
+          "p95": 0.10816400000000001
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.4096,
+          "median": 0.345056,
+          "p95": 0.389088
+        },
+        "viewport_gpu_buffer_bytes": 1083904,
+        "viewport_cpu_scratch_bytes": 1635456,
+        "cluster_mesh_upload_bytes": 1273116,
+        "source_triangles_per_asset": 7968
+      },
+      {
+        "mode": "source",
+        "instances": 256,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.9025190000000003,
+          "median": 0.25441899999999995,
+          "p95": 0.414349
+        },
+        "selection_ms": {
+          "max": 0.112442,
+          "median": 0.001563,
+          "p95": 0.002264
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.778176,
+          "median": 0.684,
+          "p95": 0.7464
+        },
+        "viewport_gpu_buffer_bytes": 37376,
+        "viewport_cpu_scratch_bytes": 91584,
+        "cluster_mesh_upload_bytes": 1273116,
+        "source_triangles_per_asset": 7968
+      }
+    ]
+  },
+  {
+    "workload": "arch-discrete",
+    "adapter": "AdapterInfo { name: \"NVIDIA GeForce RTX 3060 Ti\", vendor: 4318, device: 9353, device_type: DiscreteGpu, device_pci_bus_id: \"0000:07:00.0\", driver: \"NVIDIA\", driver_info: \"595.99.02\", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 32, transient_saves_memory: Some(false), limit_bucket: None }",
+    "scope": "Repeated real-asset scaling experiment, not gameplay. CPU selection + prepare + encode + submit; GPU pass sum, no waits in CPU span. Shadows retain off-camera instances. Fixed authored LODs are quality candidates, not assumed equivalent. All modes resident during measurement; upload counter is cluster mesh buffers only, not total residency.",
+    "rawSha256": "956886a7df8b94b97d89423467a7541b47bd89651fb4fde12399831721e044a6",
+    "rows": [
+      {
+        "mode": "source",
+        "instances": 1,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.756814,
+          "median": 0.09934699999999999,
+          "p95": 0.11915400000000001
+        },
+        "selection_ms": {
+          "max": 0.00027,
+          "median": 9.999999999999999e-05,
+          "p95": 0.00014000000000000001
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.13312,
+          "median": 0.096192,
+          "p95": 0.101312
+        },
+        "viewport_gpu_buffer_bytes": 3072,
+        "viewport_cpu_scratch_bytes": 43040,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "lod1",
+        "instances": 1,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.5969340000000001,
+          "median": 0.099467,
+          "p95": 0.12755
+        },
+        "selection_ms": {
+          "max": 0.00025100000000000003,
+          "median": 0.000101,
+          "p95": 0.000161
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.109472,
+          "median": 0.091136,
+          "p95": 0.09616
+        },
+        "viewport_gpu_buffer_bytes": 3072,
+        "viewport_cpu_scratch_bytes": 43040,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "lod2",
+        "instances": 1,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.191871,
+          "median": 0.10399499999999999,
+          "p95": 0.126278
+        },
+        "selection_ms": {
+          "max": 0.000241,
+          "median": 0.00011,
+          "p95": 0.00016999999999999999
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.095136,
+          "median": 0.090112,
+          "p95": 0.094144
+        },
+        "viewport_gpu_buffer_bytes": 3072,
+        "viewport_cpu_scratch_bytes": 43040,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "lod3",
+        "instances": 1,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.23305900000000002,
+          "median": 0.09821400000000001,
+          "p95": 0.120506
+        },
+        "selection_ms": {
+          "max": 0.00019999999999999998,
+          "median": 0.00011,
+          "p95": 0.00014000000000000001
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.097248,
+          "median": 0.091072,
+          "p95": 0.094208
+        },
+        "viewport_gpu_buffer_bytes": 3072,
+        "viewport_cpu_scratch_bytes": 43040,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "lod4",
+        "instances": 1,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.293732,
+          "median": 0.12228,
+          "p95": 0.236896
+        },
+        "selection_ms": {
+          "max": 0.00023099999999999998,
+          "median": 0.00013,
+          "p95": 0.00019
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.099328,
+          "median": 0.091072,
+          "p95": 0.095168
+        },
+        "viewport_gpu_buffer_bytes": 3072,
+        "viewport_cpu_scratch_bytes": 43040,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 1,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.32072300000000004,
+          "median": 0.16503,
+          "p95": 0.190528
+        },
+        "selection_ms": {
+          "max": 0.0008719999999999999,
+          "median": 0.00048100000000000004,
+          "p95": 0.000541
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.125792,
+          "median": 0.091072,
+          "p95": 0.093184
+        },
+        "viewport_gpu_buffer_bytes": 11776,
+        "viewport_cpu_scratch_bytes": 64640,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 1,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.253681,
+          "median": 0.170912,
+          "p95": 0.296267
+        },
+        "selection_ms": {
+          "max": 0.001532,
+          "median": 0.000501,
+          "p95": 0.000892
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.096256,
+          "median": 0.09104,
+          "p95": 0.093088
+        },
+        "viewport_gpu_buffer_bytes": 11776,
+        "viewport_cpu_scratch_bytes": 64640,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 1,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.25777500000000003,
+          "median": 0.13828000000000001,
+          "p95": 0.156084
+        },
+        "selection_ms": {
+          "max": 0.008606,
+          "median": 0.00046100000000000004,
+          "p95": 0.000511
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.095072,
+          "median": 0.089984,
+          "p95": 0.092064
+        },
+        "viewport_gpu_buffer_bytes": 7168,
+        "viewport_cpu_scratch_bytes": 53376,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 1,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.172305,
+          "median": 0.13725900000000002,
+          "p95": 0.148369
+        },
+        "selection_ms": {
+          "max": 0.001463,
+          "median": 0.00046100000000000004,
+          "p95": 0.000501
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.094112,
+          "median": 0.090016,
+          "p95": 0.091136
+        },
+        "viewport_gpu_buffer_bytes": 7168,
+        "viewport_cpu_scratch_bytes": 53376,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 1,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.177978,
+          "median": 0.162446,
+          "p95": 0.18243299999999998
+        },
+        "selection_ms": {
+          "max": 0.000741,
+          "median": 0.000471,
+          "p95": 0.000531
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.108544,
+          "median": 0.090112,
+          "p95": 0.093184
+        },
+        "viewport_gpu_buffer_bytes": 11776,
+        "viewport_cpu_scratch_bytes": 64640,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 1,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.33456,
+          "median": 0.16875700000000002,
+          "p95": 0.28673000000000004
+        },
+        "selection_ms": {
+          "max": 0.001142,
+          "median": 0.000501,
+          "p95": 0.000851
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.09616,
+          "median": 0.090112,
+          "p95": 0.093088
+        },
+        "viewport_gpu_buffer_bytes": 11776,
+        "viewport_cpu_scratch_bytes": 64640,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "lod4",
+        "instances": 1,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.11568700000000001,
+          "median": 0.09872500000000001,
+          "p95": 0.10767299999999999
+        },
+        "selection_ms": {
+          "max": 0.00018099999999999998,
+          "median": 0.000101,
+          "p95": 0.00014000000000000001
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.096096,
+          "median": 0.090112,
+          "p95": 0.094208
+        },
+        "viewport_gpu_buffer_bytes": 3072,
+        "viewport_cpu_scratch_bytes": 43040,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "lod3",
+        "instances": 1,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.20896399999999998,
+          "median": 0.101131,
+          "p95": 0.168728
+        },
+        "selection_ms": {
+          "max": 0.00037,
+          "median": 0.00011,
+          "p95": 0.000161
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.099328,
+          "median": 0.090112,
+          "p95": 0.095104
+        },
+        "viewport_gpu_buffer_bytes": 3072,
+        "viewport_cpu_scratch_bytes": 43040,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "lod2",
+        "instances": 1,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.119808,
+          "median": 0.099026,
+          "p95": 0.114045
+        },
+        "selection_ms": {
+          "max": 0.00022,
+          "median": 0.00011,
+          "p95": 0.00015
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.123872,
+          "median": 0.090112,
+          "p95": 0.094112
+        },
+        "viewport_gpu_buffer_bytes": 3072,
+        "viewport_cpu_scratch_bytes": 43040,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "lod1",
+        "instances": 1,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.1338749999999997,
+          "median": 0.099487,
+          "p95": 0.145454
+        },
+        "selection_ms": {
+          "max": 0.00028000000000000003,
+          "median": 0.00011,
+          "p95": 0.00016999999999999999
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.111616,
+          "median": 0.091136,
+          "p95": 0.095232
+        },
+        "viewport_gpu_buffer_bytes": 3072,
+        "viewport_cpu_scratch_bytes": 43040,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "source",
+        "instances": 1,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.235233,
+          "median": 0.143069,
+          "p95": 0.191871
+        },
+        "selection_ms": {
+          "max": 0.000411,
+          "median": 0.00013,
+          "p95": 0.00021
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.103328,
+          "median": 0.095136,
+          "p95": 0.100256
+        },
+        "viewport_gpu_buffer_bytes": 3072,
+        "viewport_cpu_scratch_bytes": 43040,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "source",
+        "instances": 64,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.386978,
+          "median": 0.1172,
+          "p95": 0.164129
+        },
+        "selection_ms": {
+          "max": 0.0009220000000000001,
+          "median": 0.00035,
+          "p95": 0.000451
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.83968,
+          "median": 0.54784,
+          "p95": 0.57744
+        },
+        "viewport_gpu_buffer_bytes": 11776,
+        "viewport_cpu_scratch_bytes": 54560,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "lod1",
+        "instances": 64,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.32964000000000004,
+          "median": 0.1219,
+          "p95": 0.202571
+        },
+        "selection_ms": {
+          "max": 0.001052,
+          "median": 0.000381,
+          "p95": 0.000541
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.529312,
+          "median": 0.349152,
+          "p95": 0.3696
+        },
+        "viewport_gpu_buffer_bytes": 11776,
+        "viewport_cpu_scratch_bytes": 54560,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "lod2",
+        "instances": 64,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.538486,
+          "median": 0.204484,
+          "p95": 0.312007
+        },
+        "selection_ms": {
+          "max": 0.001673,
+          "median": 0.000541,
+          "p95": 0.0007109999999999999
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.344064,
+          "median": 0.306176,
+          "p95": 0.323584
+        },
+        "viewport_gpu_buffer_bytes": 11776,
+        "viewport_cpu_scratch_bytes": 54560,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "lod3",
+        "instances": 64,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.2606330000000003,
+          "median": 0.112131,
+          "p95": 0.143901
+        },
+        "selection_ms": {
+          "max": 0.012424,
+          "median": 0.00033999999999999997,
+          "p95": 0.000451
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.338944,
+          "median": 0.308224,
+          "p95": 0.3256
+        },
+        "viewport_gpu_buffer_bytes": 11776,
+        "viewport_cpu_scratch_bytes": 54560,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "lod4",
+        "instances": 64,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.20289200000000002,
+          "median": 0.11082900000000001,
+          "p95": 0.14873
+        },
+        "selection_ms": {
+          "max": 0.001413,
+          "median": 0.000341,
+          "p95": 0.000451
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.601056,
+          "median": 0.308224,
+          "p95": 0.324608
+        },
+        "viewport_gpu_buffer_bytes": 11776,
+        "viewport_cpu_scratch_bytes": 54560,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 64,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.46236,
+          "median": 0.375317,
+          "p95": 0.412275
+        },
+        "selection_ms": {
+          "max": 0.036087999999999995,
+          "median": 0.020729,
+          "p95": 0.025057
+        },
+        "gpu_pass_sum_ms": {
+          "max": 1.381376,
+          "median": 0.180096,
+          "p95": 0.19552
+        },
+        "viewport_gpu_buffer_bytes": 281088,
+        "viewport_cpu_scratch_bytes": 445568,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 64,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.367785,
+          "median": 0.326324,
+          "p95": 0.49501199999999995
+        },
+        "selection_ms": {
+          "max": 0.044794,
+          "median": 0.019787,
+          "p95": 0.027781999999999998
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.179168,
+          "median": 0.161792,
+          "p95": 0.175008
+        },
+        "viewport_gpu_buffer_bytes": 281088,
+        "viewport_cpu_scratch_bytes": 445568,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 64,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.343529,
+          "median": 0.253137,
+          "p95": 0.30982299999999996
+        },
+        "selection_ms": {
+          "max": 0.033323,
+          "median": 0.019185999999999998,
+          "p95": 0.019556
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.152544,
+          "median": 0.138208,
+          "p95": 0.147456
+        },
+        "viewport_gpu_buffer_bytes": 141824,
+        "viewport_cpu_scratch_bytes": 248960,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 64,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.288506,
+          "median": 0.253457,
+          "p95": 0.448774
+        },
+        "selection_ms": {
+          "max": 0.037771,
+          "median": 0.019196,
+          "p95": 0.031449000000000005
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.15552,
+          "median": 0.13824,
+          "p95": 0.147424
+        },
+        "viewport_gpu_buffer_bytes": 141824,
+        "viewport_cpu_scratch_bytes": 248960,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 64,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.395704,
+          "median": 0.326965,
+          "p95": 0.366099
+        },
+        "selection_ms": {
+          "max": 0.041859,
+          "median": 0.019818,
+          "p95": 0.020027999999999997
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.180096,
+          "median": 0.163712,
+          "p95": 0.175104
+        },
+        "viewport_gpu_buffer_bytes": 281088,
+        "viewport_cpu_scratch_bytes": 445568,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 64,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.707842,
+          "median": 0.40861800000000004,
+          "p95": 0.555886
+        },
+        "selection_ms": {
+          "max": 0.042149,
+          "median": 0.02147,
+          "p95": 0.032922
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.219136,
+          "median": 0.181248,
+          "p95": 0.195584
+        },
+        "viewport_gpu_buffer_bytes": 281088,
+        "viewport_cpu_scratch_bytes": 445568,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "lod4",
+        "instances": 64,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.633142,
+          "median": 0.209063,
+          "p95": 0.308811
+        },
+        "selection_ms": {
+          "max": 0.002806,
+          "median": 0.000531,
+          "p95": 0.000882
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.545664,
+          "median": 0.311104,
+          "p95": 0.330752
+        },
+        "viewport_gpu_buffer_bytes": 11776,
+        "viewport_cpu_scratch_bytes": 54560,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "lod3",
+        "instances": 64,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.227047,
+          "median": 0.12252000000000002,
+          "p95": 0.172053
+        },
+        "selection_ms": {
+          "max": 0.0008619999999999999,
+          "median": 0.00032,
+          "p95": 0.00049
+        },
+        "gpu_pass_sum_ms": {
+          "max": 1.518592,
+          "median": 0.310272,
+          "p95": 0.330752
+        },
+        "viewport_gpu_buffer_bytes": 11776,
+        "viewport_cpu_scratch_bytes": 54560,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "lod2",
+        "instances": 64,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.13108,
+          "median": 0.108484,
+          "p95": 0.153999
+        },
+        "selection_ms": {
+          "max": 0.000691,
+          "median": 0.000301,
+          "p95": 0.00043099999999999996
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.485312,
+          "median": 0.310208,
+          "p95": 0.32768
+        },
+        "viewport_gpu_buffer_bytes": 11776,
+        "viewport_cpu_scratch_bytes": 54560,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "lod1",
+        "instances": 64,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.169278,
+          "median": 0.109276,
+          "p95": 0.140835
+        },
+        "selection_ms": {
+          "max": 0.0008420000000000001,
+          "median": 0.000311,
+          "p95": 0.00042100000000000004
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.662528,
+          "median": 0.352256,
+          "p95": 0.372736
+        },
+        "viewport_gpu_buffer_bytes": 11776,
+        "viewport_cpu_scratch_bytes": 54560,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "source",
+        "instances": 64,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.378425,
+          "median": 0.163598,
+          "p95": 0.29100699999999996
+        },
+        "selection_ms": {
+          "max": 0.008075,
+          "median": 0.00039000000000000005,
+          "p95": 0.000592
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.582656,
+          "median": 0.551904,
+          "p95": 0.580384
+        },
+        "viewport_gpu_buffer_bytes": 11776,
+        "viewport_cpu_scratch_bytes": 54560,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "source",
+        "instances": 256,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.3794269999999997,
+          "median": 0.171793,
+          "p95": 0.342986
+        },
+        "selection_ms": {
+          "max": 0.009297999999999999,
+          "median": 0.000951,
+          "p95": 0.002475
+        },
+        "gpu_pass_sum_ms": {
+          "max": 1.288192,
+          "median": 1.206272,
+          "p95": 1.26656
+        },
+        "viewport_gpu_buffer_bytes": 37376,
+        "viewport_cpu_scratch_bytes": 91424,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "lod1",
+        "instances": 256,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.1303479999999997,
+          "median": 0.131447,
+          "p95": 0.188605
+        },
+        "selection_ms": {
+          "max": 0.0022749999999999997,
+          "median": 0.0008420000000000001,
+          "p95": 0.001352
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.805888,
+          "median": 0.76288,
+          "p95": 0.795616
+        },
+        "viewport_gpu_buffer_bytes": 37376,
+        "viewport_cpu_scratch_bytes": 91424,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "lod2",
+        "instances": 256,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.188067,
+          "median": 0.131938,
+          "p95": 0.174668
+        },
+        "selection_ms": {
+          "max": 0.0020540000000000003,
+          "median": 0.000852,
+          "p95": 0.001152
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.70032,
+          "median": 0.659456,
+          "p95": 0.688064
+        },
+        "viewport_gpu_buffer_bytes": 37376,
+        "viewport_cpu_scratch_bytes": 91424,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "lod3",
+        "instances": 256,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.35583000000000004,
+          "median": 0.126799,
+          "p95": 0.171883
+        },
+        "selection_ms": {
+          "max": 0.002395,
+          "median": 0.0008420000000000001,
+          "p95": 0.001122
+        },
+        "gpu_pass_sum_ms": {
+          "max": 4.211712,
+          "median": 0.666624,
+          "p95": 1.977344
+        },
+        "viewport_gpu_buffer_bytes": 37376,
+        "viewport_cpu_scratch_bytes": 91424,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "lod4",
+        "instances": 256,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.303194,
+          "median": 0.181642,
+          "p95": 0.30218900000000004
+        },
+        "selection_ms": {
+          "max": 0.025488,
+          "median": 0.001102,
+          "p95": 0.001964
+        },
+        "gpu_pass_sum_ms": {
+          "max": 1.069056,
+          "median": 0.661472,
+          "p95": 0.689056
+        },
+        "viewport_gpu_buffer_bytes": 37376,
+        "viewport_cpu_scratch_bytes": 91424,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 256,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 3.368889,
+          "median": 1.029567,
+          "p95": 1.462221
+        },
+        "selection_ms": {
+          "max": 0.172625,
+          "median": 0.092344,
+          "p95": 0.15971
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.297984,
+          "median": 0.27136,
+          "p95": 0.29184
+        },
+        "viewport_gpu_buffer_bytes": 1083904,
+        "viewport_cpu_scratch_bytes": 1625216,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 256,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.989091,
+          "median": 0.594088,
+          "p95": 0.73366
+        },
+        "selection_ms": {
+          "max": 0.13733800000000002,
+          "median": 0.076444,
+          "p95": 0.091232
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.232448,
+          "median": 0.205824,
+          "p95": 0.224256
+        },
+        "viewport_gpu_buffer_bytes": 559616,
+        "viewport_cpu_scratch_bytes": 838784,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 256,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 1.0851019999999998,
+          "median": 0.42757500000000004,
+          "p95": 0.6407360000000001
+        },
+        "selection_ms": {
+          "max": 0.16943899999999998,
+          "median": 0.08456899999999999,
+          "p95": 0.148199
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.166784,
+          "median": 0.149408,
+          "p95": 0.161664
+        },
+        "viewport_gpu_buffer_bytes": 281088,
+        "viewport_cpu_scratch_bytes": 445568,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 256,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.40198700000000004,
+          "median": 0.338938,
+          "p95": 0.38190799999999997
+        },
+        "selection_ms": {
+          "max": 0.080992,
+          "median": 0.072436,
+          "p95": 0.078648
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.164864,
+          "median": 0.149504,
+          "p95": 0.161664
+        },
+        "viewport_gpu_buffer_bytes": 281088,
+        "viewport_cpu_scratch_bytes": 445568,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 256,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 1.17446,
+          "median": 0.60548,
+          "p95": 1.050727
+        },
+        "selection_ms": {
+          "max": 0.159249,
+          "median": 0.07670400000000001,
+          "p95": 0.15132500000000002
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.229376,
+          "median": 0.205824,
+          "p95": 0.224224
+        },
+        "viewport_gpu_buffer_bytes": 559616,
+        "viewport_cpu_scratch_bytes": 838784,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 256,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 3.577581,
+          "median": 0.973742,
+          "p95": 1.454987
+        },
+        "selection_ms": {
+          "max": 0.173406,
+          "median": 0.09367700000000001,
+          "p95": 0.15976
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.30208,
+          "median": 0.270336,
+          "p95": 0.292736
+        },
+        "viewport_gpu_buffer_bytes": 1083904,
+        "viewport_cpu_scratch_bytes": 1625216,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "lod4",
+        "instances": 256,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.21376199999999998,
+          "median": 0.120697,
+          "p95": 0.16143400000000002
+        },
+        "selection_ms": {
+          "max": 0.003367,
+          "median": 0.000821,
+          "p95": 0.001102
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.706496,
+          "median": 0.667648,
+          "p95": 0.698368
+        },
+        "viewport_gpu_buffer_bytes": 37376,
+        "viewport_cpu_scratch_bytes": 91424,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "lod3",
+        "instances": 256,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.368583,
+          "median": 0.197742,
+          "p95": 0.29124799999999995
+        },
+        "selection_ms": {
+          "max": 0.004007,
+          "median": 0.001462,
+          "p95": 0.002204
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.706368,
+          "median": 0.667648,
+          "p95": 0.697344
+        },
+        "viewport_gpu_buffer_bytes": 37376,
+        "viewport_cpu_scratch_bytes": 91424,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "lod2",
+        "instances": 256,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.123475,
+          "median": 0.123833,
+          "p95": 0.168638
+        },
+        "selection_ms": {
+          "max": 0.002064,
+          "median": 0.0008309999999999999,
+          "p95": 0.001102
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.705536,
+          "median": 0.6656,
+          "p95": 0.69632
+        },
+        "viewport_gpu_buffer_bytes": 37376,
+        "viewport_cpu_scratch_bytes": 91424,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "lod1",
+        "instances": 256,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.508941,
+          "median": 0.15887900000000002,
+          "p95": 0.33895699999999995
+        },
+        "selection_ms": {
+          "max": 0.008737,
+          "median": 0.000951,
+          "p95": 0.001824
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.818176,
+          "median": 0.768992,
+          "p95": 0.802816
+        },
+        "viewport_gpu_buffer_bytes": 37376,
+        "viewport_cpu_scratch_bytes": 91424,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      },
+      {
+        "mode": "source",
+        "instances": 256,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.4955350000000003,
+          "median": 0.15562299999999998,
+          "p95": 0.261432
+        },
+        "selection_ms": {
+          "max": 0.016600999999999998,
+          "median": 0.000911,
+          "p95": 0.001813
+        },
+        "gpu_pass_sum_ms": {
+          "max": 1.297376,
+          "median": 1.21344,
+          "p95": 1.273856
+        },
+        "viewport_gpu_buffer_bytes": 37376,
+        "viewport_cpu_scratch_bytes": 91424,
+        "cluster_mesh_upload_bytes": 3013744,
+        "source_triangles_per_asset": 14572
+      }
+    ]
+  },
+  {
+    "workload": "stress-discrete",
+    "adapter": "AdapterInfo { name: \"NVIDIA GeForce RTX 3060 Ti\", vendor: 4318, device: 9353, device_type: DiscreteGpu, device_pci_bus_id: \"0000:07:00.0\", driver: \"NVIDIA\", driver_info: \"595.99.02\", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 32, transient_saves_memory: Some(false), limit_bucket: None }",
+    "scope": "Repeated real-asset scaling experiment, not gameplay. CPU selection + prepare + encode + submit; GPU pass sum, no waits in CPU span. Shadows retain off-camera instances. Fixed authored LODs are quality candidates, not assumed equivalent. All modes resident during measurement; upload counter is cluster mesh buffers only, not total residency.",
+    "rawSha256": "966802f0be653e5130d18b9d298ab070823eaeb476008535aa8c2b8ab53e003b",
+    "rows": [
+      {
+        "mode": "source",
+        "instances": 1,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.167338,
+          "median": 0.188865,
+          "p95": 0.336744
+        },
+        "selection_ms": {
+          "max": 0.0009620000000000001,
+          "median": 9.999999999999999e-05,
+          "p95": 0.00027
+        },
+        "gpu_pass_sum_ms": {
+          "max": 3.004288,
+          "median": 0.232448,
+          "p95": 1.440768
+        },
+        "viewport_gpu_buffer_bytes": 3072,
+        "viewport_cpu_scratch_bytes": 43040,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "lod1",
+        "instances": 1,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.23879899999999998,
+          "median": 0.152998,
+          "p95": 0.189817
+        },
+        "selection_ms": {
+          "max": 0.000261,
+          "median": 0.00011,
+          "p95": 0.000161
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.163776,
+          "median": 0.157696,
+          "p95": 0.160512
+        },
+        "viewport_gpu_buffer_bytes": 3072,
+        "viewport_cpu_scratch_bytes": 43040,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "lod2",
+        "instances": 1,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.32688500000000004,
+          "median": 0.248357,
+          "p95": 0.301327
+        },
+        "selection_ms": {
+          "max": 0.000511,
+          "median": 0.00015099999999999998,
+          "p95": 0.00023999999999999998
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.111616,
+          "median": 0.102336,
+          "p95": 0.105472
+        },
+        "viewport_gpu_buffer_bytes": 3072,
+        "viewport_cpu_scratch_bytes": 43040,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "lod3",
+        "instances": 1,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.1536020000000002,
+          "median": 0.14930100000000002,
+          "p95": 0.168708
+        },
+        "selection_ms": {
+          "max": 0.00033,
+          "median": 9.999999999999999e-05,
+          "p95": 0.00014000000000000001
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.095232,
+          "median": 0.088064,
+          "p95": 0.09104
+        },
+        "viewport_gpu_buffer_bytes": 3072,
+        "viewport_cpu_scratch_bytes": 43040,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "lod4",
+        "instances": 1,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.1535320000000002,
+          "median": 0.150814,
+          "p95": 0.17663299999999998
+        },
+        "selection_ms": {
+          "max": 0.000211,
+          "median": 0.00011,
+          "p95": 0.00015099999999999998
+        },
+        "gpu_pass_sum_ms": {
+          "max": 1.286144,
+          "median": 0.086016,
+          "p95": 0.088992
+        },
+        "viewport_gpu_buffer_bytes": 3072,
+        "viewport_cpu_scratch_bytes": 43040,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 1,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.298143,
+          "median": 0.257365,
+          "p95": 0.276791
+        },
+        "selection_ms": {
+          "max": 0.009868,
+          "median": 0.004228,
+          "p95": 0.004779
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.095104,
+          "median": 0.089088,
+          "p95": 0.091136
+        },
+        "viewport_gpu_buffer_bytes": 11776,
+        "viewport_cpu_scratch_bytes": 64640,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 1,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.328908,
+          "median": 0.196831,
+          "p95": 0.221065
+        },
+        "selection_ms": {
+          "max": 0.007284,
+          "median": 0.004158,
+          "p95": 0.004639
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.092032,
+          "median": 0.084928,
+          "p95": 0.08704
+        },
+        "viewport_gpu_buffer_bytes": 7168,
+        "viewport_cpu_scratch_bytes": 53376,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 1,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.232791,
+          "median": 0.193815,
+          "p95": 0.209604
+        },
+        "selection_ms": {
+          "max": 0.012173,
+          "median": 0.004148,
+          "p95": 0.004608
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.090112,
+          "median": 0.084928,
+          "p95": 0.08704
+        },
+        "viewport_gpu_buffer_bytes": 7168,
+        "viewport_cpu_scratch_bytes": 53376,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 1,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.644666,
+          "median": 0.211578,
+          "p95": 0.439297
+        },
+        "selection_ms": {
+          "max": 0.011441,
+          "median": 0.004228,
+          "p95": 0.008676
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.091136,
+          "median": 0.084832,
+          "p95": 0.08704
+        },
+        "viewport_gpu_buffer_bytes": 7168,
+        "viewport_cpu_scratch_bytes": 53376,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 1,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.31860900000000003,
+          "median": 0.19677,
+          "p95": 0.213552
+        },
+        "selection_ms": {
+          "max": 0.009988,
+          "median": 0.004148,
+          "p95": 0.004238
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.089088,
+          "median": 0.084896,
+          "p95": 0.08704
+        },
+        "viewport_gpu_buffer_bytes": 7168,
+        "viewport_cpu_scratch_bytes": 53376,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 1,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.567838,
+          "median": 0.32022300000000004,
+          "p95": 0.4962639999999999
+        },
+        "selection_ms": {
+          "max": 0.025588,
+          "median": 0.004629,
+          "p95": 0.008045
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.095232,
+          "median": 0.089088,
+          "p95": 0.091136
+        },
+        "viewport_gpu_buffer_bytes": 11776,
+        "viewport_cpu_scratch_bytes": 64640,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "lod4",
+        "instances": 1,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.411654,
+          "median": 0.286189,
+          "p95": 0.35616000000000003
+        },
+        "selection_ms": {
+          "max": 0.00043099999999999996,
+          "median": 0.00019,
+          "p95": 0.000281
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.092128,
+          "median": 0.08592,
+          "p95": 0.088064
+        },
+        "viewport_gpu_buffer_bytes": 3072,
+        "viewport_cpu_scratch_bytes": 43040,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "lod3",
+        "instances": 1,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.270972,
+          "median": 0.169378,
+          "p95": 0.242917
+        },
+        "selection_ms": {
+          "max": 0.00029,
+          "median": 0.00011999999999999999,
+          "p95": 0.00016999999999999999
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.09616,
+          "median": 0.088064,
+          "p95": 0.091072
+        },
+        "viewport_gpu_buffer_bytes": 3072,
+        "viewport_cpu_scratch_bytes": 43040,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "lod2",
+        "instances": 1,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.913612,
+          "median": 0.270619,
+          "p95": 0.381237
+        },
+        "selection_ms": {
+          "max": 0.001282,
+          "median": 0.000191,
+          "p95": 0.000391
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.607232,
+          "median": 0.10336,
+          "p95": 0.108512
+        },
+        "viewport_gpu_buffer_bytes": 3072,
+        "viewport_cpu_scratch_bytes": 43040,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "lod1",
+        "instances": 1,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.335214,
+          "median": 0.178646,
+          "p95": 0.24981
+        },
+        "selection_ms": {
+          "max": 0.001052,
+          "median": 0.00012100000000000001,
+          "p95": 0.00021
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.553952,
+          "median": 0.157696,
+          "p95": 0.163744
+        },
+        "viewport_gpu_buffer_bytes": 3072,
+        "viewport_cpu_scratch_bytes": 43040,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "source",
+        "instances": 1,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.257728,
+          "median": 0.165621,
+          "p95": 0.20808200000000002
+        },
+        "selection_ms": {
+          "max": 0.00023099999999999998,
+          "median": 9.999999999999999e-05,
+          "p95": 0.000171
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.41872,
+          "median": 0.23136,
+          "p95": 0.234368
+        },
+        "viewport_gpu_buffer_bytes": 3072,
+        "viewport_cpu_scratch_bytes": 43040,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "source",
+        "instances": 64,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.6448959999999997,
+          "median": 0.28932399999999997,
+          "p95": 0.438996
+        },
+        "selection_ms": {
+          "max": 0.0025440000000000003,
+          "median": 0.000471,
+          "p95": 0.001373
+        },
+        "gpu_pass_sum_ms": {
+          "max": 7.177216,
+          "median": 5.733376,
+          "p95": 6.314944
+        },
+        "viewport_gpu_buffer_bytes": 11776,
+        "viewport_cpu_scratch_bytes": 54560,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "lod1",
+        "instances": 64,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.425852,
+          "median": 0.18485800000000002,
+          "p95": 0.263405
+        },
+        "selection_ms": {
+          "max": 0.001764,
+          "median": 0.00033,
+          "p95": 0.000992
+        },
+        "gpu_pass_sum_ms": {
+          "max": 4.5936,
+          "median": 3.195872,
+          "p95": 3.389376
+        },
+        "viewport_gpu_buffer_bytes": 11776,
+        "viewport_cpu_scratch_bytes": 54560,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "lod2",
+        "instances": 64,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.625199,
+          "median": 0.265409,
+          "p95": 0.43285399999999996
+        },
+        "selection_ms": {
+          "max": 0.002695,
+          "median": 0.00046100000000000004,
+          "p95": 0.001222
+        },
+        "gpu_pass_sum_ms": {
+          "max": 1.3312,
+          "median": 1.158144,
+          "p95": 1.227744
+        },
+        "viewport_gpu_buffer_bytes": 11776,
+        "viewport_cpu_scratch_bytes": 54560,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "lod3",
+        "instances": 64,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.225407,
+          "median": 0.15924,
+          "p95": 0.20723
+        },
+        "selection_ms": {
+          "max": 0.000521,
+          "median": 0.00033099999999999997,
+          "p95": 0.00046100000000000004
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.402368,
+          "median": 0.375776,
+          "p95": 0.391168
+        },
+        "viewport_gpu_buffer_bytes": 11776,
+        "viewport_cpu_scratch_bytes": 54560,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "lod4",
+        "instances": 64,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.9889,
+          "median": 0.27470700000000003,
+          "p95": 0.409531
+        },
+        "selection_ms": {
+          "max": 0.000772,
+          "median": 0.00051,
+          "p95": 0.000642
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.485344,
+          "median": 0.246784,
+          "p95": 0.256
+        },
+        "viewport_gpu_buffer_bytes": 11776,
+        "viewport_cpu_scratch_bytes": 54560,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 64,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 1.537032,
+          "median": 0.733791,
+          "p95": 1.309513
+        },
+        "selection_ms": {
+          "max": 0.555265,
+          "median": 0.253457,
+          "p95": 0.504399
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.185344,
+          "median": 0.145312,
+          "p95": 0.151552
+        },
+        "viewport_gpu_buffer_bytes": 297472,
+        "viewport_cpu_scratch_bytes": 455808,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 64,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 3.109029,
+          "median": 0.973932,
+          "p95": 1.145034
+        },
+        "selection_ms": {
+          "max": 0.627019,
+          "median": 0.47737799999999997,
+          "p95": 0.55267
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.14336,
+          "median": 0.10752,
+          "p95": 0.112608
+        },
+        "viewport_gpu_buffer_bytes": 141824,
+        "viewport_cpu_scratch_bytes": 248960,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 64,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.603024,
+          "median": 0.468441,
+          "p95": 0.5051800000000001
+        },
+        "selection_ms": {
+          "max": 0.374745,
+          "median": 0.25023100000000004,
+          "p95": 0.26684199999999997
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.165888,
+          "median": 0.125952,
+          "p95": 0.129024
+        },
+        "viewport_gpu_buffer_bytes": 39424,
+        "viewport_cpu_scratch_bytes": 101504,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 64,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 1.218152,
+          "median": 0.6254970000000001,
+          "p95": 0.948284
+        },
+        "selection_ms": {
+          "max": 0.714845,
+          "median": 0.310093,
+          "p95": 0.48062400000000005
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.144384,
+          "median": 0.136192,
+          "p95": 0.140288
+        },
+        "viewport_gpu_buffer_bytes": 39424,
+        "viewport_cpu_scratch_bytes": 101504,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 64,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 6.811526,
+          "median": 1.0288160000000002,
+          "p95": 1.168849
+        },
+        "selection_ms": {
+          "max": 5.659779,
+          "median": 0.5173829999999999,
+          "p95": 0.542982
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.191488,
+          "median": 0.114624,
+          "p95": 0.183296
+        },
+        "viewport_gpu_buffer_bytes": 141824,
+        "viewport_cpu_scratch_bytes": 248960,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 64,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.822971,
+          "median": 0.741495,
+          "p95": 1.1676469999999999
+        },
+        "selection_ms": {
+          "max": 0.5486930000000001,
+          "median": 0.257986,
+          "p95": 0.372831
+        },
+        "gpu_pass_sum_ms": {
+          "max": 1.381376,
+          "median": 0.150432,
+          "p95": 0.162816
+        },
+        "viewport_gpu_buffer_bytes": 297472,
+        "viewport_cpu_scratch_bytes": 455808,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "lod4",
+        "instances": 64,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.413651,
+          "median": 0.237908,
+          "p95": 0.329129
+        },
+        "selection_ms": {
+          "max": 0.009027,
+          "median": 0.00042,
+          "p95": 0.0006209999999999999
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.417792,
+          "median": 0.247712,
+          "p95": 0.255904
+        },
+        "viewport_gpu_buffer_bytes": 11776,
+        "viewport_cpu_scratch_bytes": 54560,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "lod3",
+        "instances": 64,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.413859,
+          "median": 0.186551,
+          "p95": 0.270068
+        },
+        "selection_ms": {
+          "max": 0.001523,
+          "median": 0.000351,
+          "p95": 0.000581
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.550848,
+          "median": 0.375808,
+          "p95": 0.392192
+        },
+        "viewport_gpu_buffer_bytes": 11776,
+        "viewport_cpu_scratch_bytes": 54560,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "lod2",
+        "instances": 64,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.4411329999999998,
+          "median": 0.256012,
+          "p95": 0.365307
+        },
+        "selection_ms": {
+          "max": 0.002034,
+          "median": 0.00043,
+          "p95": 0.001102
+        },
+        "gpu_pass_sum_ms": {
+          "max": 2.433984,
+          "median": 1.162208,
+          "p95": 1.441728
+        },
+        "viewport_gpu_buffer_bytes": 11776,
+        "viewport_cpu_scratch_bytes": 54560,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "lod1",
+        "instances": 64,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.44336499999999995,
+          "median": 0.203763,
+          "p95": 0.333708
+        },
+        "selection_ms": {
+          "max": 0.003005,
+          "median": 0.000351,
+          "p95": 0.001372
+        },
+        "gpu_pass_sum_ms": {
+          "max": 4.385728,
+          "median": 3.211232,
+          "p95": 3.410848
+        },
+        "viewport_gpu_buffer_bytes": 11776,
+        "viewport_cpu_scratch_bytes": 54560,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "source",
+        "instances": 64,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.6709430000000001,
+          "median": 0.265489,
+          "p95": 0.500562
+        },
+        "selection_ms": {
+          "max": 0.002224,
+          "median": 0.000441,
+          "p95": 0.001503
+        },
+        "gpu_pass_sum_ms": {
+          "max": 7.44448,
+          "median": 5.73952,
+          "p95": 6.085568
+        },
+        "viewport_gpu_buffer_bytes": 11776,
+        "viewport_cpu_scratch_bytes": 54560,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "source",
+        "instances": 256,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 2.534308,
+          "median": 0.25317599999999996,
+          "p95": 0.445628
+        },
+        "selection_ms": {
+          "max": 0.003927,
+          "median": 0.000941,
+          "p95": 0.002605
+        },
+        "gpu_pass_sum_ms": {
+          "max": 15.540224,
+          "median": 13.589504,
+          "p95": 14.27456
+        },
+        "viewport_gpu_buffer_bytes": 37376,
+        "viewport_cpu_scratch_bytes": 91424,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "lod1",
+        "instances": 256,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 0.742186,
+          "median": 0.256022,
+          "p95": 0.44556799999999996
+        },
+        "selection_ms": {
+          "max": 0.0041080000000000005,
+          "median": 0.001183,
+          "p95": 0.002746
+        },
+        "gpu_pass_sum_ms": {
+          "max": 9.302944,
+          "median": 7.808,
+          "p95": 8.175616
+        },
+        "viewport_gpu_buffer_bytes": 37376,
+        "viewport_cpu_scratch_bytes": 91424,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "lod2",
+        "instances": 256,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 3.690003,
+          "median": 0.354396,
+          "p95": 0.656455
+        },
+        "selection_ms": {
+          "max": 0.012384000000000001,
+          "median": 0.0016330000000000001,
+          "p95": 0.003226
+        },
+        "gpu_pass_sum_ms": {
+          "max": 4.46352,
+          "median": 2.986816,
+          "p95": 3.123104
+        },
+        "viewport_gpu_buffer_bytes": 37376,
+        "viewport_cpu_scratch_bytes": 91424,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "lod3",
+        "instances": 256,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 3.8118119999999998,
+          "median": 0.333347,
+          "p95": 0.5566669999999999
+        },
+        "selection_ms": {
+          "max": 0.00539,
+          "median": 0.0016229999999999999,
+          "p95": 0.002965
+        },
+        "gpu_pass_sum_ms": {
+          "max": 1.138624,
+          "median": 0.885728,
+          "p95": 0.907232
+        },
+        "viewport_gpu_buffer_bytes": 37376,
+        "viewport_cpu_scratch_bytes": 91424,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "lod4",
+        "instances": 256,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 3.8404350000000003,
+          "median": 0.29675799999999997,
+          "p95": 0.518836
+        },
+        "selection_ms": {
+          "max": 0.004698,
+          "median": 0.001132,
+          "p95": 0.002985
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.82224,
+          "median": 0.539648,
+          "p95": 0.550912
+        },
+        "viewport_gpu_buffer_bytes": 37376,
+        "viewport_cpu_scratch_bytes": 91424,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 256,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 3.6698350000000004,
+          "median": 1.718694,
+          "p95": 3.129198
+        },
+        "selection_ms": {
+          "max": 2.1120639999999997,
+          "median": 1.039536,
+          "p95": 2.0286969999999998
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.193536,
+          "median": 0.165888,
+          "p95": 0.181248
+        },
+        "viewport_gpu_buffer_bytes": 559616,
+        "viewport_cpu_scratch_bytes": 849024,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 256,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 3.55564,
+          "median": 1.4965060000000001,
+          "p95": 2.74764
+        },
+        "selection_ms": {
+          "max": 2.2566159999999997,
+          "median": 1.102374,
+          "p95": 2.091595
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.254976,
+          "median": 0.115712,
+          "p95": 0.224256
+        },
+        "viewport_gpu_buffer_bytes": 281088,
+        "viewport_cpu_scratch_bytes": 445568,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 256,
+        "round": 0,
+        "cpu_frame_ms": {
+          "max": 1.946863,
+          "median": 1.282523,
+          "p95": 1.3430980000000001
+        },
+        "selection_ms": {
+          "max": 1.525229,
+          "median": 1.024207,
+          "p95": 1.071866
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.26112,
+          "median": 0.217088,
+          "p95": 0.226304
+        },
+        "viewport_gpu_buffer_bytes": 72192,
+        "viewport_cpu_scratch_bytes": 150656,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "cluster-4px",
+        "instances": 256,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 4.9131540000000005,
+          "median": 1.4315630000000001,
+          "p95": 2.545068
+        },
+        "selection_ms": {
+          "max": 4.402093,
+          "median": 1.118425,
+          "p95": 2.0733610000000002
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.274432,
+          "median": 0.249856,
+          "p95": 0.26112
+        },
+        "viewport_gpu_buffer_bytes": 72192,
+        "viewport_cpu_scratch_bytes": 150656,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "cluster-2px",
+        "instances": 256,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 3.100985,
+          "median": 1.455939,
+          "p95": 2.9199640000000002
+        },
+        "selection_ms": {
+          "max": 2.3421269999999996,
+          "median": 1.095752,
+          "p95": 2.224816
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.40448,
+          "median": 0.349184,
+          "p95": 0.384
+        },
+        "viewport_gpu_buffer_bytes": 281088,
+        "viewport_cpu_scratch_bytes": 445568,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "cluster-1px",
+        "instances": 256,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 3.470129,
+          "median": 1.856703,
+          "p95": 2.050017
+        },
+        "selection_ms": {
+          "max": 1.981709,
+          "median": 1.103005,
+          "p95": 1.180852
+        },
+        "gpu_pass_sum_ms": {
+          "max": 1.045504,
+          "median": 0.575488,
+          "p95": 0.837632
+        },
+        "viewport_gpu_buffer_bytes": 559616,
+        "viewport_cpu_scratch_bytes": 849024,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "lod4",
+        "instances": 256,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.804848,
+          "median": 0.395905,
+          "p95": 0.511332
+        },
+        "selection_ms": {
+          "max": 0.009358,
+          "median": 0.001713,
+          "p95": 0.0020540000000000003
+        },
+        "gpu_pass_sum_ms": {
+          "max": 0.702464,
+          "median": 0.5376,
+          "p95": 0.54784
+        },
+        "viewport_gpu_buffer_bytes": 37376,
+        "viewport_cpu_scratch_bytes": 91424,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "lod3",
+        "instances": 256,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.49094299999999996,
+          "median": 0.215475,
+          "p95": 0.347514
+        },
+        "selection_ms": {
+          "max": 0.003116,
+          "median": 0.000902,
+          "p95": 0.0017439999999999999
+        },
+        "gpu_pass_sum_ms": {
+          "max": 1.125376,
+          "median": 0.88064,
+          "p95": 0.904128
+        },
+        "viewport_gpu_buffer_bytes": 37376,
+        "viewport_cpu_scratch_bytes": 91424,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "lod2",
+        "instances": 256,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.759068,
+          "median": 0.32383,
+          "p95": 0.507795
+        },
+        "selection_ms": {
+          "max": 0.003827,
+          "median": 0.001603,
+          "p95": 0.0023049999999999998
+        },
+        "gpu_pass_sum_ms": {
+          "max": 3.343328,
+          "median": 2.990016,
+          "p95": 3.156928
+        },
+        "viewport_gpu_buffer_bytes": 37376,
+        "viewport_cpu_scratch_bytes": 91424,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "lod1",
+        "instances": 256,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 2.5317629999999998,
+          "median": 0.322607,
+          "p95": 0.551577
+        },
+        "selection_ms": {
+          "max": 0.010679999999999999,
+          "median": 0.001462,
+          "p95": 0.003496
+        },
+        "gpu_pass_sum_ms": {
+          "max": 9.356224,
+          "median": 7.830528,
+          "p95": 8.18064
+        },
+        "viewport_gpu_buffer_bytes": 37376,
+        "viewport_cpu_scratch_bytes": 91424,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      },
+      {
+        "mode": "source",
+        "instances": 256,
+        "round": 1,
+        "cpu_frame_ms": {
+          "max": 0.6300560000000001,
+          "median": 0.237256,
+          "p95": 0.42952799999999997
+        },
+        "selection_ms": {
+          "max": 0.008095,
+          "median": 0.000942,
+          "p95": 0.002695
+        },
+        "gpu_pass_sum_ms": {
+          "max": 15.583232,
+          "median": 13.592576,
+          "p95": 14.273536
+        },
+        "viewport_gpu_buffer_bytes": 37376,
+        "viewport_cpu_scratch_bytes": 91424,
+        "cluster_mesh_upload_bytes": 29505136,
+        "source_triangles_per_asset": 262144
+      }
+    ]
+  }
+]

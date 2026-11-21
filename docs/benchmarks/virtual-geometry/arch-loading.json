@@ -1,0 +1,158 @@
+{
+  "scope": "Fresh-process loading and post-warm residency on one NVIDIA adapter. Filesystem caches are not flushed. No network/loading claims for browser or cold OS boot. NVIDIA values are process-level sampled MiB, not isolated mesh allocations.",
+  "rows": [
+    {
+      "adapter": "AdapterInfo { name: \"NVIDIA GeForce RTX 3060 Ti\", vendor: 4318, device: 9353, device_type: DiscreteGpu, device_pci_bus_id: \"0000:07:00.0\", driver: \"NVIDIA\", driver_info: \"595.99.02\", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 32, transient_saves_memory: Some(false), limit_bucket: None }",
+      "asset": "shrine.kit.arch",
+      "cluster_mesh_upload_bytes": 0,
+      "load_ms": 58.882854,
+      "mode": "source",
+      "note": "Fresh process, warm filesystem; load span excludes device setup and the following 16 rendered warm frames. RSS/HWM include allocator and driver state. Discrete retains source and LODs; cluster retains source fallback and all cluster buffers. No streaming or eviction.",
+      "process_memory_kib": [
+        "VmHWM:\t  358784 kB",
+        "VmRSS:\t  358784 kB"
+      ],
+      "world_upload_bytes": 18074764,
+      "nvidia_process_used_memory": [
+        "461 MiB"
+      ],
+      "round": 0
+    },
+    {
+      "adapter": "AdapterInfo { name: \"NVIDIA GeForce RTX 3060 Ti\", vendor: 4318, device: 9353, device_type: DiscreteGpu, device_pci_bus_id: \"0000:07:00.0\", driver: \"NVIDIA\", driver_info: \"595.99.02\", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 32, transient_saves_memory: Some(false), limit_bucket: None }",
+      "asset": "shrine.kit.arch",
+      "cluster_mesh_upload_bytes": 0,
+      "load_ms": 86.189108,
+      "mode": "discrete",
+      "note": "Fresh process, warm filesystem; load span excludes device setup and the following 16 rendered warm frames. RSS/HWM include allocator and driver state. Discrete retains source and LODs; cluster retains source fallback and all cluster buffers. No streaming or eviction.",
+      "process_memory_kib": [
+        "VmHWM:\t  324452 kB",
+        "VmRSS:\t  324452 kB"
+      ],
+      "world_upload_bytes": 22865960,
+      "nvidia_process_used_memory": [
+        "461 MiB"
+      ],
+      "round": 0
+    },
+    {
+      "adapter": "AdapterInfo { name: \"NVIDIA GeForce RTX 3060 Ti\", vendor: 4318, device: 9353, device_type: DiscreteGpu, device_pci_bus_id: \"0000:07:00.0\", driver: \"NVIDIA\", driver_info: \"595.99.02\", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 32, transient_saves_memory: Some(false), limit_bucket: None }",
+      "asset": "shrine.kit.arch",
+      "cluster_mesh_upload_bytes": 3013744,
+      "load_ms": 75.555789,
+      "mode": "cluster",
+      "note": "Fresh process, warm filesystem; load span excludes device setup and the following 16 rendered warm frames. RSS/HWM include allocator and driver state. Discrete retains source and LODs; cluster retains source fallback and all cluster buffers. No streaming or eviction.",
+      "process_memory_kib": [
+        "VmHWM:\t  324520 kB",
+        "VmRSS:\t  324520 kB"
+      ],
+      "world_upload_bytes": 21088508,
+      "nvidia_process_used_memory": [
+        "461 MiB"
+      ],
+      "round": 0
+    },
+    {
+      "adapter": "AdapterInfo { name: \"NVIDIA GeForce RTX 3060 Ti\", vendor: 4318, device: 9353, device_type: DiscreteGpu, device_pci_bus_id: \"0000:07:00.0\", driver: \"NVIDIA\", driver_info: \"595.99.02\", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 32, transient_saves_memory: Some(false), limit_bucket: None }",
+      "asset": "shrine.kit.arch",
+      "cluster_mesh_upload_bytes": 3013744,
+      "load_ms": 76.387373,
+      "mode": "cluster",
+      "note": "Fresh process, warm filesystem; load span excludes device setup and the following 16 rendered warm frames. RSS/HWM include allocator and driver state. Discrete retains source and LODs; cluster retains source fallback and all cluster buffers. No streaming or eviction.",
+      "process_memory_kib": [
+        "VmHWM:\t  324456 kB",
+        "VmRSS:\t  324456 kB"
+      ],
+      "world_upload_bytes": 21088508,
+      "nvidia_process_used_memory": [
+        "461 MiB"
+      ],
+      "round": 1
+    },
+    {
+      "adapter": "AdapterInfo { name: \"NVIDIA GeForce RTX 3060 Ti\", vendor: 4318, device: 9353, device_type: DiscreteGpu, device_pci_bus_id: \"0000:07:00.0\", driver: \"NVIDIA\", driver_info: \"595.99.02\", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 32, transient_saves_memory: Some(false), limit_bucket: None }",
+      "asset": "shrine.kit.arch",
+      "cluster_mesh_upload_bytes": 0,
+      "load_ms": 83.972196,
+      "mode": "discrete",
+      "note": "Fresh process, warm filesystem; load span excludes device setup and the following 16 rendered warm frames. RSS/HWM include allocator and driver state. Discrete retains source and LODs; cluster retains source fallback and all cluster buffers. No streaming or eviction.",
+      "process_memory_kib": [
+        "VmHWM:\t  324332 kB",
+        "VmRSS:\t  324332 kB"
+      ],
+      "world_upload_bytes": 22865960,
+      "nvidia_process_used_memory": [
+        "461 MiB"
+      ],
+      "round": 1
+    },
+    {
+      "adapter": "AdapterInfo { name: \"NVIDIA GeForce RTX 3060 Ti\", vendor: 4318, device: 9353, device_type: DiscreteGpu, device_pci_bus_id: \"0000:07:00.0\", driver: \"NVIDIA\", driver_info: \"595.99.02\", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 32, transient_saves_memory: Some(false), limit_bucket: None }",
+      "asset": "shrine.kit.arch",
+      "cluster_mesh_upload_bytes": 0,
+      "load_ms": 53.231239,
+      "mode": "source",
+      "note": "Fresh process, warm filesystem; load span excludes device setup and the following 16 rendered warm frames. RSS/HWM include allocator and driver state. Discrete retains source and LODs; cluster retains source fallback and all cluster buffers. No streaming or eviction.",
+      "process_memory_kib": [
+        "VmHWM:\t  324352 kB",
+        "VmRSS:\t  324352 kB"
+      ],
+      "world_upload_bytes": 18074764,
+      "nvidia_process_used_memory": [
+        "461 MiB"
+      ],
+      "round": 1
+    },
+    {
+      "adapter": "AdapterInfo { name: \"NVIDIA GeForce RTX 3060 Ti\", vendor: 4318, device: 9353, device_type: DiscreteGpu, device_pci_bus_id: \"0000:07:00.0\", driver: \"NVIDIA\", driver_info: \"595.99.02\", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 32, transient_saves_memory: Some(false), limit_bucket: None }",
+      "asset": "shrine.kit.arch",
+      "cluster_mesh_upload_bytes": 0,
+      "load_ms": 53.912411,
+      "mode": "source",
+      "note": "Fresh process, warm filesystem; load span excludes device setup and the following 16 rendered warm frames. RSS/HWM include allocator and driver state. Discrete retains source and LODs; cluster retains source fallback and all cluster buffers. No streaming or eviction.",
+      "process_memory_kib": [
+        "VmHWM:\t  324428 kB",
+        "VmRSS:\t  324428 kB"
+      ],
+      "world_upload_bytes": 18074764,
+      "nvidia_process_used_memory": [
+        "461 MiB"
+      ],
+      "round": 2
+    },
+    {
+      "adapter": "AdapterInfo { name: \"NVIDIA GeForce RTX 3060 Ti\", vendor: 4318, device: 9353, device_type: DiscreteGpu, device_pci_bus_id: \"0000:07:00.0\", driver: \"NVIDIA\", driver_info: \"595.99.02\", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 32, transient_saves_memory: Some(false), limit_bucket: None }",
+      "asset": "shrine.kit.arch",
+      "cluster_mesh_upload_bytes": 0,
+      "load_ms": 84.685058,
+      "mode": "discrete",
+      "note": "Fresh process, warm filesystem; load span excludes device setup and the following 16 rendered warm frames. RSS/HWM include allocator and driver state. Discrete retains source and LODs; cluster retains source fallback and all cluster buffers. No streaming or eviction.",
+      "process_memory_kib": [
+        "VmHWM:\t  324552 kB",
+        "VmRSS:\t  324552 kB"
+      ],
+      "world_upload_bytes": 22865960,
+      "nvidia_process_used_memory": [
+        "461 MiB"
+      ],
+      "round": 2
+    },
+    {
+      "adapter": "AdapterInfo { name: \"NVIDIA GeForce RTX 3060 Ti\", vendor: 4318, device: 9353, device_type: DiscreteGpu, device_pci_bus_id: \"0000:07:00.0\", driver: \"NVIDIA\", driver_info: \"595.99.02\", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 32, transient_saves_memory: Some(false), limit_bucket: None }",
+      "asset": "shrine.kit.arch",
+      "cluster_mesh_upload_bytes": 3013744,
+      "load_ms": 75.87625100000001,
+      "mode": "cluster",
+      "note": "Fresh process, warm filesystem; load span excludes device setup and the following 16 rendered warm frames. RSS/HWM include allocator and driver state. Discrete retains source and LODs; cluster retains source fallback and all cluster buffers. No streaming or eviction.",
+      "process_memory_kib": [
+        "VmHWM:\t  324388 kB",
+        "VmRSS:\t  324388 kB"
+      ],
+      "world_upload_bytes": 21088508,
+      "nvidia_process_used_memory": [
+        "461 MiB"
+      ],
+      "round": 2
+    }
+  ]
+}

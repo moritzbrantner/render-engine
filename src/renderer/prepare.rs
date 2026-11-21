@@ -132,6 +132,7 @@ impl Renderer {
             queue,
             clip_from_view * view_from_world,
             &grouped,
+            world,
         );
         // A replaced instance or visible buffer clears `frame_group`; the GPU pass binds both.
         if viewport.frame_group.is_none()
@@ -854,6 +855,7 @@ fn cull_views(
     queue: &wgpu::Queue,
     clip_from_world: Mat4,
     grouped: &Grouped,
+    world: &World,
 ) {
     let Grouped {
         groups,
@@ -945,6 +947,18 @@ fn cull_views(
     work.shadow_visible = visible.len() as u32 - main_visible;
     work.draws = viewport.main_draws.len() as u32;
     work.shadow_draws = (viewport.draws.len() - viewport.main_draws.len()) as u32;
+    let triangles = |draws: &[Draw]| {
+        draws
+            .iter()
+            .filter(|d| d.gpu.is_none())
+            .map(|d| {
+                u64::from(world.mesh(d.mesh).index_count / 3)
+                    * u64::from(d.instances.end - d.instances.start)
+            })
+            .sum()
+    };
+    work.cpu_triangles = triangles(&viewport.draws[viewport.main_draws.clone()]);
+    work.cpu_shadow_triangles = triangles(&viewport.draws[viewport.main_draws.end..]);
     if visible.is_empty() && gpu_region == 0 {
         visible.push(0);
     }

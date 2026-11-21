@@ -1,0 +1,13 @@
+
+running 1 test
+adapter=NVIDIA GeForce RTX 3060 Ti gpu_timestamps=true lights=Clustered(ClusterConfig { x: 16, y: 9, z: 24, max_lights_per_cluster: 256, diagnostic: false }) particles_enabled=true
+view=vale frame_ms median=9.61 p95=11.57 p99=12.53 max=12.53 first=4371.98 | render_ms median=8.18 p95=9.87 p99=10.65 max=10.65 first=2764.80 | prepare_ms median=1.23 p95=1.39 p99=1.59 max=1.59 first=7.31 | encode_ms median=0.39 p95=0.58 p99=0.86 max=0.86 first=0.95 | particle_step_cpu_ms median=0.01 p95=0.02 p99=0.02 max=0.02 first=0.08 | gpu_ms median=4.04 p95=4.59 p99=4.83 max=4.83 first=55.36
+view=vale gpu_pass_median_ms particle_sim=0.025 sky=0.455 shadow=1.254 lit_opaque=2.115 render_sky=0.063 lit_transparent=0.025 particles=0.056 tonemap=0.025 blit=0.016
+view=vale prepare_work PrepareWork { instances: 24712, instance_writes: 687, views: 5, bounds_tests: 123560, gpu_bounds_tests: 0, visible: 12494, shadow_visible: 21614, draws: 803, shadow_draws: 1715, upload_bytes: 822728, allocations: 0, light_cluster_tests: 231, light_cluster_entries: 193, cluster_overflows: 0 } world_work_over_view WorldWork { mesh_builds: 2328, mesh_rewrites: 0, texture_uploads: 103, material_builds: 3378, instance_edits: 24025, upload_bytes: 704090484 }
+view=vale raw frame_ms=[4371.98,16.90,13.56,9.71,10.65,9.66,9.68,9.98,10.29,9.60,9.76,10.37,9.80,9.61,10.27,9.74,9.48,9.94,10.11,9.52,9.69,10.24,9.61,9.60,10.24,9.69,9.67,10.19,10.30,9.64,9.56,10.33,9.62,9.14,9.47,9.50,9.09,9.23,10.61,9.58,9.54,10.23,9.69,9.42,9.42,10.37,9.21,9.24,9.82,9.10,8.94,9.77,11.67,11.05,10.83,10.95,10.35,10.24,10.52,9.44,9.47,11.57,12.53,10.77,10.03,9.21,8.98,9.50,9.41,9.32,9.30,9.86,9.16,9.01,9.41,9.35,9.08,8.95,9.69,9.07]
+view=vale raw render_ms=[2764.80,13.50,10.58,8.31,9.07,8.18,8.20,8.69,8.89,8.20,8.29,8.98,8.33,8.15,8.86,8.23,8.18,8.59,8.64,8.13,8.29,8.92,8.18,8.14,8.90,8.13,8.33,8.85,8.89,8.15,8.27,8.87,8.26,7.79,8.18,7.98,7.81,7.94,9.04,8.03,8.12,8.74,8.19,7.91,8.15,8.82,7.85,7.77,8.40,7.68,7.60,8.47,9.87,9.26,9.11,9.20,8.70,8.70,8.85,7.97,7.95,10.07,10.65,9.08,8.41,7.77,7.68,8.21,7.92,7.97,7.89,8.42,7.77,7.73,8.13,7.85,7.71,7.65,8.32,7.71]
+view=vale raw gpu_ms=[55.36,4.40,4.41,4.41,4.43,4.39,4.39,4.38,4.41,4.40,4.59,4.38,4.38,4.40,4.38,4.40,4.38,4.37,4.40,4.39,4.59,4.39,4.39,4.39,4.39,4.38,4.39,4.83,4.39,4.38,4.59,4.38,4.25,4.04,4.02,4.04,4.02,4.22,4.02,4.04,4.01,4.02,4.02,4.04,4.50,4.02,4.02,4.03,4.02,4.03,4.00,4.24,4.02,4.03,4.27,4.05,4.03,4.23,4.03,4.02,4.04,4.02,4.02,4.38,4.02,4.04,4.01,4.02,4.04,4.02,4.22,4.03,4.03,4.03,4.01,3.98,4.03,4.04,4.01,4.04]
+test graphics::tests::outpost_frame_time ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 99 filtered out; finished in 14.79s
+

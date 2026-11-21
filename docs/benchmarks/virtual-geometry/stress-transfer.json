@@ -1,0 +1,318 @@
+{
+  "asset": "boulder",
+  "scope": "Actual HTTP response-body bytes and elapsed serial fetch time on loopback, no HTTP client cache; warm OS cache. Excludes headers, transcode/GPU upload and WAN latency. Cluster set includes source attributes/fallback required by this prototype.",
+  "rows": [
+    {
+      "mode": "source",
+      "round": 0,
+      "payloadBytes": 8147219,
+      "loopbackFetchMs": 15.075036999405711,
+      "files": [
+        {
+          "path": "target/virtual-geometry/inputs/stress-discrete/resources/17703b501935a52a3f3e93d491ed3085021a56f2733813cb6272b0e28bd5e066.bin",
+          "payloadBytes": 8145804,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/stress-discrete/scenes/boulder/default.gltf",
+          "payloadBytes": 1415,
+          "contentEncoding": "identity"
+        }
+      ]
+    },
+    {
+      "mode": "discrete",
+      "round": 0,
+      "payloadBytes": 10273562,
+      "loopbackFetchMs": 16.67343500048446,
+      "files": [
+        {
+          "path": "target/virtual-geometry/inputs/stress-discrete/resources/17703b501935a52a3f3e93d491ed3085021a56f2733813cb6272b0e28bd5e066.bin",
+          "payloadBytes": 8145804,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/stress-discrete/scenes/boulder/default.gltf",
+          "payloadBytes": 1415,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/stress-discrete/scenes/boulder/lod1.bin",
+          "payloadBytes": 1572864,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/stress-discrete/scenes/boulder/lod1.gltf",
+          "payloadBytes": 1591,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/stress-discrete/scenes/boulder/lod2.bin",
+          "payloadBytes": 393216,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/stress-discrete/scenes/boulder/lod2.gltf",
+          "payloadBytes": 1588,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/stress-discrete/scenes/boulder/lod3.bin",
+          "payloadBytes": 98304,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/stress-discrete/scenes/boulder/lod3.gltf",
+          "payloadBytes": 1586,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/stress-discrete/scenes/boulder/lod4.bin",
+          "payloadBytes": 55608,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/stress-discrete/scenes/boulder/lod4.gltf",
+          "payloadBytes": 1586,
+          "contentEncoding": "identity"
+        }
+      ]
+    },
+    {
+      "mode": "cluster",
+      "round": 0,
+      "payloadBytes": 17764075,
+      "loopbackFetchMs": 19.81232199977967,
+      "files": [
+        {
+          "path": "target/virtual-geometry/inputs/stress-discrete/resources/17703b501935a52a3f3e93d491ed3085021a56f2733813cb6272b0e28bd5e066.bin",
+          "payloadBytes": 8145804,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/stress-discrete/scenes/boulder/default.gltf",
+          "payloadBytes": 1415,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/stress/boulder/boulder.bin",
+          "payloadBytes": 9613792,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/stress/boulder/boulder.json",
+          "payloadBytes": 3064,
+          "contentEncoding": "identity"
+        }
+      ]
+    },
+    {
+      "mode": "cluster",
+      "round": 1,
+      "payloadBytes": 17764075,
+      "loopbackFetchMs": 12.980376000086835,
+      "files": [
+        {
+          "path": "target/virtual-geometry/inputs/stress-discrete/resources/17703b501935a52a3f3e93d491ed3085021a56f2733813cb6272b0e28bd5e066.bin",
+          "payloadBytes": 8145804,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/stress-discrete/scenes/boulder/default.gltf",
+          "payloadBytes": 1415,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/stress/boulder/boulder.bin",
+          "payloadBytes": 9613792,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/stress/boulder/boulder.json",
+          "payloadBytes": 3064,
+          "contentEncoding": "identity"
+        }
+      ]
+    },
+    {
+      "mode": "discrete",
+      "round": 1,
+      "payloadBytes": 10273562,
+      "loopbackFetchMs": 13.114258000314294,
+      "files": [
+        {
+          "path": "target/virtual-geometry/inputs/stress-discrete/resources/17703b501935a52a3f3e93d491ed3085021a56f2733813cb6272b0e28bd5e066.bin",
+          "payloadBytes": 8145804,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/stress-discrete/scenes/boulder/default.gltf",
+          "payloadBytes": 1415,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/stress-discrete/scenes/boulder/lod1.bin",
+          "payloadBytes": 1572864,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/stress-discrete/scenes/boulder/lod1.gltf",
+          "payloadBytes": 1591,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/stress-discrete/scenes/boulder/lod2.bin",
+          "payloadBytes": 393216,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/stress-discrete/scenes/boulder/lod2.gltf",
+          "payloadBytes": 1588,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/stress-discrete/scenes/boulder/lod3.bin",
+          "payloadBytes": 98304,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/stress-discrete/scenes/boulder/lod3.gltf",
+          "payloadBytes": 1586,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/stress-discrete/scenes/boulder/lod4.bin",
+          "payloadBytes": 55608,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/stress-discrete/scenes/boulder/lod4.gltf",
+          "payloadBytes": 1586,
+          "contentEncoding": "identity"
+        }
+      ]
+    },
+    {
+      "mode": "source",
+      "round": 1,
+      "payloadBytes": 8147219,
+      "loopbackFetchMs": 4.928393999762193,
+      "files": [
+        {
+          "path": "target/virtual-geometry/inputs/stress-discrete/resources/17703b501935a52a3f3e93d491ed3085021a56f2733813cb6272b0e28bd5e066.bin",
+          "payloadBytes": 8145804,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/stress-discrete/scenes/boulder/default.gltf",
+          "payloadBytes": 1415,
+          "contentEncoding": "identity"
+        }
+      ]
+    },
+    {
+      "mode": "source",
+      "round": 2,
+      "payloadBytes": 8147219,
+      "loopbackFetchMs": 4.3170330000066315,
+      "files": [
+        {
+          "path": "target/virtual-geometry/inputs/stress-discrete/resources/17703b501935a52a3f3e93d491ed3085021a56f2733813cb6272b0e28bd5e066.bin",
+          "payloadBytes": 8145804,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/stress-discrete/scenes/boulder/default.gltf",
+          "payloadBytes": 1415,
+          "contentEncoding": "identity"
+        }
+      ]
+    },
+    {
+      "mode": "discrete",
+      "round": 2,
+      "payloadBytes": 10273562,
+      "loopbackFetchMs": 9.262339000088105,
+      "files": [
+        {
+          "path": "target/virtual-geometry/inputs/stress-discrete/resources/17703b501935a52a3f3e93d491ed3085021a56f2733813cb6272b0e28bd5e066.bin",
+          "payloadBytes": 8145804,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/stress-discrete/scenes/boulder/default.gltf",
+          "payloadBytes": 1415,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/stress-discrete/scenes/boulder/lod1.bin",
+          "payloadBytes": 1572864,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/stress-discrete/scenes/boulder/lod1.gltf",
+          "payloadBytes": 1591,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/stress-discrete/scenes/boulder/lod2.bin",
+          "payloadBytes": 393216,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/stress-discrete/scenes/boulder/lod2.gltf",
+          "payloadBytes": 1588,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/stress-discrete/scenes/boulder/lod3.bin",
+          "payloadBytes": 98304,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/stress-discrete/scenes/boulder/lod3.gltf",
+          "payloadBytes": 1586,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/stress-discrete/scenes/boulder/lod4.bin",
+          "payloadBytes": 55608,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/stress-discrete/scenes/boulder/lod4.gltf",
+          "payloadBytes": 1586,
+          "contentEncoding": "identity"
+        }
+      ]
+    },
+    {
+      "mode": "cluster",
+      "round": 2,
+      "payloadBytes": 17764075,
+      "loopbackFetchMs": 10.755569999673753,
+      "files": [
+        {
+          "path": "target/virtual-geometry/inputs/stress-discrete/resources/17703b501935a52a3f3e93d491ed3085021a56f2733813cb6272b0e28bd5e066.bin",
+          "payloadBytes": 8145804,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/stress-discrete/scenes/boulder/default.gltf",
+          "payloadBytes": 1415,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/stress/boulder/boulder.bin",
+          "payloadBytes": 9613792,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/stress/boulder/boulder.json",
+          "payloadBytes": 3064,
+          "contentEncoding": "identity"
+        }
+      ]
+    }
+  ]
+}
