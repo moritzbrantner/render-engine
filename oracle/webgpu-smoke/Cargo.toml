@@ -29,6 +29,9 @@ web-sys = { version = "0.3.107", features = ["console", "HtmlCanvasElement", "Pe
 image = { version = "0.25.10", default-features = false, features = ["png"] }
 nv-flip = "0.1.2"
 pollster = "1.0.1"
+# The browser showcase's shooter frames, built natively for `compare showcase` (#128).
+glam = "0.34.1"
+serde_json = "=1.0.154"
 
 [profile.release]
 lto = true

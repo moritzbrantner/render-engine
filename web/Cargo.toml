@@ -1,0 +1,54 @@
+# render-engine in the browser (#128): the canvas surface, async device creation, resize and
+# device-pixel ratio, a frame loop and device-loss recovery around the engine's own `Renderer`.
+# Its own manifest and lockfile, like `oracle/`: never a dependency or feature of `render-engine`,
+# so the native build is unchanged. Built only for `wasm32-unknown-unknown`
+# (`scripts/build-web.sh`); on any other target the library is empty.
+[workspace]
+
+[package]
+name = "render-engine-web"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "Browser (WebGPU) adapter for render-engine: canvas surface, device, frame loop"
+
+[lib]
+crate-type = ["rlib"]
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+render-engine = { path = ".." }
+# Keep in step with wgpu's: the wasm-bindgen CLI must match this version exactly.
+wasm-bindgen = "=0.2.130"
+wasm-bindgen-futures = "0.4.80"
+js-sys = "0.3.107"
+web-sys = { version = "0.3.107", features = [
+  "console",
+  "HtmlCanvasElement",
+  "Performance",
+  "Window",
+] }
+
+# The showcase page's wasm (`web/showcase/`): the shooter frames of `tests/fixtures/shooter/`,
+# built by `examples/shooter_frame/fixture.rs`, under an orbiting camera.
+[[example]]
+name = "shooter_showcase"
+path = "examples/shooter_showcase/main.rs"
+crate-type = ["cdylib"]
+
+[dev-dependencies]
+glam = "0.34.1"
+serde_json = "=1.0.154"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+
+# The shipped build: one codegen unit with LTO, and panics abort (a wasm panic
+# cannot unwind into JS anyway). `scripts/build-web.sh` runs wasm-opt on the result.
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"

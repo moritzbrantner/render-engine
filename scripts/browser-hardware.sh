@@ -3,7 +3,8 @@
 # machine with a hardware GPU, in one run: the oracle on the GPU (Bevy, native render-engine,
 # three.js, with GPU time), then in Playwright's Chromium and Firefox the engine on WebGPU against
 # them, the backend selection (WebGPU, WebGL 2 fallback, error) and the fallback's frames against
-# Bevy, and browser GPU time. Everything goes into target/browser-hardware/report.md for the PR.
+# Bevy, browser GPU time, and the showcase (scripts/web-showcase.sh). Everything goes into
+# target/browser-hardware/report.md for the PR.
 # Not part of CI. Needs what scripts/webgpu-smoke.sh needs, plus
 #   npx playwright install chromium firefox
 #
@@ -92,6 +93,10 @@ gpu_time() {
 step "Chromium: GPU and CPU time" env SMOKE_DEV=1 bash -c "$(declare -f gpu_time); out='$out'; gpu_time"
 step "Firefox: GPU and CPU time" env SMOKE_BROWSER=firefox bash -c "$(declare -f gpu_time); out='$out'; gpu_time"
 step "Native: the same protocol" oracle/webgpu-smoke/target/release/compare native "$out" sun_shadows many_instances point_spot sky_day_cycle_noon
+
+# The browser showcase (#128): its frames against native, device loss, resize, startup, and GPU,
+# prepare, encode and submit times against native, in both browsers.
+step "Showcase: shooter frames on WebGPU (Chromium, Firefox) vs native" bash scripts/web-showcase.sh
 
 echo "report: $report"
 exit "$failed"

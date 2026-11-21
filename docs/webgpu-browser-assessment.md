@@ -5,6 +5,10 @@ code can render a documented oracle fixture in Chromium WebGPU, and whether a **
 prototype** would be worth an issue. It does not replace three.js (D8), does not touch the
 mmorpg's web client and does not promise broad browser support.
 
+The prototype it scoped now exists: `render-engine-web` and its showcase page (#128, [Browser
+(WebGPU)](consumer-integration.md#browser-webgpu)), with Firefox, device loss, resize and
+`wasm-opt` measured there.
+
 ## Result: GO for a separate prototype issue, nothing beyond it
 
 **GO** for a separate, bounded prototype issue (scope at the end; not filed here). **No** change to
