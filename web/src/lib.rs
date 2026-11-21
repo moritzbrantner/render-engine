@@ -224,8 +224,14 @@ impl Gpu {
         })
     }
 
-    /// Destroys the device as a loss would. The loss is recorded first, so the loop stops drawing
-    /// to the canvas at once instead of when the browser's `lost` promise resolves.
+    /// Loses the device as a reset would. The loss is recorded at once, so the loop stops drawing
+    /// and moves to a new device; the device itself is destroyed once the canvas has presented
+    /// the last frame drawn with it (two animation frames, then the queue's submitted work).
+    ///
+    /// Headless Firefox 159 serves the page no more animation frames, its own included, if a
+    /// device is destroyed while the canvas is still presenting its last frame and the canvas
+    /// then changes (is configured for the next device): that presentation never completes
+    /// (#135; a plain JS page shows the same).
     pub fn destroy(&self) {
         self.lost
             .lock()
@@ -234,7 +240,16 @@ impl Gpu {
                 reason: wgpu::DeviceLostReason::Destroyed,
                 message: "destroyed by the page".into(),
             });
-        self.device.destroy();
+        let device = self.device.clone();
+        let queue = self.queue.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            animation_frame(PRESENT_TIMEOUT_MS).await;
+            animation_frame(PRESENT_TIMEOUT_MS).await;
+            if let Some(queue) = queue.as_webgpu() {
+                let _ = wasm_bindgen_futures::JsFuture::from(queue.on_submitted_work_done()).await;
+            }
+            device.destroy();
+        });
     }
 
     /// Set once the device is lost; a lost device's work is silently dropped.
@@ -462,9 +477,25 @@ impl<A: App> Clone for Running<A> {
 /// Times re-initialisation is tried after a loss, waiting 0.5 s × the attempt in between.
 const REINIT_ATTEMPTS: u32 = 5;
 
-/// How often the loss is checked besides every animation frame: Firefox 159 stops animation
-/// frames for a page whose WebGPU canvas lost its device, so a frame-driven check never runs.
+/// How often the loss is checked besides every animation frame: a page can stop getting animation
+/// frames when its device is lost (Firefox 159, [`Gpu::destroy`]), so a frame-driven check alone
+/// might never run.
 const WATCHDOG_MS: i32 = 250;
+
+/// How long [`Gpu::destroy`] waits for an animation frame before going on without one (a hidden
+/// page gets none, and presents nothing either).
+const PRESENT_TIMEOUT_MS: i32 = 250;
+
+/// Resolves at the next animation frame, or after `timeout_ms` if none comes first.
+async fn animation_frame(timeout_ms: i32) {
+    let promise = js_sys::Promise::new(&mut |resolve, _| {
+        if let Some(w) = web_sys::window() {
+            let _ = w.request_animation_frame(&resolve);
+            let _ = w.set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, timeout_ms);
+        }
+    });
+    let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
+}
 
 /// Creates the device on `element`, calls [`App::init`], and runs [`App::frame`] on every
 /// animation frame until [`Running::stop`]. Fails if the first device or surface cannot be

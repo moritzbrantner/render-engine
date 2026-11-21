@@ -37,6 +37,8 @@ struct Showcase {
     first_frame_at: Option<f64>,
     world_ms: f64,
     losses: u32,
+    /// Frames drawn, on every device.
+    drawn: u64,
 }
 
 struct State {
@@ -126,6 +128,7 @@ impl App for Showcase {
         }
         self.rolling
             .push_back([info.dt_ms, t1 - t0, t2 - t1, t3 - t2]);
+        self.drawn += 1;
         if self.first_frame_at.is_none() {
             self.first_frame_at = Some(now());
         }
@@ -188,6 +191,7 @@ impl ShooterShowcase {
             first_frame_at: None,
             world_ms: 0.0,
             losses: 0,
+            drawn: 0,
         };
         let running = render_engine_web::start(canvas, Options::default(), app).await?;
         Ok(ShooterShowcase { running })
@@ -249,6 +253,7 @@ impl ShooterShowcase {
                 "worldMs": app.world_ms,
                 "generation": generation,
                 "losses": app.losses,
+                "drawn": app.drawn,
             });
             if let Some((gpu, state)) = live {
                 let info = gpu.adapter.get_info();
