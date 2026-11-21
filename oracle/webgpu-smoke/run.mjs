@@ -3,7 +3,7 @@
 //
 //   node oracle/webgpu-smoke/run.mjs <out dir> <mode> <scenario> [key=value ...]
 //
-// Modes: render, present, time, particles, probe, select. Writes <out>/<scenario>.<tag>.rgba (or
+// Modes: render, present, time, particles, meshes (#116), probe, select. Writes <out>/<scenario>.<tag>.rgba (or
 // .png) and .json, where tag is webgpu (render), select.<backend> (select: select.webgpu,
 // select.webgl2 or select.null when neither started) or the mode. Set SMOKE_FALLBACK=1 for Chromium's software
 // adapter (SwiftShader), SMOKE_DEV=1 for --enable-webgpu-developer-features (unquantised

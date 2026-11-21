@@ -103,6 +103,7 @@ Evidence is what ran on the hardware adapter unless a row says otherwise.
 | Particles | Compute simulation, `draw_indirect`, flipbooks | Run; captures below. `read_alive_particles` blocks on `map_async`, so it cannot work as-is on wasm. The renderer does not need it. |
 | Skinning | Skinned pipeline variants | Created without error. **No skinned draw was run**: the oracle's skinned and textured scenarios read glTF from disk. Unverified. |
 | Shadows | Cascades, spot, point cube, PCSS | Run; `depth-clip-control` present on both adapters. |
+| Buffer uploads | Every buffer filled from data (meshes, materials, filter constants) | Created unmapped and filled with `Queue::write_buffer` (`src/upload.rs`): SwiftShader rejected `mappedAtCreation` buffers after many small allocations in a consumer (#116). `node oracle/webgpu-smoke/run.mjs <out> meshes <scenario> frames=30 meshes=150` (`SMOKE_FALLBACK=1` for SwiftShader) adds 150 small meshes after 30 frames; the mapped path did not fail in it here. |
 | Fallbacks | `DEPTH_CLIP_CONTROL`, `DUAL_SOURCE_BLENDING` optional | SwiftShader has no `dual-source-blending`; the sky pipeline used its alpha fallback there. |
 | `Culling::GpuIndirect`, `LightAssignment::Clustered` | Opt-in at the time (clustered became the default later, #94; the captures here used the per-fragment loop) | `indirect-first-instance` is present on both adapters, 4 fragment storage buffers fit, but **neither path ran in a browser**. Their diagnostic readbacks block (`gpu_culling.rs`, `clustered.rs`) and would need async versions. |
 
