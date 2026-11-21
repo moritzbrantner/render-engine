@@ -93,7 +93,7 @@ On WebGL 2 it uses the paths that exist without compute or storage buffers:
 | --- | --- |
 | Light assignment | Every point and spot light for every fragment, the engine's reference path (`LightAssignment::PerFragment`). No clustering. |
 | Culling | CPU: three.js frustum culling, plus `culling.js` per shadow view for instanced meshes. No `Culling::GpuIndirect`. |
-| Particles | **None.** The port has no particle path; [#126](https://github.com/moritzbrantner/render-engine/issues/126) covers a CPU-simulated one. |
+| Particles | CPU-simulated: `ParticleEmitter` replays the engine's emitters on the CPU and draws instanced quads (#126); every bevy_hanabi scenario passes against Bevy. Lit, fogged and soft particles are not ported ([#130](https://github.com/moritzbrantner/render-engine/issues/130)). |
 | HUD overlay | Not drawn: the web client draws its HUD in CSS (D8). |
 
 Limitations: it is a second implementation of the shading, so a shading change in the engine is
@@ -123,6 +123,28 @@ step of native and about 700 differ on shadow edges. That is the adapter, not th
 same WebGL 2 page rendered through ANGLE on SwiftShader is identical to that WebGPU frame (FLIP
 0.0000) and shows the same offset against Bevy, as #75 found for SwiftShader. On the RTX 3060 Ti,
 #75 measured WebGPU against Bevy at 0.0000 / 0.0000 on `sun_shadows`.
+
+### Particles
+
+The oracle's three.js side runs every particle scenario that has a bevy_hanabi reference with
+`ParticleEmitter`, driven as it drives render-engine, under D9's gates (lavapipe, headless
+Chromium through ANGLE on Vulkan; FLIP mean / p99, and coverage / spatial / colour distances for
+statistical captures):
+
+| Scenario | Capture | three.js vs Bevy | render-engine vs Bevy |
+| --- | --- | --- | --- |
+| `particles_fountain` | 0.5 s exact, 2.0 s statistical | 0.0000 / 0.0000; 0.000 / 0.000 / 0.000 | the same |
+| `particles_100k` | 0.75 s exact, 3.0 s statistical | 0.0001 / 0.0016; 0.000 / 0.000 / 0.000 | 0.0000 / 0.0011; 0.000 / 0.000 / 0.000 |
+| `particles_alpha` | 1.0 s, 3.0 s statistical | 0.000 / 0.009 / 0.030–0.051 (gate 0.065 / 0.07 / 0.095) | 0.000 / 0.004 / 0.034 |
+| `particles_textured` | 0.625 s exact, 2.5 s statistical | 0.0001 / 0.0017; 0.000 / 0.000 / 0.001 | 0.0000 / 0.0011; 0.000 / 0.000 / 0.000 |
+| `smoke_and_sparks` | 1.0 s, 3.0 s statistical | 0.000 / 0.002–0.005 / 0.001 | 0.000 / 0.001–0.002 / 0.000 |
+| `particles_snapshot` | 0.5 s, 1.0 s exact | 0.0000 / 0.0000 | the same |
+| `particles_cone` | 0.5 s exact, 2.5 s statistical | 0.0000 / 0.0000; 0.000 / 0.000 / 0.000 | the same |
+| `particles_lit_fog` | | not ported ([#130](https://github.com/moritzbrantner/render-engine/issues/130)) | passes |
+
+The spawn and alive counts match Bevy's on every frame of every scenario. `particles_alpha`'s
+colour distance varies between runs because Bevy's GPU decides the alpha-blended draw order
+within an emitter; the three.js side's is deterministic.
 
 ## Tests
 

@@ -111,6 +111,14 @@ function aliveChart(s) {
     <figcaption>Alive particles per frame (peak ${top}); vertical lines mark the captures. ${legend}</figcaption></figure>`;
 }
 
+// A particle capture's three.js result, when the three.js side ran it.
+function threeCapture(s, c) {
+  const t = s.three?.captures?.find(x => x.label === c.label);
+  if (!t) return '';
+  const gate = t.tier === 'exact' ? `FLIP mean ${fmt(t.flip_mean)}, p99 ${fmt(t.flip_p99)}` : `coverage ${fmt(t.stats.coverage)}, spatial ${fmt(t.stats.spatial)}, colour ${fmt(t.stats.colour)}`;
+  return ` · <a href="oracle/${esc(s.scenario)}.${esc(c.label)}.three.png">three.js</a> ${gate} ${status(t)}`;
+}
+
 function particleSection(ci) {
   const list = ci.particles || [];
   if (!list.length) return '';
@@ -119,14 +127,14 @@ function particleSection(ci) {
     : `coverage ${fmt(c.stats.coverage)}, spatial ${fmt(c.stats.spatial)}, colour ${fmt(c.stats.colour)}`;
   return `<section class="section" id="particles">
     <h2>Particles</h2>
-    <p>Bevy with <code>bevy_hanabi</code> against render-engine's emitters, both at a fixed 1/64 s timestep and a fixed seed. A capture taken before any particle dies needs an exact image match (the FLIP gate above). Later captures are compared by coverage, spatial and colour statistics. The spawn and alive counts have to match on every frame. The images are render-engine's; hover for the FLIP heat map. <a href="${REPO}/blob/main/docs/technical-decisions.md#d9--particle-parity-seeded-replay-then-statistics">Decision record</a>.</p>
+    <p>Bevy with <code>bevy_hanabi</code> against render-engine's emitters, both at a fixed 1/64 s timestep and a fixed seed. A capture taken before any particle dies needs an exact image match (the FLIP gate above). Later captures are compared by coverage, spatial and colour statistics. The spawn and alive counts have to match on every frame. The images are render-engine's; hover for the FLIP heat map. The three.js side (<code>packages/three-lighting/particles.js</code>, the WebGL 2 fallback) runs the same emitters under the same gates. <a href="${REPO}/blob/main/docs/technical-decisions.md#d9--particle-parity-seeded-replay-then-statistics">Decision record</a>.</p>
     ${list.map(s => `<div class="particle">
       <header><h3>${esc(s.scenario)}</h3>${status(s)}</header>
-      <p class="cap">${esc(s.capability)} · seed ${s.seed} · statistics gate: coverage ≤ ${g(s.stat_max.coverage)}, spatial ≤ ${g(s.stat_max.spatial)}, colour ≤ ${g(s.stat_max.colour)} · spawn and alive counts ${s.population_passed ? 'match' : 'differ'}</p>
+      <p class="cap">${esc(s.capability)} · seed ${s.seed} · statistics gate: coverage ≤ ${g(s.stat_max.coverage)}, spatial ≤ ${g(s.stat_max.spatial)}, colour ≤ ${g(s.stat_max.colour)} · spawn and alive counts ${s.population_passed ? 'match' : 'differ'} · three.js ${threeStatus(s.three)}${s.three && s.three.status !== 'passed' ? ` ${esc(threeNote(s.three))}${issueLink(s.three.issue)}` : ''}</p>
       <div class="grid">${s.captures.map(c => `<figure class="card" tabindex="0">
         <div class="thumb"><img loading="lazy" src="oracle/${esc(s.scenario)}.${esc(c.label)}.engine.png" alt="${esc(s.scenario)} at ${c.time} s, render-engine"><img class="heat" loading="lazy" src="oracle/${esc(s.scenario)}.${esc(c.label)}.flip.png" alt=""></div>
         <figcaption class="body"><div class="row"><h3>t = ${c.time.toFixed(2)} s</h3><span class="tier">${esc(c.tier)}</span>${status(c)}</div>
-        <p class="cap">${gate(c)} · ${c.alive} alive · frame ${c.frame} · <a href="oracle/${esc(s.scenario)}.${esc(c.label)}.bevy.png">Bevy image</a></p></figcaption>
+        <p class="cap">${gate(c)} · ${c.alive} alive · frame ${c.frame} · <a href="oracle/${esc(s.scenario)}.${esc(c.label)}.bevy.png">Bevy image</a>${threeCapture(s, c)}</p></figcaption>
       </figure>`).join('')}</div>
       ${aliveChart(s)}
     </div>`).join('')}

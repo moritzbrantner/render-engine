@@ -540,6 +540,23 @@ mod tests {
     }
 
     #[test]
+    fn seed_chain_vectors() {
+        // `packages/three-lighting/particles.test.js` pins the WebGL 2 port's seed chain to the
+        // same values: change both together.
+        let vectors = [
+            (0, 3_442_241_407),
+            (1, 3_543_144_545),
+            (7, 1_789_459_390),
+            (42, 572_990_626),
+            (0xdead_beef, 3_547_977_055),
+            (u32::MAX, 2_331_729_548),
+        ];
+        for (seed, next) in vectors {
+            assert_eq!(next_seed(seed), next, "next_seed({seed})");
+        }
+    }
+
+    #[test]
     fn gradients_interpolate_and_clamp() {
         let g = Gradient::new(vec![(0.0, 0.1f32), (1.0, 0.02)]);
         assert_eq!(g.sample(-1.0), Some(0.1));

@@ -24,6 +24,7 @@ import {
 import {
   Lighting,
   LitMaterial,
+  ParticleEmitter,
   loadCubemap,
   loadToneMappingLuts,
   textureFromData,
@@ -186,21 +187,25 @@ export async function renderScenario(base, timedFrames = 0) {
     colorSpace: SRGBColorSpace,
     depthBuffer: false,
   });
-  lighting.render(renderer, scene, camera, target);
   const pixels = new Uint8Array(width * height * 4);
-  renderer.readRenderTargetPixels(target, 0, 0, width, height, pixels);
-
-  // GL rows run bottom-up.
   const image = new ImageData(width, height);
-  const row = width * 4;
-  for (let y = 0; y < height; y++) {
-    image.data.set(pixels.subarray((height - 1 - y) * row, (height - y) * row), y * row);
-  }
   const png = document.createElement('canvas');
   png.width = width;
   png.height = height;
-  png.getContext('2d').putImageData(image, 0, 0);
-  const dataUrl = png.toDataURL('image/png');
+  // One frame as a base64 PNG, rows top-down (GL rows run bottom-up).
+  const capture = () => {
+    lighting.render(renderer, scene, camera, target);
+    renderer.readRenderTargetPixels(target, 0, 0, width, height, pixels);
+    const row = width * 4;
+    for (let y = 0; y < height; y++) {
+      image.data.set(pixels.subarray((height - 1 - y) * row, (height - y) * row), y * row);
+    }
+    png.getContext('2d').putImageData(image, 0, 0);
+    const dataUrl = png.toDataURL('image/png');
+    return dataUrl.slice(dataUrl.indexOf(',') + 1);
+  };
+  if (doc.particles) return { renderer: rendererName, ...runParticles(doc.particles, scene, textures, capture) };
+  const frame = capture();
 
   // Advisory GPU time: the whole Lighting.render per frame, median of timedFrames.
   let gpuMs = null;
@@ -228,5 +233,43 @@ export async function renderScenario(base, timedFrames = 0) {
     if (times.length) gpuMs = times[Math.floor(times.length / 2)];
   }
 
-  return { png: dataUrl.slice(dataUrl.indexOf(',') + 1), renderer: rendererName, gpuMs };
+  return { png: frame, renderer: rendererName, gpuMs };
+}
+
+/**
+ * A particle scenario's emitters on `particles.js`, driven as the oracle drives render-engine's
+ * (`run_engine_particles`): added inactive, stepped until Bevy's first spawn update, then each
+ * by its driver (its spawner; a burst on frame 1; consumer-fed states after every step). Returns
+ * the plate (no particles yet), the captures, and per emitter and frame the spawn and alive
+ * counts.
+ */
+function runParticles(p, scene, textures, capture) {
+  const emitters = p.emitters.map((e) => {
+    const texture = e.desc.texture && { ...e.desc.texture, texture: textures[e.desc.texture.texture] };
+    const emitter = new ParticleEmitter({ ...e.desc, texture, active: false });
+    emitter.setTransform(new Matrix4().makeTranslation(...e.translation));
+    scene.add(emitter);
+    return emitter;
+  });
+  const plate = capture();
+  for (let i = 1; i < p.firstSpawnUpdate; i++) for (const e of emitters) e.step(p.dt);
+  emitters.forEach((e, i) => e.setEmitter({ ...e.desc, active: p.emitters[i].driver === 'spawner' }));
+  const last = Math.max(...p.captures.map((c) => c.frame));
+  const spawnCounts = emitters.map(() => []);
+  const alive = emitters.map(() => []);
+  const captures = [];
+  for (let frame = 1; frame <= last; frame++) {
+    emitters.forEach((e, i) => {
+      if (p.emitters[i].driver === 'trigger' && frame === 1) e.burst(p.emitters[i].burst, e.transform);
+    });
+    for (const e of emitters) e.step(p.dt);
+    emitters.forEach((e, i) => {
+      const x = p.emitters[i];
+      if (x.driver === 'snapshot') e.setParticles(x.snapshot[frame - 1]);
+      spawnCounts[i].push(x.driver === 'snapshot' ? x.spawns[frame - 1] : e.spawnCount);
+      alive[i].push(e.aliveCount);
+    });
+    for (const c of p.captures) if (c.frame === frame) captures.push({ label: c.label, png: capture() });
+  }
+  return { plate, captures, spawnCounts, alive };
 }

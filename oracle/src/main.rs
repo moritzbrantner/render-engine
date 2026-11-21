@@ -333,6 +333,10 @@ fn population_json(s: &particles::ParticleScenario, spawns: &[Vec<u32>]) -> serd
 /// What render-engine's side of a particle scenario produced.
 struct EngineParticles {
     plate: Vec<u8>,
+    /// The emitters as render-engine got them, and the uploaded textures in asset order (the
+    /// three.js side's export).
+    descs: Vec<render_engine::particles::Emitter>,
+    textures: Vec<render_engine::world::TextureId>,
     /// `(simulation frame, RGBA8)` per capture.
     captures: Vec<(u32, Vec<u8>)>,
     /// Per emitter and simulation frame: the spawner's count and the alive particles after it.
@@ -405,6 +409,8 @@ fn run_engine_particles(
     let last = s.captures.iter().map(|c| c.frame).max().unwrap_or(0);
     let mut out = EngineParticles {
         plate,
+        descs: emitters.iter().map(|(_, d)| d.clone()).collect(),
+        textures,
         captures: Vec::new(),
         spawn_counts: vec![Vec::new(); emitters.len()],
         alive: vec![Vec::new(); emitters.len()],
@@ -460,6 +466,7 @@ fn particle_scenarios(
 ) -> (Vec<serde_json::Value>, bool) {
     let mut report = Vec::new();
     let mut failed = false;
+    let software = gpu.adapter.device_type == render_engine::wgpu::DeviceType::Cpu;
     for s in particles::all()
         .iter()
         .filter(|s| o.only.is_empty() || o.only.iter().any(|n| n == s.name))
@@ -634,6 +641,12 @@ fn particle_scenarios(
                 "passed": cmp.passed,
             }));
         }
+        let three = o
+            .three
+            .then(|| three_particles(s, &ours, &run, &o.out, software));
+        if let Some(t) = &three {
+            failed |= t["blocking"].as_bool().unwrap_or(false);
+        }
         let passed = images_ok && population_ok && !timing_missing && !(slow && gate_timing);
         failed |= !passed;
         let result = if !images_ok {
@@ -675,9 +688,177 @@ fn particle_scenarios(
             "bevy_spans": run.spans,
             "result": result,
             "passed": passed,
+            "three": three,
         }));
     }
     (report, failed)
+}
+
+/// The three.js side of a particle scenario (`packages/three-lighting/particles.js`, #126): the
+/// emitters render-engine ran, simulated and drawn on WebGL 2, judged against Bevy like
+/// render-engine (each capture by its tier, every frame by the spawn and alive counts). Prints a
+/// line per capture; `blocking` when it fails and is not a known gap (`three_side::GAPS`).
+fn three_particles(
+    s: &particles::ParticleScenario,
+    ours: &EngineParticles,
+    run: &bevy_side::ParticleRun,
+    out: &std::path::Path,
+    software: bool,
+) -> serde_json::Value {
+    use serde_json::json;
+    let print = |label: &str, flip: Option<(f32, f32)>, result: &str| {
+        let f = |v: Option<f32>| v.map_or("-".to_string(), |v| format!("{v:.4}"));
+        println!(
+            "{:<24} {:<20} {:>9} {:>9}  three.js: {result}",
+            label,
+            "",
+            f(flip.map(|f| f.0)),
+            f(flip.map(|f| f.1))
+        );
+    };
+    if let Some(reason) = three_side::particles_unsupported(s) {
+        let issue = three_side::unported_issue(reason);
+        print(
+            "",
+            None,
+            &format!("not ported ({reason}, #{})", issue.unwrap_or(0)),
+        );
+        return json!({
+            "status": "unported",
+            "reason": reason,
+            "issue": issue,
+            "result": format!("not ported ({reason})"),
+            "passed": false,
+            "blocking": false,
+        });
+    }
+    let gap = three_side::gap_issue(s.name);
+    let fail = |result: String| {
+        print("", None, &result);
+        json!({
+            "status": if gap.is_some() { "gap" } else { "failed" },
+            "issue": gap,
+            "result": result,
+            "passed": false,
+            "blocking": gap.is_none(),
+        })
+    };
+    if let Err(e) = three_side::export_particles(
+        s,
+        &ours.descs,
+        &ours.textures,
+        run.first_spawn_update,
+        &run.spawns,
+        out,
+    ) {
+        return fail(format!("export failed: {e}"));
+    }
+    if let Err(e) = three_side::render(&[s.name], out, software, 0) {
+        let err =
+            std::fs::read_to_string(out.join(format!("{}.three.err", s.name))).unwrap_or_default();
+        return fail(format!(
+            "NOT RENDERED ({e}) {}",
+            err.lines().next().unwrap_or_default()
+        ));
+    }
+    let read = |stem: &str| {
+        image::open(out.join(format!("{stem}.three.png")))
+            .ok()
+            .map(|i| i.to_rgba8().into_raw())
+    };
+    let Some(plate) = read(&format!("{}.plate", s.name)) else {
+        return fail("no plate".into());
+    };
+    let meta: serde_json::Value =
+        std::fs::read_to_string(out.join(format!("{}.three.meta.json", s.name)))
+            .ok()
+            .and_then(|m| serde_json::from_str(&m).ok())
+            .unwrap_or_default();
+    let counts =
+        |key: &str| -> Option<Vec<Vec<u32>>> { serde_json::from_value(meta[key].clone()).ok() };
+    let population_ok = match (counts("spawnCounts"), counts("alive")) {
+        (Some(spawned), Some(alive)) => s.emitters.iter().enumerate().all(|(i, e)| {
+            let expected: Vec<u32> = particles::population(&run.spawns[i], e.lifetime, e.capacity)
+                .iter()
+                .map(|p| p.alive)
+                .collect();
+            spawned.get(i) == Some(&run.spawns[i]) && alive.get(i) == Some(&expected)
+        }),
+        _ => false,
+    };
+    let mut captures = Vec::new();
+    let mut images_ok = true;
+    for c in &s.captures {
+        let stem = format!("{}.{}", s.name, c.label());
+        let (Some((_, bevy)), Some(three)) = (
+            run.captures.iter().find(|(f, _)| *f == c.frame),
+            read(&stem),
+        ) else {
+            images_ok = false;
+            print(&format!("{}@{}", s.name, c.label()), None, "NOT RENDERED");
+            continue;
+        };
+        let cmp = compare_particles(
+            s,
+            c.tier,
+            (run.plate.as_deref().unwrap_or_default(), bevy),
+            (&plate, &three),
+        );
+        images_ok &= cmp.passed;
+        if let Err(e) = save_png(
+            &out.join(format!("{stem}.three.flip.png")),
+            s.width,
+            s.height,
+            &cmp.flip.heatmap,
+        ) {
+            eprintln!("cannot write {stem}.three.flip.png: {e}");
+        }
+        let result = if cmp.passed {
+            "ok".to_string()
+        } else {
+            match c.tier {
+                particles::Tier::Exact => "IMAGE DIFFERS".to_string(),
+                particles::Tier::Statistical => "STATISTICS DIFFER".to_string(),
+            }
+        };
+        print(
+            &format!("{}@{}", s.name, c.label()),
+            Some((cmp.flip.mean, cmp.flip.p99)),
+            &format!(
+                "{result}; {} tier, stats {:.3}/{:.3}/{:.3}",
+                c.tier.id(),
+                cmp.stats.coverage,
+                cmp.stats.spatial,
+                cmp.stats.colour
+            ),
+        );
+        captures.push(json!({
+            "label": c.label(),
+            "tier": c.tier.id(),
+            "flip_mean": cmp.flip.mean,
+            "flip_p99": cmp.flip.p99,
+            "stats": {
+                "coverage": cmp.stats.coverage,
+                "spatial": cmp.stats.spatial,
+                "colour": cmp.stats.colour,
+            },
+            "passed": cmp.passed,
+        }));
+    }
+    if !population_ok {
+        print("", None, "POPULATION DIFFERS (spawn or alive counts)");
+    }
+    let ok = images_ok && population_ok;
+    json!({
+        "status": if ok { "passed" } else if gap.is_some() { "gap" } else { "failed" },
+        "captures": captures,
+        "population_passed": population_ok,
+        "renderer": meta["renderer"],
+        "issue": gap,
+        "result": if ok { "ok".to_string() } else if !images_ok { "image or statistics gate failed".to_string() } else { "spawn or alive counts differ from Bevy".to_string() },
+        "passed": ok,
+        "blocking": !ok && gap.is_none(),
+    })
 }
 
 /// Other seeds `--calibrate` compares each particle scenario against.

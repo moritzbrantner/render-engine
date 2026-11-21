@@ -10,12 +10,15 @@
 //! Scenarios that use something the port does not cover yet are not exported; the reason is
 //! reported as a known gap with its follow-up issue (`GAPS`).
 
-use crate::content::Geometry;
+use crate::content::{Assets, Geometry, MeshInstance};
+use crate::particles::{Driver, ParticleScenario, Reference, Spawn};
 use crate::scenarios::Scenario;
 use render_engine::material::AlphaMode;
 use render_engine::mesh::MeshData;
-use render_engine::scene::{FogFalloff, LightShadows, ShadowFilter, Tonemapping};
+use render_engine::particles;
+use render_engine::scene::{FogFalloff, LightShadows, Scene, ShadowFilter, Tonemapping};
 use render_engine::wgpu;
+use render_engine::world::TextureId;
 use serde_json::{Value, json};
 use std::{collections::HashMap, path::Path};
 
@@ -24,7 +27,7 @@ use std::{collections::HashMap, path::Path};
 pub const GAPS: &[(&str, u32)] = &[];
 
 /// Follow-up issue per capability the port does not cover yet.
-const UNPORTED_ISSUE: &[(&str, u32)] = &[];
+const UNPORTED_ISSUE: &[(&str, u32)] = &[("lit and fogged particles", 130)];
 
 pub fn gap_issue(name: &str) -> Option<u32> {
     GAPS.iter().find(|(n, _)| *n == name).map(|(_, i)| *i)
@@ -57,6 +60,26 @@ fn v4(v: render_engine::glam::Vec4) -> Value {
 
 /// Writes `<name>.three.json` and `<name>.three.bin` into `dir`.
 pub fn export(s: &Scenario, dir: &Path) -> Result<(), String> {
+    let (doc, bin) = scene_document(s.name, s.width, s.height, &s.scene, &s.objects, &s.assets);
+    write(s.name, &doc, &bin, dir)
+}
+
+fn write(name: &str, doc: &Value, bin: &[u8], dir: &Path) -> Result<(), String> {
+    std::fs::write(dir.join(format!("{name}.three.json")), doc.to_string())
+        .map_err(|e| e.to_string())?;
+    std::fs::write(dir.join(format!("{name}.three.bin")), bin).map_err(|e| e.to_string())
+}
+
+/// A scene as the three.js side builds it (`oracle/three/scene.js`): its JSON document and the
+/// binary data the document points into.
+fn scene_document(
+    name: &str,
+    width: u32,
+    height: u32,
+    scene: &Scene,
+    scene_objects: &[MeshInstance],
+    assets: &Assets,
+) -> (Value, Vec<u8>) {
     let mut bin: Vec<u8> = Vec::new();
     let push_f32 = |bin: &mut Vec<u8>, data: &[f32]| {
         let offset = bin.len();
@@ -102,8 +125,7 @@ pub fn export(s: &Scenario, dir: &Path) -> Result<(), String> {
     };
     // Texels as uploaded (RGBA8, every mip level); 4-byte multiples, so the f32 data that
     // follows stays aligned.
-    let textures: Vec<Value> = s
-        .assets
+    let textures: Vec<Value> = assets
         .textures
         .iter()
         .map(|t| {
@@ -148,8 +170,7 @@ pub fn export(s: &Scenario, dir: &Path) -> Result<(), String> {
     let mats = |m: &[render_engine::glam::Mat4]| -> Vec<f32> {
         m.iter().flat_map(|m| m.to_cols_array()).collect()
     };
-    let skins: Vec<Value> = s
-        .assets
+    let skins: Vec<Value> = assets
         .skins
         .iter()
         .map(|skin| {
@@ -160,7 +181,7 @@ pub fn export(s: &Scenario, dir: &Path) -> Result<(), String> {
         })
         .collect();
     let mut objects = Vec::new();
-    for o in &s.objects {
+    for o in scene_objects {
         let mesh = match o.geometry {
             Geometry::Shape(shape) => {
                 let key = format!("{shape:?}");
@@ -178,7 +199,7 @@ pub fn export(s: &Scenario, dir: &Path) -> Result<(), String> {
                 match shapes.get(&key) {
                     Some(&j) => j,
                     None => {
-                        meshes.push(add_mesh(&mut bin, &s.assets.meshes[i]));
+                        meshes.push(add_mesh(&mut bin, &assets.meshes[i]));
                         shapes.insert(key, meshes.len() - 1);
                         meshes.len() - 1
                     }
@@ -217,7 +238,6 @@ pub fn export(s: &Scenario, dir: &Path) -> Result<(), String> {
         }));
     }
 
-    let scene = &s.scene;
     let cam = &scene.camera;
     let sun = scene.sun.map(|sun| {
         json!({
@@ -328,9 +348,9 @@ pub fn export(s: &Scenario, dir: &Path) -> Result<(), String> {
         })
     });
     let doc = json!({
-        "name": s.name,
-        "width": s.width,
-        "height": s.height,
+        "name": name,
+        "width": width,
+        "height": height,
         "camera": {
             "eye": v3(cam.eye),
             "target": v3(cam.target),
@@ -363,9 +383,7 @@ pub fn export(s: &Scenario, dir: &Path) -> Result<(), String> {
         "skins": skins,
         "objects": objects,
     });
-    std::fs::write(dir.join(format!("{}.three.json", s.name)), doc.to_string())
-        .map_err(|e| e.to_string())?;
-    std::fs::write(dir.join(format!("{}.three.bin", s.name)), bin).map_err(|e| e.to_string())
+    (doc, bin)
 }
 
 /// Renders the exported scenarios in headless Chromium (`oracle/three/render.mjs`, WebGL through
@@ -407,4 +425,188 @@ fn lavapipe_icd() -> Result<std::path::PathBuf, String> {
                 .is_some_and(|n| n.starts_with("lvp_icd") && n.ends_with(".json"))
         })
         .ok_or_else(|| format!("no lavapipe ICD in {}", dir.display()))
+}
+
+/// A [`particles::Value`] as `packages/three-lighting/particles.js` takes it: the constant, or
+/// `{min, max}`.
+fn value<T: Copy>(v: particles::Value<T>, f: impl Fn(T) -> Value) -> Value {
+    match v {
+        particles::Value::Const(c) => f(c),
+        particles::Value::Uniform { min, max } => json!({ "min": f(min), "max": f(max) }),
+    }
+}
+
+/// render-engine's emitter description in the shape of `particles.js`' `emitterDescription`,
+/// its texture as an index into the exported textures (`textures` are the uploaded ids, in
+/// asset order).
+fn emitter_json(d: &particles::Emitter, textures: &[TextureId]) -> Value {
+    use particles::InitModifier as M;
+    let num = |v: f32| json!(v);
+    let init: Vec<Value> = d
+        .init
+        .iter()
+        .map(|m| match *m {
+            M::PositionSphere {
+                center,
+                radius,
+                dimension,
+            } => json!({
+                "kind": "positionSphere",
+                "center": v3(center),
+                "radius": radius,
+                "dimension": match dimension {
+                    particles::ShapeDimension::Volume => "volume",
+                    particles::ShapeDimension::Surface => "surface",
+                },
+            }),
+            M::Position(v) => json!({ "kind": "position", "value": value(v, v3) }),
+            M::VelocitySphere { center, speed } => json!({
+                "kind": "velocitySphere",
+                "center": v3(center),
+                "speed": value(speed, num),
+            }),
+            M::Velocity(v) => json!({ "kind": "velocity", "value": value(v, v3) }),
+            M::VelocityCone {
+                direction,
+                spread,
+                speed,
+            } => json!({
+                "kind": "velocityCone",
+                "direction": v3(direction),
+                "spread": spread,
+                "speed": value(speed, num),
+            }),
+            M::Lifetime(v) => json!({ "kind": "lifetime", "value": value(v, num) }),
+            M::Age(v) => json!({ "kind": "age", "value": value(v, num) }),
+            M::Size(v) => json!({ "kind": "size", "value": value(v, num) }),
+            M::Color(v) => json!({ "kind": "color", "value": value(v, v4) }),
+        })
+        .collect();
+    let gradient = |keys: Vec<(f32, Value)>| -> Value {
+        keys.into_iter().map(|(t, v)| json!([t, v])).collect()
+    };
+    json!({
+        "capacity": d.capacity,
+        "spawner": {
+            "count": d.spawner.count,
+            "spawnDuration": d.spawner.spawn_duration,
+            "period": d.spawner.period,
+            "cycles": d.spawner.cycles,
+        },
+        "seed": d.seed,
+        "init": init,
+        "accel": v3(d.accel),
+        "sizeOverLife": d.size_over_life.as_ref().map(|g| {
+            gradient(g.keys.iter().map(|&(t, v)| (t, json!([v.x, v.y]))).collect())
+        }),
+        "colorOverLife": d.color_over_life.as_ref().map(|c| json!({
+            "gradient": gradient(c.gradient.keys.iter().map(|&(t, v)| (t, v4(v))).collect()),
+            "blend": match c.blend {
+                particles::ColorBlend::Overwrite => "overwrite",
+                particles::ColorBlend::Multiply => "multiply",
+                particles::ColorBlend::Add => "add",
+            },
+        })),
+        "orient": match d.orient {
+            particles::Orient::CameraPlane => "cameraPlane",
+            particles::Orient::AlongVelocity => "alongVelocity",
+        },
+        "texture": d.texture.map(|t| json!({
+            "texture": textures.iter().position(|&id| id == t.texture),
+            "mapping": match t.mapping {
+                particles::TextureMapping::Modulate => "modulate",
+                particles::TextureMapping::ModulateRgb => "modulateRgb",
+                particles::TextureMapping::ModulateOpacityFromR => "modulateOpacityFromR",
+            },
+            "flipbook": t.flipbook.map(|f| json!({ "grid": [f.grid.x, f.grid.y], "frames": f.frames })),
+        })),
+        "roundness": d.roundness,
+        "depthFade": d.depth_fade,
+        "lighting": d.lighting.map(|l| json!({
+            "perceptualRoughness": l.perceptual_roughness,
+            "metallic": l.metallic,
+            "reflectance": l.reflectance,
+        })),
+        "fog": d.fog,
+        "blend": match d.blend {
+            particles::ParticleBlend::Add => "add",
+            particles::ParticleBlend::Alpha => "alpha",
+        },
+        "active": d.active,
+    })
+}
+
+/// Writes a particle scenario for the three.js side: its scene, and under `particles` what
+/// `run_engine_particles` does with it: the emitters (`descs`, render-engine's descriptions,
+/// added inactive), their drivers and translations, Bevy's first spawn update and spawn counts,
+/// the capture frames, and per consumer-fed emitter the states it is handed after every step.
+pub fn export_particles(
+    s: &ParticleScenario,
+    descs: &[particles::Emitter],
+    textures: &[TextureId],
+    first_spawn_update: u32,
+    spawns: &[Vec<u32>],
+    dir: &Path,
+) -> Result<(), String> {
+    let (mut doc, bin) = scene_document(s.name, s.width, s.height, &s.scene, &s.objects, &s.assets);
+    let last = s.captures.iter().map(|c| c.frame).max().unwrap_or(0);
+    let emitters: Vec<Value> = s
+        .emitters
+        .iter()
+        .zip(descs)
+        .enumerate()
+        .map(|(i, (e, desc))| {
+            // The effect seed of frame 1, where a snapshot's replay starts.
+            let first_seed = (1..first_spawn_update)
+                .fold(s.seed.wrapping_add(i as u32), |seed, _| {
+                    particles::next_seed(seed)
+                });
+            let snapshot = (e.driver == Driver::Snapshot).then(|| {
+                (1..=last)
+                    .map(|frame| {
+                        e.replay(first_seed, &spawns[i], frame)
+                            .iter()
+                            .map(|p| {
+                                json!({
+                                    "position": v3(p.position),
+                                    "velocity": v3(p.velocity),
+                                    "age": p.age,
+                                    "lifetime": p.lifetime,
+                                    "size": p.size,
+                                    "color": v4(p.color),
+                                })
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .collect::<Vec<_>>()
+            });
+            json!({
+                "desc": emitter_json(desc, textures),
+                "translation": v3(e.translation),
+                "driver": match e.driver {
+                    Driver::Spawner => "spawner",
+                    Driver::Trigger => "trigger",
+                    Driver::Snapshot => "snapshot",
+                },
+                "burst": match e.spawn {
+                    Spawn::Burst { count } => count,
+                    Spawn::Rate { .. } => 0,
+                },
+                "spawns": spawns[i],
+                "snapshot": snapshot,
+            })
+        })
+        .collect();
+    doc["particles"] = json!({
+        "dt": crate::particles::DT,
+        "firstSpawnUpdate": first_spawn_update,
+        "captures": s.captures.iter().map(|c| json!({ "frame": c.frame, "label": c.label() })).collect::<Vec<_>>(),
+        "emitters": emitters,
+    });
+    write(s.name, &doc, &bin, dir)
+}
+
+/// Why a particle scenario has no three.js side yet, with its follow-up issue.
+pub fn particles_unsupported(s: &ParticleScenario) -> Option<&'static str> {
+    (s.reference == Reference::StandardQuads).then_some("lit and fogged particles")
 }
