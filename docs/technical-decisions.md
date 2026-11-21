@@ -379,7 +379,8 @@ As built (#11):
   lighting scenarios (the glTF props and skinned figure fetched by the page included) against
   Bevy with D3's thresholds, three of them again with `Culling::GpuIndirect` (their per-view
   counts must equal native's), the D9 particle scenarios by their tiers and spawn and alive
-  counts, and soft particles against native render-engine (no Bevy counterpart yet).
+  counts (`particles_soft`, soft particles against Bevy's `StandardMaterial` quads, included), and
+  two more particle scenarios with every emitter soft against native render-engine.
   `scripts/browser-gate.sh` runs it; the CI job `browser` runs it in Playwright's Firefox against
   the oracle slices' images and is required by `merge-ready`. Why Firefox: its WebGPU is wgpu on
   Vulkan, so on a runner it gets lavapipe, the device Bevy and native render-engine run on there.

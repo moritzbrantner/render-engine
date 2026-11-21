@@ -27,8 +27,8 @@ mapfile -t particles < <($compare list particles -)
 # GPU culling on the culling scenario, the 64-light hall and the glTF props (blended and
 # CPU-tested instances beside GPU-culled ones).
 gpu_culled=(many_instances many_lights textured_props)
-# Soft particles over the lit set's ground and boxes. No D9 scenario is soft yet; one is
-# (`particles_soft`) when it is, through the particle step.
+# Soft particles against Bevy are `particles_soft` (a D9 scenario, the particle step); these run
+# two more scenarios with every emitter soft, against native render-engine.
 soft=(particles_textured smoke_and_sparks)
 failed=0
 

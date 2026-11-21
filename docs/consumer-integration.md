@@ -709,7 +709,8 @@ to wasm32 (`oracle/webgpu-smoke/`) in a browser and judges them against a full o
 images: every lighting scenario against Bevy with D3's gates, `many_instances`, `many_lights` and
 `textured_props` again with `Culling::GpuIndirect` and the clustered diagnostic (the browser's
 per-view culled counts must equal native's), every D9 particle scenario by its tier and its spawn
-and alive counts (read with the async `read_alive_particles` each frame), and
+and alive counts (read with the async `read_alive_particles` each frame; `particles_soft` tests soft
+particles against Bevy), and
 `particles_textured` and `smoke_and_sparks` with every emitter soft (`depth_fade` 0.5 m) against
 the same run natively. CI's `browser` job runs it in Playwright's Firefox on lavapipe; Chromium's
 software adapter (SwiftShader) cannot be compared with Bevy on lavapipe (D8).
@@ -729,7 +730,7 @@ that differ from native render-engine on the same device:
 | `many_lights`, `Culling::GpuIndirect` | 0.0000 / 0.0004, 0 px | 0.0000 / 0.0004, 0 px | 0.0000 / 0.0002, 0 px |
 | `textured_props`, `Culling::GpuIndirect` | 0.0000 / 0.0007, 0 px | 0.0000 / 0.0007, 0 px | 0.0000 / 0.0005, 0 px |
 | Every other lighting scenario (24) | ≤ 0.0009 / ≤ 0.0143 (the sky views; native: ≤ 0.0001 / ≤ 0.0034) | ≤ 0.0001 / ≤ 0.0034 | ≤ 0.0001 / ≤ 0.0022 |
-| D9 particle captures (16, 8 scenarios) | all pass their tier; counts equal Bevy's | same | same |
+| D9 particle captures (18, 9 scenarios, `particles_soft` included) | all pass their tier; counts equal Bevy's; `particles_soft` 0.0000 / 0.0006, byte-identical to native | same | same; `particles_soft` 0.0000 / 0.0000, byte-identical |
 | Soft particles vs native (4 captures) | ≤ 0.0013 / ≤ 0.0308 | ≤ 0.0013 / ≤ 0.0290 | ≤ 0.0013 / ≤ 0.0338 |
 
 - The GPU-culled instance counts per view equal native's in every case. The clustered
