@@ -34,9 +34,9 @@ const cases = [
     expect: (r) => r.backend === 'webgpu' && r.attempts.length === 0 && r.width === 1280,
   },
   {
-    name: 'WebGPU initialisation fails (glTF scene in wasm): falls back to WebGL 2',
+    name: 'WebGPU initialisation fails (glTF files withheld from the wasm): falls back to WebGL 2',
     skip: process.env.SKIP_WEBGPU === '1',
-    run: () => select('textured_props', {}),
+    run: () => select('textured_props', {}, 'assets=0'),
     expect: (r) => r.backend === 'webgl2' && r.attempts[0]?.backend === 'webgpu' && r.attempts[0].reason.startsWith('initialisation failed'),
   },
   {

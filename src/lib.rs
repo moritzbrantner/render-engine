@@ -53,6 +53,7 @@ pub mod mesh;
 mod particle_pass;
 mod particle_sim;
 pub mod particles;
+mod readback;
 pub mod renderer;
 pub mod scene;
 mod sky;

@@ -146,27 +146,19 @@ impl Renderer {
     }
 
     /// With [`ClusterConfig::diagnostic`]: the summed `(shaded fragments, lights they looped
-    /// over)` since the last [`Renderer::prepare`]. Reads back and waits: for tools only.
-    pub fn read_cluster_diagnostic(&self, viewport: &Viewport) -> Option<(u64, u64)> {
+    /// over)` since the last [`Renderer::prepare`]. Reads back: for tools only. Natively the
+    /// future completes on its first poll (`pollster::block_on`); in the browser, once the GPU
+    /// has written the counters.
+    pub async fn read_cluster_diagnostic(&self, viewport: &Viewport) -> Option<(u64, u64)> {
         let buffer = viewport.clustered.as_ref()?.diagnostic.as_ref()?;
-        let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("cluster diagnostic readback"),
-            size: 8,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let mut encoder = self.device.create_command_encoder(&Default::default());
-        encoder.copy_buffer_to_buffer(buffer, 0, &staging, 0, 8);
-        self.queue.submit([encoder.finish()]);
-        let slice = staging.slice(..);
-        let (tx, rx) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |r| {
-            let _ = tx.send(r);
-        });
-        let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
-        rx.recv().ok()?.ok()?;
-        let bytes = slice.get_mapped_range().expect("mapped").to_vec();
-        staging.unmap();
+        let bytes = crate::readback::read_buffer(
+            &self.device,
+            &self.queue,
+            buffer,
+            8,
+            "cluster diagnostic readback",
+        )
+        .await?;
         let counts: &[u32] = bytemuck::cast_slice(&bytes);
         Some((u64::from(counts[0]), u64::from(counts[1])))
     }

@@ -318,7 +318,7 @@ pub(crate) fn timed_run(
 
     // Per-view instance counts: the GPU path reads back the last frame, the CPU path's are in
     // `work`.
-    let kept_per_view = renderer.read_gpu_culled(&viewport).unwrap_or_default();
+    let kept_per_view = pollster::block_on(renderer.read_gpu_culled(&viewport)).unwrap_or_default();
     Ok(Round {
         prepare_ms: median(prepare_ms),
         encode_ms: median(encode_ms),
@@ -409,7 +409,7 @@ fn compare_frame(
         )?;
     }
     let renderer = gpu.renderer();
-    let counts = renderer.read_gpu_culled(gpu_view);
+    let counts = pollster::block_on(renderer.read_gpu_culled(gpu_view));
     let gpu_work = gpu_view.work();
     let cpu_work = cpu_view.work();
     let kept_gpu = counts

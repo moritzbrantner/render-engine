@@ -10,7 +10,7 @@ use render_engine::scene::{
     OverlayQuad, PointLight, RAW_SUNLIGHT, Scene, ShadowFilter, ShadowMapSizes, Sky, SpotLight,
     Sun, SunShadows, Tonemapping,
 };
-use std::{path::Path, sync::Arc};
+use std::sync::Arc;
 
 pub struct Scenario {
     pub name: &'static str,
@@ -128,7 +128,7 @@ pub fn all() -> Vec<Scenario> {
 /// point and two spot shadow casters) over 121 pillars and 400 props, viewed down the hall, so
 /// the cluster lists differ across the screen and through the depth slices and many lights end
 /// in plain view.
-fn many_lights() -> Scenario {
+pub fn many_lights() -> Scenario {
     let mut s = crate::forward_plus_scenes::dungeon("many_lights", 64, 4, 1280, 720);
     s.capability = "64 point + spot lights, clustered assignment (Forward+)";
     s
@@ -139,17 +139,17 @@ fn many_lights() -> Scenario {
 /// one bent forward, head and torso turned, one knee raised. Two copies share the mesh with
 /// different skins, one of them mirrored, over a ground that catches both shadows; sun and
 /// IBL as in `textured_props`.
-fn skinned_figure() -> Scenario {
+pub fn skinned_figure() -> Scenario {
     let mut assets = Assets::default();
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../assets/figure/Superhero_Male.gltf");
-    let prims = assets.load_gltf(&path);
+    let path = "figure/Superhero_Male.gltf";
+    let prims = assets.load_gltf(path);
     let deg = |d: f32| d.to_radians();
     let x = |d| Quat::from_rotation_x(deg(d));
     let y = |d| Quat::from_rotation_y(deg(d));
     let z = |d| Quat::from_rotation_z(deg(d));
     let poses = [
         assets.load_skin(
-            &path,
+            path,
             &[
                 ("upperarm_l", z(-60.0)),
                 ("upperarm_r", z(55.0) * y(-40.0)),
@@ -161,7 +161,7 @@ fn skinned_figure() -> Scenario {
             ],
         ),
         assets.load_skin(
-            &path,
+            path,
             &[
                 ("upperarm_l", z(-70.0)),
                 ("upperarm_r", z(70.0)),
@@ -312,7 +312,7 @@ pub fn sky_day_cycle() -> [Scenario; 4] {
 /// trim sheet, a crate in wood and metal, two alpha-masked, double-sided bushes (one mirrored)
 /// and a blended glass ball, under a cascaded sun and the Tiergarten environment map. The crate
 /// appears twice from one mesh upload.
-fn textured_props() -> Scenario {
+pub fn textured_props() -> Scenario {
     let mut assets = Assets::default();
     let mut objects = vec![MeshInstance::new(
         Shape::Plane(Vec2::splat(10.0)),
@@ -323,7 +323,6 @@ fn textured_props() -> Scenario {
             ..Material::default()
         },
     )];
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../assets/props");
     let placements: [(&str, Vec3, f32, Vec3); 6] = [
         ("Anvil.gltf", Vec3::new(-1.1, 0.0, 0.5), 25.0, Vec3::ONE),
         (
@@ -361,7 +360,7 @@ fn textured_props() -> Scenario {
     let mut loaded: Vec<(&str, Vec<crate::content::Primitive>)> = Vec::new();
     for (file, translation, yaw, scale) in placements {
         if !loaded.iter().any(|(f, _)| *f == file) {
-            let prims = assets.load_gltf(&dir.join(file));
+            let prims = assets.load_gltf(&format!("props/{file}"));
             loaded.push((file, prims));
         }
         let (_, prims) = loaded.iter().find(|(f, _)| *f == file).unwrap();

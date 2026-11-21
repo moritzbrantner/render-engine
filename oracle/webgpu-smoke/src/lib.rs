@@ -1,6 +1,7 @@
-//! A wasm32 smoke of render-engine in Chromium WebGPU (`docs/webgpu-browser-assessment.md`, #75):
-//! the oracle's scenario content, the engine's own `Renderer`, nothing else. It compiles the
-//! oracle's `content.rs`, `scenarios.rs` and `particles.rs` by path instead of copying a scene.
+//! A wasm32 smoke of render-engine in a browser's WebGPU (`docs/webgpu-browser-assessment.md`,
+//! #75, #129): the oracle's scenario content, the engine's own `Renderer`, nothing else. It
+//! compiles the oracle's `content.rs`, `scenarios.rs` and `particles.rs` by path instead of
+//! copying a scene; the page fetches the glTF files they read ([`provide_asset`]).
 #![cfg(target_arch = "wasm32")]
 
 #[allow(dead_code)]
@@ -16,12 +17,13 @@ mod particles;
 #[path = "../../src/scenarios.rs"]
 mod scenarios;
 
+mod particle_run;
 mod scenario_list;
 
 use js_sys::{Function, Promise};
 use render_engine::{
     headless::COLOR_FORMAT,
-    renderer::{FrameTimestamps, Renderer, Viewport},
+    renderer::{ClusterConfig, Culling, FrameTimestamps, LightAssignment, Renderer, Viewport},
     scene::Scene,
     wgpu,
     world::{Instance, World},
@@ -292,6 +294,14 @@ impl Smoke {
     }
 
     fn load(&self, name: &str) -> Result<Loaded, JsValue> {
+        if let Some(missing) = scenario_list::files(name)
+            .into_iter()
+            .find(|f| !content::asset_provided(f))
+        {
+            return Err(err(format!(
+                "assets/{missing} was not provided by the page"
+            )));
+        }
         let s = scenario_list::find(name).ok_or_else(|| err(format!("no scenario {name}")))?;
         let start = now();
         let (world, instances, _) = content::upload(&self.renderer, &s.assets, &s.objects);
@@ -325,35 +335,86 @@ impl Smoke {
     }
 
     /// One frame to RGBA8 (the path `Headless::render` takes). JSON stages plus the pixels.
-    pub async fn render(&self, name: &str) -> Result<Rendered, JsValue> {
+    /// `culling` is `cpu` (the default) or `gpu` (`Culling::GpuIndirect`); `lights` is
+    /// `clustered` (the default), `per-fragment` or `diagnostic` (clustered with its counters).
+    /// The GPU path's per-view instance counts and the clustered counters are read back with
+    /// the engine's async readbacks into `Rendered::diagnostics`.
+    pub async fn render(
+        &self,
+        name: &str,
+        culling: &str,
+        lights: &str,
+    ) -> Result<Rendered, JsValue> {
         let mut l = self.load(name)?;
+        match culling {
+            "" | "cpu" => {}
+            "gpu" => l
+                .viewport
+                .set_culling(&self.renderer, Culling::GpuIndirect)
+                .map_err(err)?,
+            c => return Err(err(format!("culling={c}: cpu or gpu"))),
+        }
+        let assignment = match lights {
+            "" | "clustered" => LightAssignment::default(),
+            "per-fragment" => LightAssignment::PerFragment,
+            "diagnostic" => LightAssignment::Clustered(ClusterConfig {
+                diagnostic: true,
+                ..ClusterConfig::default()
+            }),
+            a => {
+                return Err(err(format!(
+                    "lights={a}: clustered, per-fragment or diagnostic"
+                )));
+            }
+        };
+        l.viewport
+            .set_light_assignment(&self.renderer, assignment)
+            .map_err(err)?;
         let t0 = now();
         self.renderer
             .prepare(&mut l.viewport, &l.world, &l.scene, &l.instances);
         let prepare_ms = now() - t0;
         let rgba = self.capture(&mut l).await?;
+        let culled = self.renderer.read_gpu_culled(&l.viewport).await;
+        let cluster = self.renderer.read_cluster_diagnostic(&l.viewport).await;
+        let work = l.viewport.work();
         Ok(Rendered {
             rgba,
             width: l.width,
             height: l.height,
             upload_ms: l.upload_ms,
             prepare_ms,
+            diagnostics: format!(
+                r#"{{"culling":"{:?}","lightAssignment":"{:?}","cpuVisible":{},"cpuShadowVisible":{},"gpuCulledPerView":{},"clusterFragmentsLights":{}}}"#,
+                l.viewport.culling(),
+                l.viewport.light_assignment(),
+                work.visible,
+                work.shadow_visible,
+                culled.map_or("null".into(), |c| format!("{c:?}")),
+                cluster.map_or("null".into(), |(f, n)| format!("[{f},{n}]")),
+            ),
         })
     }
 
     async fn capture(&self, l: &mut Loaded) -> Result<Vec<u8>, JsValue> {
-        let target = self.target(l.width, l.height);
+        self.capture_frame(&l.viewport, &l.world).await
+    }
+
+    /// Encodes the prepared `viewport` into an offscreen target and reads it back as RGBA8.
+    async fn capture_frame(&self, viewport: &Viewport, world: &World) -> Result<Vec<u8>, JsValue> {
+        let (width, height) = viewport.size();
+        let target = self.target(width, height);
         let view = target.create_view(&Default::default());
-        let row = (l.width * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+        let row = (width * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
         let readback = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("readback"),
-            size: u64::from(row * l.height),
+            size: u64::from(row * height),
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             mapped_at_creation: false,
         });
         let mut encoder = self.device.create_command_encoder(&Default::default());
         self.renderer
-            .encode(&mut encoder, &l.viewport, &l.world, &view, None);
+            .encode(&mut encoder, viewport, world, &view, None);
         encoder.copy_texture_to_buffer(
             target.as_image_copy(),
             wgpu::TexelCopyBufferInfo {
@@ -368,10 +429,10 @@ impl Smoke {
         );
         self.queue.submit([encoder.finish()]);
         let bytes = read(&readback).await?;
-        let mut rgba = Vec::with_capacity((l.width * l.height * 4) as usize);
-        for y in 0..l.height {
+        let mut rgba = Vec::with_capacity((width * height * 4) as usize);
+        for y in 0..height {
             let start = (y * row) as usize;
-            rgba.extend_from_slice(&bytes[start..start + (l.width * 4) as usize]);
+            rgba.extend_from_slice(&bytes[start..start + (width * 4) as usize]);
         }
         Ok(rgba)
     }
@@ -428,75 +489,72 @@ impl Smoke {
             height: l.height,
             upload_ms,
             prepare_ms,
+            diagnostics: String::new(),
         })
     }
 
-    /// A particle capture: `frame` simulation steps of the scenario's emitters, then the frame
-    /// the oracle captures (`run_engine_particles`, without its alive-count readback, which
-    /// blocks). Pixels only.
+    /// A D9 particle scenario as the oracle runs it (`particle_run`): Bevy's first spawn update
+    /// and its spawn counts per emitter and frame (`spawns`, emitter after emitter, each
+    /// `spawns.len() / emitters` frames long, from the oracle's `<name>.bevy.json`), the
+    /// plate, every capture, and each frame's alive counts read back with the async
+    /// `World::read_alive_particles`. `depth_fade` (metres, when not NaN) makes every emitter
+    /// soft.
     pub async fn particles(
         &self,
         name: &str,
         first_spawn_update: u32,
-        frame: u32,
-    ) -> Result<Rendered, JsValue> {
+        spawns: Vec<u32>,
+        depth_fade: f64,
+    ) -> Result<ParticleCaptures, JsValue> {
         let s = particles::all()
             .into_iter()
             .find(|s| s.name == name)
             .ok_or_else(|| err(format!("no particle scenario {name}")))?;
-        let (mut world, instances, textures) =
-            content::upload(&self.renderer, &s.assets, &s.objects);
-        let emitters: Vec<_> = s
-            .emitters
+        let n = s.emitters.len().max(1);
+        let frames = spawns.len() / n;
+        let bevy = particle_run::BevyRun {
+            first_spawn_update,
+            spawns: spawns.chunks(frames.max(1)).map(<[u32]>::to_vec).collect(),
+        };
+        let fade = (!depth_fade.is_nan()).then_some(depth_fade as f32);
+        let run = particle_run::run(
+            &self.renderer,
+            &self.device,
+            &self.queue,
+            &s,
+            &bevy,
+            fade,
+            async |viewport, world, scene, instances| {
+                self.renderer.prepare(viewport, world, scene, instances);
+                self.capture_frame(viewport, world)
+                    .await
+                    .map_err(|e| format!("{e:?}"))
+            },
+        )
+        .await
+        .map_err(err)?;
+        let population_ok = particle_run::population_ok(&s, &bevy, &run);
+        let labels: Vec<String> = run
+            .captures
             .iter()
-            .enumerate()
-            .map(|(i, e)| {
-                let desc = e.engine(s.seed.wrapping_add(i as u32), &textures);
-                let id = world.add_emitter(&desc);
-                world.set_emitter_transform(
-                    id,
-                    render_engine::glam::Mat4::from_translation(e.translation),
-                );
-                (id, desc)
+            .map(|(frame, _)| {
+                s.captures
+                    .iter()
+                    .find(|c| c.frame == *frame)
+                    .expect("captured frame")
+                    .label()
             })
             .collect();
-        let step = |world: &mut World| {
-            let mut encoder = self.device.create_command_encoder(&Default::default());
-            world.step_particles(&mut encoder, particles::DT, None);
-            self.queue.submit([encoder.finish()]);
-        };
-        for _ in 1..first_spawn_update {
-            step(&mut world);
-        }
-        for (id, desc) in &emitters {
-            world.set_emitter(
-                *id,
-                &render_engine::particles::Emitter {
-                    active: true,
-                    ..desc.clone()
-                },
-            );
-        }
-        for _ in 0..frame {
-            step(&mut world);
-        }
-        let mut l = Loaded {
-            world,
-            instances,
-            viewport: Viewport::new(&self.renderer, s.width, s.height),
-            scene: s.scene,
+        let json = format!(
+            r#"{{"populationOk":{population_ok},"labels":{labels:?},"spawnCounts":{:?},"alive":{:?}}}"#,
+            run.spawn_counts, run.alive
+        );
+        Ok(ParticleCaptures {
+            json,
             width: s.width,
             height: s.height,
-            upload_ms: 0.0,
-        };
-        self.renderer
-            .prepare(&mut l.viewport, &l.world, &l.scene, &l.instances);
-        Ok(Rendered {
-            rgba: self.capture(&mut l).await?,
-            width: l.width,
-            height: l.height,
-            upload_ms: 0.0,
-            prepare_ms: 0.0,
+            plate: run.plate,
+            captures: run.captures.into_iter().map(|(_, rgba)| rgba).collect(),
         })
     }
 
@@ -653,6 +711,7 @@ pub struct Rendered {
     pub height: u32,
     pub upload_ms: f64,
     pub prepare_ms: f64,
+    diagnostics: String,
 }
 
 #[wasm_bindgen]
@@ -661,4 +720,58 @@ impl Rendered {
     pub fn rgba(&self) -> Vec<u8> {
         self.rgba.clone()
     }
+}
+
+#[wasm_bindgen]
+impl Rendered {
+    /// JSON: the viewport's culling and light assignment, its CPU visible counts, and the GPU
+    /// readbacks (per-view instances kept by `Culling::GpuIndirect`, the clustered counters).
+    #[wasm_bindgen(getter)]
+    pub fn diagnostics(&self) -> String {
+        self.diagnostics.clone()
+    }
+}
+
+/// A particle run's plate, captures (in the scenario's capture order) and counts.
+#[wasm_bindgen]
+pub struct ParticleCaptures {
+    json: String,
+    pub width: u32,
+    pub height: u32,
+    plate: Vec<u8>,
+    captures: Vec<Vec<u8>>,
+}
+
+#[wasm_bindgen]
+impl ParticleCaptures {
+    /// `{populationOk, labels, spawnCounts, alive}`.
+    #[wasm_bindgen(getter)]
+    pub fn json(&self) -> String {
+        self.json.clone()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn plate(&self) -> Vec<u8> {
+        self.plate.clone()
+    }
+
+    pub fn capture(&self, i: usize) -> Vec<u8> {
+        self.captures[i].clone()
+    }
+}
+
+/// The files under `assets/` that scenario `name` reads; the page fetches each and hands it to
+/// [`provide_asset`] before rendering it (the wasm reads no files).
+#[wasm_bindgen]
+pub fn asset_files(name: &str) -> Vec<String> {
+    scenario_list::files(name)
+        .into_iter()
+        .map(String::from)
+        .collect()
+}
+
+/// The bytes of `assets/<path>`, fetched by the page.
+#[wasm_bindgen]
+pub fn provide_asset(path: &str, bytes: Vec<u8>) {
+    content::provide_asset(path, bytes);
 }

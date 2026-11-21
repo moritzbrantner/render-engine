@@ -10,7 +10,7 @@ use render_engine::{
     wgpu,
     world::{Instance, TextureId, World},
 };
-use std::{collections::HashMap, path::Path};
+use std::collections::HashMap;
 
 #[derive(Clone, Copy, Debug)]
 pub enum Geometry {
@@ -144,7 +144,89 @@ pub struct Assets {
     pub textures: Vec<TextureData>,
     pub skins: Vec<Skin>,
     /// Texture index per (image file, sRGB), so props sharing a texture share the upload.
-    loaded: HashMap<(std::path::PathBuf, bool), usize>,
+    loaded: HashMap<(String, bool), usize>,
+}
+
+/// A file under the repository's `assets/` by its path there (`props/Anvil.gltf`). The oracle
+/// reads it from disk. The WebGPU smoke (`oracle/webgpu-smoke`, wasm32) has no file system: its
+/// page fetches the files and hands them over with [`provide_asset`] before building a scenario
+/// that needs them (#129).
+pub fn asset(path: &str) -> Vec<u8> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        // The repository's `assets/`, from the oracle or from a crate below it (the smoke).
+        let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .map(|d| d.join("assets"))
+            .find(|d| d.is_dir())
+            .expect("the repository's assets/")
+            .join(path);
+        std::fs::read(&file).unwrap_or_else(|e| panic!("{}: {e}", file.display()))
+    }
+    #[cfg(target_arch = "wasm32")]
+    PROVIDED.with_borrow(|files| {
+        files
+            .get(path)
+            .unwrap_or_else(|| panic!("assets/{path} was not provided by the page"))
+            .clone()
+    })
+}
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static PROVIDED: std::cell::RefCell<HashMap<String, Vec<u8>>> = Default::default();
+}
+
+/// The bytes of `assets/<path>`, fetched by the smoke's page.
+#[cfg(target_arch = "wasm32")]
+pub fn provide_asset(path: &str, bytes: Vec<u8>) {
+    PROVIDED.with_borrow_mut(|files| files.insert(path.to_string(), bytes));
+}
+
+/// Whether the page provided `assets/<path>`.
+#[cfg(target_arch = "wasm32")]
+pub fn asset_provided(path: &str) -> bool {
+    PROVIDED.with_borrow(|files| files.contains_key(path))
+}
+
+/// A parsed `.gltf` with its buffers, read through [`asset`]: the file's directory under
+/// `assets/`, the document and each buffer's bytes.
+struct GltfFile {
+    dir: String,
+    doc: gltf::Document,
+    buffers: Vec<Vec<u8>>,
+}
+
+impl GltfFile {
+    fn read(path: &str) -> Self {
+        let gltf::Gltf { document, blob } =
+            gltf::Gltf::from_slice(&asset(path)).unwrap_or_else(|e| panic!("{path}: {e}"));
+        let dir = path.rsplit_once('/').map_or("", |(d, _)| d).to_string();
+        let buffers = document
+            .buffers()
+            .map(|b| {
+                let data = match b.source() {
+                    gltf::buffer::Source::Bin => blob.clone().expect("GLB binary chunk"),
+                    gltf::buffer::Source::Uri(uri) => asset(&Self::join(&dir, uri)),
+                };
+                assert!(data.len() >= b.length(), "{path}: buffer too short");
+                data
+            })
+            .collect();
+        Self {
+            dir,
+            doc: document,
+            buffers,
+        }
+    }
+
+    fn join(dir: &str, uri: &str) -> String {
+        if dir.is_empty() {
+            uri.to_string()
+        } else {
+            format!("{dir}/{uri}")
+        }
+    }
 }
 
 /// One glTF primitive: a mesh and its material.
@@ -159,11 +241,9 @@ impl Assets {
     /// Reads every mesh primitive of a glTF file's default scene, its material and textures
     /// (with a box-filtered mip chain each), the way Bevy's glTF loader maps them. Tangents are
     /// generated with MikkTSpace where a normal map needs them and the file has none (as Bevy's
-    /// loader does).
-    pub fn load_gltf(&mut self, path: &Path) -> Vec<Primitive> {
-        let (doc, buffers, images) =
-            gltf::import(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-        let dir = path.parent().expect("file in a directory");
+    /// loader does). `path` is under `assets/` ([`asset`]).
+    pub fn load_gltf(&mut self, path: &str) -> Vec<Primitive> {
+        let GltfFile { dir, doc, buffers } = GltfFile::read(path);
         let mut out = Vec::new();
         let scene = doc.default_scene().expect("glTF default scene");
         let mut stack: Vec<(gltf::Node, Mat4)> =
@@ -173,7 +253,7 @@ impl Assets {
             stack.extend(node.children().map(|c| (c, transform)));
             let Some(mesh) = node.mesh() else { continue };
             for prim in mesh.primitives() {
-                let r = prim.reader(|b| Some(&buffers[b.index()]));
+                let r = prim.reader(|b| Some(&buffers[b.index()][..]));
                 let mut data = MeshData {
                     positions: r
                         .read_positions()
@@ -207,15 +287,15 @@ impl Assets {
                 let pbr = m.pbr_metallic_roughness();
                 let mut texture = |t: gltf::Texture, srgb: bool| {
                     let gltf::image::Source::Uri { uri, .. } = t.source().source() else {
-                        panic!("{}: embedded images are not supported", path.display());
+                        panic!("{path}: embedded images are not supported");
                     };
-                    let key = (dir.join(uri), srgb);
+                    let key = (GltfFile::join(&dir, uri), srgb);
                     if let Some(&i) = self.loaded.get(&key) {
                         return i;
                     }
-                    let image = &images[t.source().index()];
+                    let image = decode(&asset(&key.0), &key.0);
                     self.textures
-                        .push(texture_data(image, srgb, sampler(&t.sampler())));
+                        .push(texture_data(&image, srgb, sampler(&t.sampler())));
                     let i = self.textures.len() - 1;
                     self.loaded.insert(key, i);
                     i
@@ -265,9 +345,8 @@ impl Assets {
     /// rotation, and every joint's transform follows from the node hierarchy (the skinned mesh
     /// sits at the scene root, so these are relative to it). Returns the index into
     /// [`Assets::skins`].
-    pub fn load_skin(&mut self, path: &Path, pose: &[(&str, Quat)]) -> usize {
-        let (doc, buffers, _) =
-            gltf::import(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    pub fn load_skin(&mut self, path: &str, pose: &[(&str, Quat)]) -> usize {
+        let GltfFile { doc, buffers, .. } = GltfFile::read(path);
         let skin = doc.skins().next().expect("a glTF skin");
         let mut global = vec![Mat4::IDENTITY; doc.nodes().len()];
         let scene = doc.default_scene().expect("glTF default scene");
@@ -287,12 +366,11 @@ impl Assets {
         for (name, _) in pose {
             assert!(
                 skin.joints().any(|j| j.name() == Some(*name)),
-                "{}: no joint {name}",
-                path.display()
+                "{path}: no joint {name}"
             );
         }
         let inverse_bindposes = skin
-            .reader(|b| Some(&buffers[b.index()]))
+            .reader(|b| Some(&buffers[b.index()][..]))
             .read_inverse_bind_matrices()
             .expect("inverse bind matrices")
             .map(|m| Mat4::from_cols_array_2d(&m))
@@ -340,18 +418,24 @@ fn sampler(s: &gltf::texture::Sampler) -> Sampler {
     out
 }
 
+/// A glTF image file's pixels, decoded as the gltf crate's importer decodes them.
+fn decode(bytes: &[u8], path: &str) -> image::DynamicImage {
+    image::load_from_memory(bytes).unwrap_or_else(|e| panic!("{path}: {e}"))
+}
+
 /// RGBA8 texels with a mip chain down to 1×1, each level a 2×2 box filter of the one above.
-fn texture_data(image: &gltf::image::Data, srgb: bool, sampler: Sampler) -> TextureData {
-    use gltf::image::Format;
-    let channels = match image.format {
-        Format::R8 => 1,
-        Format::R8G8 => 2,
-        Format::R8G8B8 => 3,
-        Format::R8G8B8A8 => 4,
-        f => panic!("unsupported glTF image format {f:?}"),
+fn texture_data(image: &image::DynamicImage, srgb: bool, sampler: Sampler) -> TextureData {
+    use image::DynamicImage::*;
+    // The 8-bit layouts the gltf crate's importer keeps (`gltf::image::Format`).
+    let channels = match image {
+        ImageLuma8(_) => 1,
+        ImageLumaA8(_) => 2,
+        ImageRgb8(_) => 3,
+        ImageRgba8(_) => 4,
+        f => panic!("unsupported glTF image format {:?}", f.color()),
     };
     let rgba: Vec<u8> = image
-        .pixels
+        .as_bytes()
         .chunks(channels)
         .flat_map(|p| match channels {
             1 => [p[0], p[0], p[0], 255],
@@ -360,7 +444,7 @@ fn texture_data(image: &gltf::image::Data, srgb: bool, sampler: Sampler) -> Text
             _ => [p[0], p[1], p[2], p[3]],
         })
         .collect();
-    let (mut w, mut h) = (image.width, image.height);
+    let (mut w, mut h) = (image.width(), image.height());
     let mut levels = vec![rgba];
     while w > 1 || h > 1 {
         let (nw, nh) = ((w / 2).max(1), (h / 2).max(1));
@@ -383,8 +467,8 @@ fn texture_data(image: &gltf::image::Data, srgb: bool, sampler: Sampler) -> Text
         (w, h) = (nw, nh);
     }
     TextureData {
-        width: image.width,
-        height: image.height,
+        width: image.width(),
+        height: image.height(),
         format: if srgb {
             wgpu::TextureFormat::Rgba8UnormSrgb
         } else {

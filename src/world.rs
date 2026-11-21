@@ -667,10 +667,11 @@ impl World {
     }
 
     /// Every emitter's alive-particle count after the last submitted
-    /// [`World::step_particles`]. Reads the GPU counters back and waits for them, so it is meant
-    /// for tests and tools, not for every frame of a game.
-    pub fn read_alive_particles(&self) -> Vec<(EmitterId, u32)> {
-        let counts = self.particles.read_alive(&self.queue);
+    /// [`World::step_particles`]. Reads the GPU counters back, so it is meant for tests and
+    /// tools, not for every frame of a game. Natively the future completes on its first poll
+    /// (`pollster::block_on`); in the browser, once the GPU has written the counters.
+    pub async fn read_alive_particles(&self) -> Vec<(EmitterId, u32)> {
+        let counts = self.particles.read_alive(&self.queue).await;
         self.emitter_ids()
             .map(|(id, e)| {
                 let n = e.base.and_then(|_| counts.get(id as usize).copied());

@@ -8,7 +8,9 @@
 # Not part of CI. Needs what scripts/webgpu-smoke.sh needs, plus
 #   npx playwright install chromium firefox
 #
-#   bash scripts/browser-hardware.sh [scenario...]     default: the #75 lighting set
+#   bash scripts/browser-hardware.sh [scenario...]     default: every oracle scenario (the
+#                                                      browser gate); the #75 lighting set for
+#                                                      the GPU-time and selection steps
 #
 # A step that fails is recorded in the report and the run goes on; the exit code is 1 if any did.
 set -uo pipefail
@@ -56,14 +58,24 @@ step() {
 } >"$report"
 
 only=()
-for s in "${scenarios[@]}" textured_props; do only+=(--only "$s"); done
+if (($#)); then
+  for s in "${scenarios[@]}" textured_props; do only+=(--only "$s"); done
+fi
 step "Oracle on the GPU (FLIP and GPU-time gates)" \
   cargo run --release --locked --manifest-path oracle/Cargo.toml -- "${only[@]}"
 
-# Builds the wasm and runs the WebGPU smoke and the image comparison against native and Bevy.
-step "Chromium: engine on WebGPU vs native, Bevy, three.js" bash scripts/webgpu-smoke.sh "${scenarios[@]}"
-step "Firefox: engine on WebGPU vs native, Bevy, three.js" \
-  env SMOKE_BROWSER=firefox bash scripts/webgpu-smoke.sh "${scenarios[@]}"
+# Builds the wasm and runs the WebGPU smoke against native and Bevy: with scenarios given, those
+# (scripts/webgpu-smoke.sh); otherwise the browser gate on every oracle scenario
+# (scripts/browser-gate.sh: lighting, GPU culling, particles, soft particles).
+for browser in chromium firefox; do
+  if (($#)); then
+    step "$browser: engine on WebGPU vs native, Bevy, three.js" \
+      env SMOKE_BROWSER="$browser" bash scripts/webgpu-smoke.sh "${scenarios[@]}"
+  else
+    step "$browser: browser gate (every oracle scenario on WebGPU)" \
+      env SMOKE_BROWSER="$browser" bash scripts/browser-gate.sh "$out"
+  fi
+done
 
 for browser in chromium firefox; do
   step "$browser: backend selection" env SMOKE_BROWSER="$browser" node oracle/webgpu-smoke/check-backends.mjs "$out"

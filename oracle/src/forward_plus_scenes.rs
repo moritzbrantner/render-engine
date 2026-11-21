@@ -16,7 +16,6 @@ use render_engine::{
         Sun, SunShadows, Tonemapping,
     },
 };
-use std::path::Path;
 
 /// A deterministic value in `0..1` for `(index, salt)`: a cheap hash, so the scenes need no
 /// random state and Bevy's child process rebuilds the same content.
@@ -53,8 +52,7 @@ fn material(base_color: Vec3, perceptual_roughness: f32) -> Material {
 /// every fourth a spot light) strung along the path.
 fn outdoor(name: &'static str, lights: usize) -> Scenario {
     let mut assets = content::Assets::default();
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../assets/props");
-    let bush = assets.load_gltf(&dir.join("Bush_Common.gltf"));
+    let bush = assets.load_gltf("props/Bush_Common.gltf");
     let mut objects = vec![MeshInstance::new(
         Shape::Plane(Vec2::splat(200.0)),
         Vec3::ZERO,

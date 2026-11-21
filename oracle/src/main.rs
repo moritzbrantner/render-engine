@@ -436,7 +436,7 @@ fn run_engine_particles(
             }
         }
         gpu.queue.submit([encoder.finish()]);
-        let alive = out.world.read_alive_particles();
+        let alive = pollster::block_on(out.world.read_alive_particles());
         for (i, ((id, _), e)) in emitters.iter().zip(&s.emitters).enumerate() {
             out.spawn_counts[i].push(if e.driver == Driver::Snapshot {
                 spawns[i][frame as usize - 1]

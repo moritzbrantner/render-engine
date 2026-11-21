@@ -108,33 +108,24 @@ impl Renderer {
     }
 
     /// Per view (the camera first), how many instances the GPU pass kept in the frame last
-    /// submitted for `viewport`; `None` on the CPU path. Reads back and waits: for tests and
-    /// tools, not the frame loop.
-    pub fn read_gpu_culled(&self, viewport: &Viewport) -> Option<Vec<u32>> {
+    /// submitted for `viewport`; `None` on the CPU path. Reads back: for tests and tools, not
+    /// the frame loop. Natively the future completes on its first poll (`pollster::block_on`);
+    /// in the browser, once the GPU has written the counts.
+    pub async fn read_gpu_culled(&self, viewport: &Viewport) -> Option<Vec<u32>> {
         let gpu = viewport.gpu_culling.as_ref()?;
         let (views, rows) = gpu.shape;
         let size = u64::from(views * rows) * INDIRECT_STRIDE;
         if size == 0 {
             return Some(vec![0; views as usize]);
         }
-        let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("gpu culling readback"),
+        let bytes = crate::readback::read_buffer(
+            &self.device,
+            &self.queue,
+            &gpu.indirect.buffer,
             size,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let mut encoder = self.device.create_command_encoder(&Default::default());
-        encoder.copy_buffer_to_buffer(&gpu.indirect.buffer, 0, &staging, 0, size);
-        self.queue.submit([encoder.finish()]);
-        let slice = staging.slice(..);
-        let (tx, rx) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |r| {
-            let _ = tx.send(r);
-        });
-        let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
-        rx.recv().ok()?.ok()?;
-        let bytes = slice.get_mapped_range().expect("mapped").to_vec();
-        staging.unmap();
+            "gpu culling readback",
+        )
+        .await?;
         let args: &[IndirectArgs] = bytemuck::cast_slice(&bytes);
         Some(
             args.chunks(rows as usize)

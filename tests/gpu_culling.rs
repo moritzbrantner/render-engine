@@ -203,11 +203,8 @@ impl Fixture {
         assert!(a.rgba == b.rgba, "{label}: images differ between paths");
         // The CPU path counts visible instances in `work`; the GPU path's are read back.
         let cpu_work = cpu.work();
-        let counts = self
-            .gpu
-            .renderer()
-            .read_gpu_culled(gpu)
-            .expect("GPU path active");
+        let counts =
+            pollster::block_on(self.gpu.renderer().read_gpu_culled(gpu)).expect("GPU path active");
         let gpu_work = gpu.work();
         let gpu_kept: u32 = counts.iter().sum::<u32>() + gpu_work.visible + gpu_work.shadow_visible;
         assert_eq!(

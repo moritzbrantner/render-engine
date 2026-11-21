@@ -7,7 +7,12 @@ mmorpg's web client and does not promise broad browser support.
 
 The prototype it scoped now exists: `render-engine-web` and its showcase page (#128, [Browser
 (WebGPU)](consumer-integration.md#browser-webgpu)), with Firefox, device loss, resize and
-`wasm-opt` measured there.
+`wasm-opt` measured there. What it left unverified runs in the browser since #129: skinned
+and textured glTF content (the page fetches the files, the oracle's loader reads the bytes),
+`many_lights` on the clustered path, `Culling::GpuIndirect`, every D9 particle scenario, soft
+particles, and the diagnostic readbacks, now async. Every oracle scenario passes against Bevy in
+Chromium and Firefox on the RTX 3060 Ti and, on CI, in Firefox on lavapipe ([browser
+gate](consumer-integration.md#browser-gate)).
 
 ## Result: GO for a separate prototype issue, nothing beyond it
 
@@ -60,8 +65,9 @@ cargo run --release --locked --manifest-path oracle/Cargo.toml -- --only sun_sha
 bash scripts/webgpu-smoke.sh sun_shadows
 ```
 
-The smoke is not built by `cargo build` at the repository root or by CI: `oracle/webgpu-smoke/`
-has its own manifest and lockfile (the root workspace excludes `oracle/`), and no job runs it. It
+The smoke is not built by `cargo build` at the repository root: `oracle/webgpu-smoke/` has its
+own manifest and lockfile (the root workspace excludes `oracle/`). Since #129 CI's `browser` job
+runs it on every oracle scenario (`scripts/browser-gate.sh`, Firefox on lavapipe). It
 compiles the oracle's `content.rs`, `scenarios.rs`, `forward_plus_scenes.rs` and `particles.rs` by path, so the scene is the
 oracle's, and it calls the same `Renderer::new`, `prepare` and `encode` a native consumer calls.
 Run measured 2026-11-09 on the owner's desktop (Linux 7.0.0-42, RTX 3060 Ti, driver 595.99.02,
@@ -104,12 +110,12 @@ Evidence is what ran on the hardware adapter unless a row says otherwise.
 | Depth sampling | The shadow blocker search reads depth through a linear sampler | **WebGPU validation error** on every lit pipeline: `SamplerBindingType::Filtering` on a `Depth` texture. Natively legal and Bevy's choice. Fixed under `cfg!(target_arch = "wasm32")`: `NonFiltering` and nearest. The native build is unaffected. `point_spot_soft` differs from native in 9 pixels. |
 | Timestamp queries | Pass-level spans | `timestamp-query` is present on both adapters. Medians with and without `--enable-webgpu-developer-features` agree within noise at these frame times, so Chromium's quantisation did not move them. |
 | Limits | Requested `Limits::default()` | Sufficient for every tested path. NVIDIA: `maxStorageBuffersPerShaderStage` 16, `maxStorageTexturesPerShaderStage` 8, `maxTextureDimension2D` 16384. SwiftShader: 10, 4, 8192. |
-| Particles | Compute simulation, `draw_indirect`, flipbooks | Run; captures below. `read_alive_particles` blocks on `map_async`, so it cannot work as-is on wasm. The renderer does not need it. |
-| Skinning | Skinned pipeline variants | Created without error. **No skinned draw was run**: the oracle's skinned and textured scenarios read glTF from disk. Unverified. |
+| Particles | Compute simulation, `draw_indirect`, flipbooks | Run; captures below. `read_alive_particles` blocks on `map_async`, so it cannot work as-is on wasm. The renderer does not need it. Since #129 it is async, and every D9 scenario passes in the browser. |
+| Skinning | Skinned pipeline variants | Created without error. **No skinned draw was run**: the oracle's skinned and textured scenarios read glTF from disk. Unverified here; since #129 the page fetches the files and `skinned_figure` passes against Bevy. |
 | Shadows | Cascades, spot, point cube, PCSS | Run; `depth-clip-control` present on both adapters. |
 | Buffer uploads | Every buffer filled from data (meshes, materials, filter constants) | Created unmapped and filled with `Queue::write_buffer` (`src/upload.rs`): SwiftShader rejected `mappedAtCreation` buffers after many small allocations in a consumer (#116). `node oracle/webgpu-smoke/run.mjs <out> meshes <scenario> frames=30 meshes=150` (`SMOKE_FALLBACK=1` for SwiftShader) adds 150 small meshes after 30 frames; the mapped path did not fail in it here. |
 | Fallbacks | `DEPTH_CLIP_CONTROL`, `DUAL_SOURCE_BLENDING` optional | SwiftShader has no `dual-source-blending`; the sky pipeline used its alpha fallback there. |
-| `Culling::GpuIndirect`, `LightAssignment::Clustered` | Opt-in at the time (clustered became the default later, #94; the captures here used the per-fragment loop) | `indirect-first-instance` is present on both adapters, 4 fragment storage buffers fit, but **neither path ran in a browser**. Their diagnostic readbacks block (`gpu_culling.rs`, `clustered.rs`) and would need async versions. |
+| `Culling::GpuIndirect`, `LightAssignment::Clustered` | Opt-in at the time (clustered became the default later, #94; the captures here used the per-fragment loop) | `indirect-first-instance` is present on both adapters, 4 fragment storage buffers fit, but **neither path ran in a browser**. Their diagnostic readbacks block (`gpu_culling.rs`, `clustered.rs`) and would need async versions. Since #129 both run, with async readbacks. |
 
 ## The smallest smoke
 
@@ -250,15 +256,17 @@ would need to measure; this smoke does not show it either way.
 - **`Headless` stays native.** An async wasm counterpart, if it is ever wanted, is the adapter
   crate's. The `Renderer` API already needs only a device and a queue.
 - Blocking diagnostic readbacks (`read_alive_particles`, the GPU-culling and clustered diagnostics)
-  need an async form before they can run on wasm; they are not on the render path.
+  need an async form before they can run on wasm; they are not on the render path. (#129 made
+  them async futures that complete on their first poll natively.)
 
 ## Not verified
 
 - Any browser other than the Playwright headless shell on this machine: Firefox, Safari, Chrome
   stable (which returned no adapter under headless here), a headed window, mobile GPUs, and other
   desktop drivers.
-- Skinned meshes and `textured_props` drawing in a browser (pipelines compile; no image).
-- `Culling::GpuIndirect` and `LightAssignment::Clustered` in a browser.
+- Skinned meshes and `textured_props` drawing in a browser (pipelines compile; no image). Done
+  in #129.
+- `Culling::GpuIndirect` and `LightAssignment::Clustered` in a browser. Done in #129.
 - The cause of the sky's 12–14k differing pixels against native.
 - CPU time of the three.js renderer, and any real consumer's frame or workload. D10's consumer
   and adoption evidence is not provided by this assessment.
@@ -271,9 +279,10 @@ Not filed: GO means the owner can decide whether to open it. It should cover, an
 1. An adapter crate with its own manifest (above): canvas, device, the wasm entry; `Renderer`
    unchanged; no default dependency for native consumers.
 2. Skinned and textured drawing in the browser: a file-free way to deliver glTF bytes to the
-   existing `content` loader, then `skinned_figure` and `textured_props` against D3.
+   existing `content` loader, then `skinned_figure` and `textured_props` against D3. Done in #129.
 3. Asynchronous forms of the blocking diagnostics, and a decision on whether the D8 FLIP gate
-   should run in a browser CI job (currently explicitly not).
+   should run in a browser CI job (currently explicitly not). Done in #129: async, and a CI job
+   (D8).
 4. A representative CPU-submission workload, because #615's bottleneck is draw submission and
    one 22 k-instance scene at 67 draws per frame does not settle it; consumer pilot and adoption
    stay subject to D10.
