@@ -1,0 +1,453 @@
+{
+  "asset": "shrine.kit.arch",
+  "scope": "Actual HTTP response-body bytes and elapsed serial fetch time on loopback, no HTTP client cache; warm OS cache. Excludes headers, transcode/GPU upload and WAN latency. Cluster set includes source attributes/fallback required by this prototype.",
+  "rows": [
+    {
+      "mode": "source",
+      "round": 0,
+      "payloadBytes": 1988767,
+      "loopbackFetchMs": 9.753092999744695,
+      "files": [
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/resources/158e12d857a1215fbce37007d995a4c1280335036ab40b1c5df6b55219d9368a.ktx2",
+          "payloadBytes": 100804,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/resources/6a0ddc1da8fe4e2dd421eb708214b01ffd925089dd83826d7b2d4153c6f86d36.ktx2",
+          "payloadBytes": 744905,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/resources/db155153cd865a17bc25c67c32aba73e10d18ed63a6122bc08601374f7f5a7c5.bin",
+          "payloadBytes": 1069728,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/resources/ea9797b4f07e647161c6bd3f391ad621bafd3a907a874f3f51b453fc74c25fc6.ktx2",
+          "payloadBytes": 70864,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/scenes/shrine.kit.arch/default.gltf",
+          "payloadBytes": 2466,
+          "contentEncoding": "identity"
+        }
+      ]
+    },
+    {
+      "mode": "discrete",
+      "round": 0,
+      "payloadBytes": 2299759,
+      "loopbackFetchMs": 7.55040799958806,
+      "files": [
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/resources/158e12d857a1215fbce37007d995a4c1280335036ab40b1c5df6b55219d9368a.ktx2",
+          "payloadBytes": 100804,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/resources/6a0ddc1da8fe4e2dd421eb708214b01ffd925089dd83826d7b2d4153c6f86d36.ktx2",
+          "payloadBytes": 744905,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/resources/db155153cd865a17bc25c67c32aba73e10d18ed63a6122bc08601374f7f5a7c5.bin",
+          "payloadBytes": 1069728,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/resources/ea9797b4f07e647161c6bd3f391ad621bafd3a907a874f3f51b453fc74c25fc6.ktx2",
+          "payloadBytes": 70864,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/scenes/shrine.kit.arch/default.gltf",
+          "payloadBytes": 2466,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/scenes/shrine.kit.arch/lod1.bin",
+          "payloadBytes": 87420,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/scenes/shrine.kit.arch/lod1.gltf",
+          "payloadBytes": 2637,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/scenes/shrine.kit.arch/lod2.bin",
+          "payloadBytes": 70944,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/scenes/shrine.kit.arch/lod2.gltf",
+          "payloadBytes": 2637,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/scenes/shrine.kit.arch/lod3.bin",
+          "payloadBytes": 71040,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/scenes/shrine.kit.arch/lod3.gltf",
+          "payloadBytes": 2637,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/scenes/shrine.kit.arch/lod4.bin",
+          "payloadBytes": 71040,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/scenes/shrine.kit.arch/lod4.gltf",
+          "payloadBytes": 2637,
+          "contentEncoding": "identity"
+        }
+      ]
+    },
+    {
+      "mode": "cluster",
+      "round": 0,
+      "payloadBytes": 2775255,
+      "loopbackFetchMs": 5.705496999325987,
+      "files": [
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/resources/158e12d857a1215fbce37007d995a4c1280335036ab40b1c5df6b55219d9368a.ktx2",
+          "payloadBytes": 100804,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/resources/6a0ddc1da8fe4e2dd421eb708214b01ffd925089dd83826d7b2d4153c6f86d36.ktx2",
+          "payloadBytes": 744905,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/resources/db155153cd865a17bc25c67c32aba73e10d18ed63a6122bc08601374f7f5a7c5.bin",
+          "payloadBytes": 1069728,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/resources/ea9797b4f07e647161c6bd3f391ad621bafd3a907a874f3f51b453fc74c25fc6.ktx2",
+          "payloadBytes": 70864,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/scenes/shrine.kit.arch/default.gltf",
+          "payloadBytes": 2466,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/shrine/shrine.kit.arch/shrine.kit.arch.bin",
+          "payloadBytes": 784012,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/shrine/shrine.kit.arch/shrine.kit.arch.json",
+          "payloadBytes": 2476,
+          "contentEncoding": "identity"
+        }
+      ]
+    },
+    {
+      "mode": "cluster",
+      "round": 1,
+      "payloadBytes": 2775255,
+      "loopbackFetchMs": 5.175197999960801,
+      "files": [
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/resources/158e12d857a1215fbce37007d995a4c1280335036ab40b1c5df6b55219d9368a.ktx2",
+          "payloadBytes": 100804,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/resources/6a0ddc1da8fe4e2dd421eb708214b01ffd925089dd83826d7b2d4153c6f86d36.ktx2",
+          "payloadBytes": 744905,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/resources/db155153cd865a17bc25c67c32aba73e10d18ed63a6122bc08601374f7f5a7c5.bin",
+          "payloadBytes": 1069728,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/resources/ea9797b4f07e647161c6bd3f391ad621bafd3a907a874f3f51b453fc74c25fc6.ktx2",
+          "payloadBytes": 70864,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/scenes/shrine.kit.arch/default.gltf",
+          "payloadBytes": 2466,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/shrine/shrine.kit.arch/shrine.kit.arch.bin",
+          "payloadBytes": 784012,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/shrine/shrine.kit.arch/shrine.kit.arch.json",
+          "payloadBytes": 2476,
+          "contentEncoding": "identity"
+        }
+      ]
+    },
+    {
+      "mode": "discrete",
+      "round": 1,
+      "payloadBytes": 2299759,
+      "loopbackFetchMs": 6.76089199987473,
+      "files": [
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/resources/158e12d857a1215fbce37007d995a4c1280335036ab40b1c5df6b55219d9368a.ktx2",
+          "payloadBytes": 100804,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/resources/6a0ddc1da8fe4e2dd421eb708214b01ffd925089dd83826d7b2d4153c6f86d36.ktx2",
+          "payloadBytes": 744905,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/resources/db155153cd865a17bc25c67c32aba73e10d18ed63a6122bc08601374f7f5a7c5.bin",
+          "payloadBytes": 1069728,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/resources/ea9797b4f07e647161c6bd3f391ad621bafd3a907a874f3f51b453fc74c25fc6.ktx2",
+          "payloadBytes": 70864,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/scenes/shrine.kit.arch/default.gltf",
+          "payloadBytes": 2466,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/scenes/shrine.kit.arch/lod1.bin",
+          "payloadBytes": 87420,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/scenes/shrine.kit.arch/lod1.gltf",
+          "payloadBytes": 2637,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/scenes/shrine.kit.arch/lod2.bin",
+          "payloadBytes": 70944,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/scenes/shrine.kit.arch/lod2.gltf",
+          "payloadBytes": 2637,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/scenes/shrine.kit.arch/lod3.bin",
+          "payloadBytes": 71040,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/scenes/shrine.kit.arch/lod3.gltf",
+          "payloadBytes": 2637,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/scenes/shrine.kit.arch/lod4.bin",
+          "payloadBytes": 71040,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/scenes/shrine.kit.arch/lod4.gltf",
+          "payloadBytes": 2637,
+          "contentEncoding": "identity"
+        }
+      ]
+    },
+    {
+      "mode": "source",
+      "round": 1,
+      "payloadBytes": 1988767,
+      "loopbackFetchMs": 3.4929729999930714,
+      "files": [
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/resources/158e12d857a1215fbce37007d995a4c1280335036ab40b1c5df6b55219d9368a.ktx2",
+          "payloadBytes": 100804,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/resources/6a0ddc1da8fe4e2dd421eb708214b01ffd925089dd83826d7b2d4153c6f86d36.ktx2",
+          "payloadBytes": 744905,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/resources/db155153cd865a17bc25c67c32aba73e10d18ed63a6122bc08601374f7f5a7c5.bin",
+          "payloadBytes": 1069728,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/resources/ea9797b4f07e647161c6bd3f391ad621bafd3a907a874f3f51b453fc74c25fc6.ktx2",
+          "payloadBytes": 70864,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/scenes/shrine.kit.arch/default.gltf",
+          "payloadBytes": 2466,
+          "contentEncoding": "identity"
+        }
+      ]
+    },
+    {
+      "mode": "source",
+      "round": 2,
+      "payloadBytes": 1988767,
+      "loopbackFetchMs": 3.516667999974743,
+      "files": [
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/resources/158e12d857a1215fbce37007d995a4c1280335036ab40b1c5df6b55219d9368a.ktx2",
+          "payloadBytes": 100804,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/resources/6a0ddc1da8fe4e2dd421eb708214b01ffd925089dd83826d7b2d4153c6f86d36.ktx2",
+          "payloadBytes": 744905,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/resources/db155153cd865a17bc25c67c32aba73e10d18ed63a6122bc08601374f7f5a7c5.bin",
+          "payloadBytes": 1069728,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/resources/ea9797b4f07e647161c6bd3f391ad621bafd3a907a874f3f51b453fc74c25fc6.ktx2",
+          "payloadBytes": 70864,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/scenes/shrine.kit.arch/default.gltf",
+          "payloadBytes": 2466,
+          "contentEncoding": "identity"
+        }
+      ]
+    },
+    {
+      "mode": "discrete",
+      "round": 2,
+      "payloadBytes": 2299759,
+      "loopbackFetchMs": 6.928187000085018,
+      "files": [
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/resources/158e12d857a1215fbce37007d995a4c1280335036ab40b1c5df6b55219d9368a.ktx2",
+          "payloadBytes": 100804,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/resources/6a0ddc1da8fe4e2dd421eb708214b01ffd925089dd83826d7b2d4153c6f86d36.ktx2",
+          "payloadBytes": 744905,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/resources/db155153cd865a17bc25c67c32aba73e10d18ed63a6122bc08601374f7f5a7c5.bin",
+          "payloadBytes": 1069728,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/resources/ea9797b4f07e647161c6bd3f391ad621bafd3a907a874f3f51b453fc74c25fc6.ktx2",
+          "payloadBytes": 70864,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/scenes/shrine.kit.arch/default.gltf",
+          "payloadBytes": 2466,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/scenes/shrine.kit.arch/lod1.bin",
+          "payloadBytes": 87420,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/scenes/shrine.kit.arch/lod1.gltf",
+          "payloadBytes": 2637,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/scenes/shrine.kit.arch/lod2.bin",
+          "payloadBytes": 70944,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/scenes/shrine.kit.arch/lod2.gltf",
+          "payloadBytes": 2637,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/scenes/shrine.kit.arch/lod3.bin",
+          "payloadBytes": 71040,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/scenes/shrine.kit.arch/lod3.gltf",
+          "payloadBytes": 2637,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/scenes/shrine.kit.arch/lod4.bin",
+          "payloadBytes": 71040,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/scenes/shrine.kit.arch/lod4.gltf",
+          "payloadBytes": 2637,
+          "contentEncoding": "identity"
+        }
+      ]
+    },
+    {
+      "mode": "cluster",
+      "round": 2,
+      "payloadBytes": 2775255,
+      "loopbackFetchMs": 4.600647999723151,
+      "files": [
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/resources/158e12d857a1215fbce37007d995a4c1280335036ab40b1c5df6b55219d9368a.ktx2",
+          "payloadBytes": 100804,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/resources/6a0ddc1da8fe4e2dd421eb708214b01ffd925089dd83826d7b2d4153c6f86d36.ktx2",
+          "payloadBytes": 744905,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/resources/db155153cd865a17bc25c67c32aba73e10d18ed63a6122bc08601374f7f5a7c5.bin",
+          "payloadBytes": 1069728,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/resources/ea9797b4f07e647161c6bd3f391ad621bafd3a907a874f3f51b453fc74c25fc6.ktx2",
+          "payloadBytes": 70864,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/inputs/arch-discrete/scenes/shrine.kit.arch/default.gltf",
+          "payloadBytes": 2466,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/shrine/shrine.kit.arch/shrine.kit.arch.bin",
+          "payloadBytes": 784012,
+          "contentEncoding": "identity"
+        },
+        {
+          "path": "target/virtual-geometry/shrine/shrine.kit.arch/shrine.kit.arch.json",
+          "payloadBytes": 2476,
+          "contentEncoding": "identity"
+        }
+      ]
+    }
+  ]
+}

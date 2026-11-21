@@ -1,0 +1,4 @@
+offscreen on NVIDIA GeForce RTX 3060 Ti (Vulkan, NVIDIA)
+robot kits: 28 entries, 12 textures decoded in 50 ms
+robot kits: 32 entries, 4 textures decoded in 25 ms
+offscreen 1280x720 on assembly-works: 300 frames in 0.53 s; frame ms mean 1.66 p50 1.63 p95 1.87 max 10.18

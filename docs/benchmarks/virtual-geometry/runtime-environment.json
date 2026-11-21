@@ -1,0 +1,6 @@
+{
+  "rustc": "rustc 1.100.0 (0ef1bc386 2026-11-09)\nbinary: rustc\ncommit-hash: 0ef1bc386059596dada8fb65b50425aab2ea637a\ncommit-date: 2026-11-09\nhost: x86_64-unknown-linux-gnu\nrelease: 1.100.0\nLLVM version: 23.1.5\n",
+  "benchmarkSourceSha256": "a1576683ef292859d34a75abcf696248840a51d8ed596404c4f756190f296cd6",
+  "lodRunnerLockSha256": "316c0aec6c6abe19e14ddf35ff204aab45ca29e3204397467947cfb4d339cc71",
+  "note": "Runtime benchmark source hash; working-tree code was compiled before measurements. Ordinary desktop workload was active."
+}

@@ -355,6 +355,12 @@ instance in every view each frame.
 
 ## Work contracts
 
+`Viewport::work().cpu_triangles` and `cpu_shadow_triangles` count submitted indexed
+triangles in the main and shadow views, respectively, after CPU frustum culling and
+before clipping/rasterization. They multiply each draw's triangle count by its visible
+instance count. GPU-indirect draws are excluded because their instance counts require
+readback; these counters must not be reported as the total with GPU culling enabled.
+
 The engine's CPU-side frame work and edit costs are counted where they happen and held to
 these growth bounds by `tests/work.rs`, with exact counts over 64, 1 024 and 22 400 instances
 (the size of the oracle's `many_instances`), sparse (8 visible) and dense (all visible). GPU

@@ -16,6 +16,25 @@ use render_engine::{
 
 const SIZE: u32 = 128;
 
+#[test]
+fn submitted_cpu_triangle_counts_exclude_indirect_draws() {
+    let mut f = fixture();
+    let mut instances = f.instances();
+    instances.retain(|i| i.material != f.blend);
+    let Some((mut cpu, mut indirect)) = f.pair() else {
+        return;
+    };
+    let scene = base_scene(false);
+    let renderer = f.gpu.renderer();
+    renderer.prepare(&mut cpu, &f.world, &scene, &instances);
+    renderer.prepare(&mut indirect, &f.world, &scene, &instances);
+    assert!(cpu.work().cpu_triangles > 0);
+    assert!(cpu.work().cpu_shadow_triangles > 0);
+    assert!(indirect.work().gpu_bounds_tests > 0);
+    assert_eq!(indirect.work().cpu_triangles, 0);
+    assert_eq!(indirect.work().cpu_shadow_triangles, 0);
+}
+
 fn base_scene(lights: bool) -> Scene {
     Scene {
         camera: Camera {
