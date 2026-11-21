@@ -73,7 +73,8 @@ each with a follow-up issue.
 
 CI (`.github/workflows/validate.yml`) runs all of this on plain Ubuntu with lavapipe
 (`WGPU_FORCE_FALLBACK_ADAPTER=1`) in parallel jobs: `tests` (engine fmt/clippy/test, never
-compiles Bevy), `oracle-checks` (oracle clippy/test, three-lighting tests) and `oracle 1/4`…`4/4`
+compiles Bevy; a crashing test leaves a core, its backtrace in the log and the `crash-stacks`
+artifact, via `scripts/crash-stacks.sh`), `oracle-checks` (oracle clippy/test, three-lighting tests) and `oracle 1/4`…`4/4`
 (the FLIP gate, `--shard K/4`); `oracle` joins the slices' reports into the Pages site and fails
 when any of them failed. Markdown-only PRs skip all of them;
 `main` requires the `merge-ready` check. The FLIP gate is enforced on CI. The GPU-time gate is a
