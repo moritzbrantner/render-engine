@@ -9,9 +9,11 @@
 // passes. The engine's update threads reap and append in an order its atomics decide; here they
 // run in alive-list order, one valid order of the same pass.
 //
-// Not on WebGL 2: lit particles (`lighting`), fogged particles (`fog`) and soft particles
-// (`depthFade`). An emitter that asks for them draws unlit, unfogged and with hard edges, and
-// lists them in `emitter.unsupported`.
+// The engine's opt-ins beyond hanabi (render-engine#130) draw as `particles_shaded.wgsl` does:
+// a lit emitter (`lighting`) shades each quad through LitMaterial's fragment stage
+// (`litShading`) as a StandardMaterial, a fogged one (`fog`) takes the scene's distance fog, and
+// a soft one (`depthFade`) fades out in front of the opaque scene, read from the depth `Lighting`
+// resolves after the opaque draws (WebGL 2 cannot sample the multisampled depth).
 
 import {
   AddEquation,
@@ -32,6 +34,7 @@ import {
   Vector3,
   ZeroFactor,
 } from 'three';
+import { litShading, NO_LOCAL_LIGHTS } from './shaders.js';
 
 const f32 = Math.fround;
 
@@ -321,6 +324,14 @@ in vec2 particleSize;
 in vec4 particleColor;
 out vec4 vColor;
 out vec2 vUv;
+// What LitMaterial's fragment stage reads (lit and fogged emitters): the world position and the
+// quad's unit normal, towards the camera; no tangents.
+out vec3 vWorld;
+out vec3 vNormal;
+out vec4 vTangent;
+flat out float vHasTangents;
+// The view distance along the camera's axis (soft emitters; the engine's near / depth).
+out float vViewDistance;
 
 void main() {
   vec2 corner = position.xy;
@@ -333,7 +344,16 @@ void main() {
   }
   vec2 vpos = corner * particleSize;
   vec3 world = particlePosition + axisX * vpos.x + axisY * vpos.y;
-  gl_Position = projectionMatrix * viewMatrix * vec4(world, 1.0);
+  vec4 view = viewMatrix * vec4(world, 1.0);
+  gl_Position = projectionMatrix * view;
+  vViewDistance = -view.z;
+  vWorld = world;
+  // x × y is the camera's back axis for camera-plane quads; a velocity-aligned quad's turns to
+  // the camera too.
+  vec3 normal = normalize(cross(axisX, axisY));
+  vNormal = dot(normal, eye - particlePosition) < 0.0 ? -normal : normal;
+  vTangent = vec4(0.0);
+  vHasTangents = 0.0;
   vColor = particleColor;
   vec2 uv = vec2(corner.x + 0.5, 0.5 - corner.y);
   if (flipbookColumns > 0) {
@@ -345,16 +365,13 @@ void main() {
 }
 `;
 
-const fragmentShader = /* glsl */ `
-precision highp float;
+// The particle's colour after its texture and round mask, and the soft fade.
+const particleFragment = /* glsl */ `
 uniform sampler2D map;
 uniform int mapping;
 uniform float roundness;
-in vec4 vColor;
-in vec2 vUv;
-layout(location = 0) out highp vec4 fragColor;
 
-void main() {
+vec4 particleColor() {
   vec4 color = vColor;
   if (mapping > 0) {
     vec4 tex = texture(map, vUv);
@@ -366,9 +383,66 @@ void main() {
     float n = 2.0 / roundness;
     if (pow(abs(1.0 - 2.0 * vUv.x), n) + pow(abs(1.0 - 2.0 * vUv.y), n) > 1.0) discard;
   }
+  return color;
+}
+
+#ifdef PARTICLE_SOFT
+// The opaque scene's depth (three's projection, the MSAA depth resolved; Lighting.render) and
+// three's depth-to-view-distance terms (the projection's elements 10 and 14).
+uniform highp sampler2D sceneDepth;
+uniform vec2 depthToDistance;
+uniform float depthFade;
+in float vViewDistance;
+
+// Soft particles (render-engine particles.wgsl depth_fade): alpha fades to zero over the last
+// depthFade metres of view distance in front of the opaque scene. Three's cleared depth (Bevy's
+// reverse-Z 0: nothing drawn) is infinitely far.
+float softFade() {
+  float depth = texelFetch(sceneDepth, ivec2(gl_FragCoord.xy), 0).r;
+  float scene = depth >= 1.0 ? 1e30 : depthToDistance.y / (depth * 2.0 - 1.0 + depthToDistance.x);
+  return clamp((scene - vViewDistance) / depthFade, 0.0, 1.0);
+}
+#endif
+
+// render-engine particles_shaded.wgsl shaded_color: a lit particle is a StandardMaterial on its
+// quad (base colour = the particle's colour after its texture, the quad's normal towards the
+// camera, no emissive light or occlusion); a fogged one, lit or not, takes the distance fog like
+// Bevy's main_pass_post_lighting_processing, alpha kept.
+void main() {
+  vec4 color = particleColor();
+#ifdef PARTICLE_LIT
+  MaterialSample m;
+  m.baseColor = color;
+  m.emissive = vec3(0.0);
+  m.metallic = metallic;
+  m.perceptualRoughness = perceptualRoughness;
+  m.diffuseOcclusion = 1.0;
+  m.Nt = vec3(0.0);
+  color = vec4(litRadiance(vNormal, normalize(vNormal), m), color.a);
+#endif
+#ifdef PARTICLE_FOG
+  if (fogBi.w > 0.5) {
+    color.rgb = applyFog(color.rgb, vWorld);
+  }
+#endif
+#ifdef PARTICLE_SOFT
+  color.a *= softFade();
+#endif
   fragColor = color;
 }
 `;
+
+// Unlit and unfogged (hanabi's particles).
+const fragmentShader = /* glsl */ `
+precision highp float;
+in vec4 vColor;
+in vec2 vUv;
+layout(location = 0) out highp vec4 fragColor;
+${particleFragment}`;
+
+// Lit or fogged: after LitMaterial's lights, shadows and fog.
+const shadedFragmentShader = /* glsl */ `${litShading}
+${particleFragment}`;
 
 // Two triangles over hanabi's unit quad.
 const CORNERS = [-0.5, -0.5, 0, 0.5, -0.5, 0, 0.5, 0.5, 0, -0.5, -0.5, 0, 0.5, 0.5, 0, -0.5, 0.5, 0];
@@ -380,8 +454,10 @@ const back = new Vector3();
 /**
  * One render-engine emitter on WebGL 2: add it to the scene that `Lighting.render` draws, call
  * `step(dt)` at the game's simulation rate. Its particles draw after the blended geometry, back to
- * front by the emitter's position with the other emitters, unlit, additive (`blend: 'add'`) or
- * alpha-blended into the HDR target, depth-tested but not written.
+ * front by the emitter's position with the other emitters, additive (`blend: 'add'`) or
+ * alpha-blended into the HDR target, depth-tested but not written. They are unlit and unfogged
+ * unless the description asks for `lighting` or `fog`, which take `Lighting`'s lights, shadows,
+ * exposure and fog; `depthFade` softens them against the opaque scene.
  *
  * The description is render-engine's `Emitter` in camelCase (`emitterDescription`); a texture
  * is `{ texture: THREE.Texture, mapping, flipbook: { grid: [columns, rows], frames } }`.
@@ -404,7 +480,15 @@ export class ParticleEmitter extends Mesh {
         map: { value: null },
         mapping: { value: 0 },
         roundness: { value: 0 },
+        metallic: { value: 0 },
+        perceptualRoughness: { value: 0.5 },
+        reflectance: { value: 0.5 },
+        depthFade: { value: 0 },
+        depthToDistance: { value: new Vector2() },
       },
+      // Lighting sizes the lit shader's light loops (and binds its frame uniforms, sceneDepth
+      // among them) on every material that uses them.
+      defines: { ...NO_LOCAL_LIGHTS },
       transparent: true,
       // Depth tested like the lit geometry (Lighting's main pass uses three's depth convention).
       depthWrite: false,
@@ -413,6 +497,7 @@ export class ParticleEmitter extends Mesh {
       blendEquation: AddEquation,
       blendEquationAlpha: AddEquation,
     });
+    material.usesLighting = true;
     super(geometry, material);
     this.isParticleEmitter = true;
     this.frustumCulled = false;
@@ -440,8 +525,13 @@ export class ParticleEmitter extends Mesh {
     this.colorKeys = flatten(d.colorOverLife?.gradient, 4);
     this.colorBlend = d.colorOverLife ? COLOR_BLEND[d.colorOverLife.blend] : -1;
     this.frames = d.texture?.flipbook?.frames ?? 0;
-    this.unsupported = [d.lighting && 'lighting', d.fog && 'fog', d.depthFade > 0 && 'depthFade'].filter(Boolean);
     const u = this.material.uniforms;
+    const lighting = d.lighting ?? { perceptualRoughness: 0.5, metallic: 0, reflectance: 0.5 };
+    u.perceptualRoughness.value = lighting.perceptualRoughness;
+    u.metallic.value = lighting.metallic;
+    u.reflectance.value = lighting.reflectance;
+    u.depthFade.value = d.depthFade;
+    this.#setShader(Boolean(d.lighting), d.fog, d.depthFade > 0);
     u.orient.value = ORIENT[d.orient];
     u.roundness.value = d.roundness;
     u.mapping.value = d.texture ? MAPPING[d.texture.mapping] : 0;
@@ -458,6 +548,18 @@ export class ParticleEmitter extends Mesh {
       Object.assign(m, { blendDst: OneMinusSrcAlphaFactor, blendSrcAlpha: OneFactor, blendDstAlpha: OneMinusSrcAlphaFactor });
     }
     m.needsUpdate = true;
+  }
+
+  /** The fragment stage for the emitter's opt-ins (setEmitter flags the material for update). */
+  #setShader(lit, fog, soft) {
+    const m = this.material;
+    m.fragmentShader = lit || fog ? shadedFragmentShader : fragmentShader;
+    for (const [name, on] of Object.entries({ PARTICLE_LIT: lit, PARTICLE_FOG: fog, PARTICLE_SOFT: soft })) {
+      if (on) m.defines[name] = '';
+      else delete m.defines[name];
+    }
+    // Lighting splits its main pass so the opaque depth is resolved before these draw.
+    m.readsSceneDepth = soft;
   }
 
   /** Where new particles spawn; alive ones stay where they are (world-space simulation). */
@@ -694,6 +796,8 @@ export class ParticleEmitter extends Mesh {
     u.cameraRight.value.copy(right).normalize();
     u.cameraUp.value.copy(up).normalize();
     u.eye.value.setFromMatrixPosition(camera.matrixWorld);
+    const p = camera.projectionMatrix.elements;
+    u.depthToDistance.value.set(p[10], p[14]);
   }
 
   dispose() {

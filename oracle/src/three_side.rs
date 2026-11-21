@@ -11,7 +11,7 @@
 //! reported as a known gap with its follow-up issue (`GAPS`).
 
 use crate::content::{Assets, Geometry, MeshInstance};
-use crate::particles::{Driver, ParticleScenario, Reference, Spawn};
+use crate::particles::{Driver, ParticleScenario, Spawn};
 use crate::scenarios::Scenario;
 use render_engine::material::AlphaMode;
 use render_engine::mesh::MeshData;
@@ -27,7 +27,7 @@ use std::{collections::HashMap, path::Path};
 pub const GAPS: &[(&str, u32)] = &[];
 
 /// Follow-up issue per capability the port does not cover yet.
-const UNPORTED_ISSUE: &[(&str, u32)] = &[("lit and fogged particles", 130)];
+const UNPORTED_ISSUE: &[(&str, u32)] = &[];
 
 pub fn gap_issue(name: &str) -> Option<u32> {
     GAPS.iter().find(|(n, _)| *n == name).map(|(_, i)| *i)
@@ -604,9 +604,4 @@ pub fn export_particles(
         "emitters": emitters,
     });
     write(s.name, &doc, &bin, dir)
-}
-
-/// Why a particle scenario has no three.js side yet, with its follow-up issue.
-pub fn particles_unsupported(s: &ParticleScenario) -> Option<&'static str> {
-    (s.reference == Reference::StandardQuads).then_some("lit and fogged particles")
 }

@@ -77,8 +77,9 @@ pub enum Reference {
     Hanabi,
     /// Lit and fogged particles, which hanabi does not have (#84): Bevy draws each particle's
     /// state ([`quad_states`]) as a camera-facing `Rectangle` with a `StandardMaterial` (lit or
-    /// unlit, `fog_enabled` per emitter). The states follow from the emitters without random
-    /// draws, so both sides draw the same particles; the gate is on their shading.
+    /// unlit, `fog_enabled` per emitter; soft emitters, #83, fade it from Bevy's depth prepass).
+    /// The states follow from the emitters without random draws, so both sides draw the same
+    /// particles; the gate is on their shading.
     StandardQuads,
 }
 
@@ -170,6 +171,9 @@ pub struct Emitter {
     pub lighting: Option<ParticleLighting>,
     /// Fogged particles (opt-in beyond hanabi, #84): [`Reference::StandardQuads`] scenarios only.
     pub fog: bool,
+    /// Soft particles (opt-in beyond hanabi, #83): metres of fade in front of the opaque scene
+    /// (0: hard). [`Reference::StandardQuads`] scenarios only.
+    pub depth_fade: f32,
     /// How render-engine's side fills the emitter; Bevy's runs hanabi's spawner either way.
     pub driver: Driver,
 }
@@ -278,7 +282,7 @@ impl Emitter {
                 flipbook: t.flipbook,
             }),
             roundness: if self.round { 1.0 } else { 0.0 },
-            depth_fade: 0.0,
+            depth_fade: self.depth_fade,
             blend: self.blend,
             lighting: self.lighting,
             fog: self.fog,
@@ -383,6 +387,7 @@ pub fn all() -> Vec<ParticleScenario> {
         particles_textured(),
         smoke_and_sparks(),
         lit_fog(),
+        soft(),
         snapshot(),
         cone_bursts(),
     ]
@@ -536,6 +541,7 @@ fn sparks(translation: Vec3) -> Emitter {
         translation,
         lighting: None,
         fog: false,
+        depth_fade: 0.0,
         driver: Driver::Spawner,
     }
 }
@@ -591,6 +597,7 @@ fn particles_textured() -> ParticleScenario {
                 translation: Vec3::new(-0.7, 0.05, 0.3),
                 lighting: None,
                 fog: false,
+                depth_fade: 0.0,
                 driver: Driver::Spawner,
             },
             sparks(Vec3::new(0.6, 0.3, 0.5)),
@@ -669,6 +676,7 @@ fn smoke_and_sparks() -> ParticleScenario {
                 translation: Vec3::new(-0.75, 0.1, -0.2),
                 lighting: None,
                 fog: false,
+                depth_fade: 0.0,
                 driver: Driver::Spawner,
             },
             sparks(Vec3::new(0.3, 0.3, 0.9)),
@@ -782,6 +790,7 @@ fn lit_fog() -> ParticleScenario {
         translation: at,
         lighting,
         fog,
+        depth_fade: 0.0,
         driver: Driver::Spawner,
     };
     let emitters = vec![
@@ -805,6 +814,125 @@ fn lit_fog() -> ParticleScenario {
         objects,
         assets,
         seed: 0x5eed_0500,
+        emitters,
+        captures: vec![
+            Capture {
+                frame: 32,
+                tier: Tier::Exact,
+            },
+            Capture {
+                frame: 160,
+                tier: Tier::Exact,
+            },
+        ],
+        // Every capture is exact (the FLIP gate); there is no statistical capture.
+        stat_max: StatThresholds {
+            coverage: 0.0,
+            spatial: 0.0,
+            colour: 0.0,
+        },
+        reference: Reference::StandardQuads,
+    }
+}
+
+/// `particles_soft` (#83, #130): soft particles in the lit set. Puffs and a glow cut into the
+/// ground and stand just in front of the boxes, each fading out over its last `depth_fade` metres
+/// in front of the opaque scene: a lit puff on the ground beside a hard control, an unlit puff
+/// before box 1, an additive glow before box 2, and a puff against the clear colour (nothing
+/// behind it: never faded). Soft particles have no Bevy counterpart (technical decisions D9), so
+/// Bevy draws the [`Reference::StandardQuads`] with the engine's fade on top of
+/// `StandardMaterial`'s fragment stage, from its depth prepass (`bevy_side::SoftFade`). Every
+/// capture is exact, like `particles_lit_fog`.
+fn soft() -> ParticleScenario {
+    let (scene, objects) = lit_set(set_camera());
+    let mut assets = Assets::default();
+    assets.textures.push(puff());
+    let grey = Vec4::new(0.6, 0.6, 0.6, 0.9);
+    let glow = Vec4::new(4.0, 1.6, 0.4, 0.8);
+    let diffuse = Some(ParticleLighting::diffuse());
+    let puff = |name,
+                at: Vec3,
+                size: f32,
+                color: Vec4,
+                lighting: Option<ParticleLighting>,
+                blend,
+                depth_fade| Emitter {
+        name,
+        capacity: 1,
+        spawn: Spawn::Burst { count: 1 },
+        position: Vec3::ZERO,
+        radius: 0.0,
+        velocity: Velocity::Jitter {
+            base: Vec3::new(0.0, 0.1, 0.0),
+            spread: Vec3::ZERO,
+        },
+        lifetime: 256.0 * DT,
+        gravity: Vec3::ZERO,
+        size: square(&[(0.0, size), (1.0, size * 1.2)]),
+        color: vec![(0.0, color), (1.0, color * Vec4::new(1.0, 1.0, 1.0, 0.8))],
+        orient: Orient::CameraPlane,
+        texture: Some(EmitterTexture {
+            texture: 0,
+            mapping: TextureMapping::Modulate,
+            flipbook: None,
+        }),
+        round: false,
+        blend,
+        translation: at,
+        lighting,
+        fog: false,
+        depth_fade,
+        driver: Driver::Spawner,
+    };
+    let (alpha, add) = (ParticleBlend::Alpha, ParticleBlend::Add);
+    let emitters = vec![
+        puff(
+            "ground",
+            Vec3::new(-0.3, 0.1, 1.6),
+            1.4,
+            grey,
+            diffuse,
+            alpha,
+            0.8,
+        ),
+        puff(
+            "ground_hard",
+            Vec3::new(2.4, 0.1, 1.2),
+            1.4,
+            grey,
+            diffuse,
+            alpha,
+            0.0,
+        ),
+        puff(
+            "box",
+            Vec3::new(-1.5, 0.7, 0.35),
+            1.0,
+            grey,
+            None,
+            alpha,
+            0.5,
+        ),
+        puff("glow", Vec3::new(1.4, 0.3, 0.5), 0.9, glow, None, add, 0.3),
+        puff(
+            "sky",
+            Vec3::new(-1.0, 2.6, -3.0),
+            0.8,
+            grey,
+            None,
+            alpha,
+            1.0,
+        ),
+    ];
+    ParticleScenario {
+        name: "particles_soft",
+        capability: "soft particles (depth fade) vs StandardMaterial quads",
+        width: 1280,
+        height: 720,
+        scene,
+        objects,
+        assets,
+        seed: 0x5eed_0083,
         emitters,
         captures: vec![
             Capture {
@@ -978,6 +1106,7 @@ fn fountain() -> ParticleScenario {
                 translation: Vec3::ZERO,
                 lighting: None,
                 fog: false,
+                depth_fade: 0.0,
                 driver: Driver::Spawner,
             },
             Emitter {
@@ -1005,6 +1134,7 @@ fn fountain() -> ParticleScenario {
                 translation: Vec3::ZERO,
                 lighting: None,
                 fog: false,
+                depth_fade: 0.0,
                 driver: Driver::Spawner,
             },
         ],
@@ -1069,6 +1199,7 @@ fn cone(
         translation: Vec3::ZERO,
         lighting: None,
         fog: false,
+        depth_fade: 0.0,
         driver: Driver::Spawner,
     }
 }
@@ -1183,6 +1314,7 @@ fn hundred_k() -> ParticleScenario {
         translation: Vec3::ZERO,
         lighting: None,
         fog: false,
+        depth_fade: 0.0,
         driver: Driver::Spawner,
     }];
     for i in 0..50 {
@@ -1211,6 +1343,7 @@ fn hundred_k() -> ParticleScenario {
             translation: Vec3::ZERO,
             lighting: None,
             fog: false,
+            depth_fade: 0.0,
             driver: Driver::Spawner,
         });
     }
@@ -1285,6 +1418,7 @@ fn alpha() -> ParticleScenario {
         translation,
         lighting: None,
         fog: false,
+        depth_fade: 0.0,
         driver: Driver::Spawner,
     };
     ParticleScenario {

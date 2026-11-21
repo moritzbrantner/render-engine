@@ -490,14 +490,26 @@ Each capture is judged by one of two tiers:
   fogged particles are built as opt-in emitter options; every default stays hanabi parity, so
   the particle scenarios above are unchanged. Lit and fogged particles are gated against Bevy
   `StandardMaterial` camera-facing quads (#84, `particles_lit_fog`). Soft particles have no Bevy
-  counterpart and are checked by engine tests and the kit scenes:
+  counterpart; they are checked by engine tests, the kit scenes and, since #130,
+  `particles_soft` (below):
   - **Soft particles** (#83, `Emitter::depth_fade`): over the last `depth_fade` metres of view
     distance in front of the opaque scene, alpha is scaled by `clamp((scene − particle) /
     depth_fade, 0, 1)`, with the scene's distance from sample 0 of the multisampled depth
     (reverse-Z infinite: distance = near / depth; depth 0 is infinitely far). The particles
     of a frame with a soft emitter draw in a pass of their own after the main pass, with the
     depth target attached read-only and bound as a texture; a frame without one keeps them in
-    the main pass and renders as before.
+    the main pass and renders as before. **Oracle** (#130): `particles_soft` puts lit and unlit,
+    alpha and additive puffs into the lit set's ground and in front of its boxes, beside a hard
+    control and a puff with nothing behind it, as `Reference::StandardQuads`. The Bevy side
+    extends each soft quad's `StandardMaterial` (`ExtendedMaterial`, `oracle/src/soft_quad.wesl`)
+    with the same fade, read from sample 0 of a depth prepass, on the base colour's alpha
+    before `pbr.wesl`'s lighting (emissive light is zero, so this equals fading after shading).
+    The reference is thus the engine's formula on Bevy's shading, depth and blending, not a Bevy
+    feature. Both captures are exact: on the RTX 3060 Ti render-engine scores FLIP mean 0.0000
+    and p99 0.0006, the three.js side p99 ≤ 0.0011 (lavapipe: 0.0000 and ≤ 0.0001); the
+    three.js side with the fade switched off scores mean 0.0057–0.0063 and p99 0.22–0.26 and
+    fails. `--calibrate` gives 0 for every variant: there are no random draws and no gravity.
+    GPU time is 0.138 ms against Bevy's 0.265 ms.
   - **Lit and fogged particles** (#84, `Emitter::lighting`, `Emitter::fog`): a lit particle is
     shaded as a Bevy `StandardMaterial` on its camera-facing quad. Its base colour is the
     particle's colour after its texture, its roughness, metallic and reflectance come from
@@ -583,7 +595,11 @@ Each capture is judged by one of two tiers:
   instanced quads in `Lighting`'s HDR pass. The oracle exports each `Reference::Hanabi` scenario
   with the engine's own emitter descriptions (`three_side::export_particles`), drives them as it
   drives render-engine, and judges them by the same tiers and counts. Every hanabi scenario
-  passes; lit, fogged and soft particles are not ported ([#130](https://github.com/moritzbrantner/render-engine/issues/130)).
+  passes. Lit and fogged emitters (#130) shade through `LitMaterial`'s fragment stage
+  (`litShading`) with their own `main`, as `particles_shaded.wgsl` follows `lit.wgsl`; soft ones
+  read the opaque draws' depth, which `Lighting` resolves after them (WebGL 2 cannot sample the
+  multisampled depth), so a frame with one splits its main pass like a frame with a sky.
+  `particles_lit_fog` and `particles_soft` pass on this side too.
   Its update runs in alive-list order, one valid order of the engine's atomics, so with the
   engine and Bevy recycling slots in the same order (above) its late captures match too.
 

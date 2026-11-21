@@ -716,22 +716,6 @@ fn three_particles(
             f(flip.map(|f| f.1))
         );
     };
-    if let Some(reason) = three_side::particles_unsupported(s) {
-        let issue = three_side::unported_issue(reason);
-        print(
-            "",
-            None,
-            &format!("not ported ({reason}, #{})", issue.unwrap_or(0)),
-        );
-        return json!({
-            "status": "unported",
-            "reason": reason,
-            "issue": issue,
-            "result": format!("not ported ({reason})"),
-            "passed": false,
-            "blocking": false,
-        });
-    }
     let gap = three_side::gap_issue(s.name);
     let fail = |result: String| {
         print("", None, &result);
