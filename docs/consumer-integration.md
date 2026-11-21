@@ -616,7 +616,10 @@ let running = render_engine_web::start(canvas, Options::default(), Game::new()).
   noticed on the next frame or within 250 ms. The loop drops the app's `State`, calls
   `App::device_lost`, creates a new device, canvas configuration and renderer, and calls
   `App::init` again: the game re-uploads from its own data, which is why that data lives in the
-  app, not the state. Five failed attempts end the loop with `App::failed`.
+  app, not the state. Five failed attempts end the loop with `App::failed`. `Gpu::destroy`
+  records the loss at once but destroys the device only after the canvas has presented its last
+  frame (two animation frames, then the queue's submitted work): headless Firefox 159 otherwise
+  stops serving the page animation frames for good (#135, below).
 - **Timing.** `timing::frame_times` is the async `Headless::gpu_frame_times`: GPU timestamps plus
   `prepare`, `encode` and submit per frame, offscreen, after a warm-up.
 - **Content.** The engine reads no files, natively or in the browser (D7). The page fetches its
@@ -670,10 +673,14 @@ The two tone-mapping LUTs the engine embeds are 0.37 MB of it, already compresse
   identical too.
 - **Device loss.** Chromium: `Gpu::destroy` and a real GPU process crash (`Browser.crashGpuProcess`)
   both recover onto a new device with the same image and no errors. Firefox: `Gpu::destroy`
-  recovers (new device, same image when drawn with `render_now`), but the browser then serves the
-  page no animation frames at all, its own included; a plain JS page doing the same does not
-  reproduce it, so the cause is not found. A real GPU reset in Firefox was not tested (Playwright's
-  Firefox has no way to cause one).
+  recovers the same way. In both, the page's animation frames and the loop's frames keep coming
+  after the recovery (30 of each within 10 s; `scripts/web-showcase.sh` fails otherwise). This
+  needs `Gpu::destroy`'s deferral: headless Firefox 159 (Playwright's and the stock build, not a
+  headed window) never completes the presentation of a canvas frame whose device is destroyed
+  before it is presented, and once the canvas changes after that (configured for the new
+  device), it serves the page no more animation frames at all. A plain JS page shows it
+  (#135). A real GPU reset in Firefox was not tested (Playwright's Firefox has no way to cause
+  one); one that lands while a frame is being presented may stall a headless Firefox the same way.
 - **Resize.** At device pixel ratio 2 the canvas renders 2560 × 1440 for a 1280 × 720 CSS box,
   and follows CSS resizes (640 × 360 → 1280 × 720, 333 × 517 → 666 × 1034) without errors, in both
   browsers.

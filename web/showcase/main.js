@@ -107,17 +107,23 @@ async function runTask(showcase, startup) {
     if (q.get('how') === 'crash') window.smokeCrashGpu = true;
     else showcase.lose_device();
     const deadline = performance.now() + 20_000;
-    // Timers, not animation frames: Firefox 159 stops a page's animation frames after its device
-    // is destroyed (see docs/consumer-integration.md#browser-webgpu).
+    // Timers, not animation frames: a browser can stop serving animation frames after a loss
+    // (Firefox 159 did, #135), and the check below must see that rather than hang.
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     while (showcase.generation() < 2 && performance.now() < deadline) await sleep(50);
+    // Frames keep coming after the recovery: the page's own animation frames and the loop's
+    // drawn frames, 30 of each within 10 s (the new device's first frames compile pipelines).
+    const drawnAtRecovery = stats(showcase).drawn;
+    const recoveredAt = performance.now();
     let animationFrames = 0;
     const count = () => {
       animationFrames++;
-      requestAnimationFrame(count);
+      if (animationFrames < 30) requestAnimationFrame(count);
     };
     requestAnimationFrame(count);
-    await sleep(1000);
+    const loopFrames = () => stats(showcase).drawn - drawnAtRecovery;
+    while ((animationFrames < 30 || loopFrames() < 30) && performance.now() < recoveredAt + 10_000) await sleep(50);
+    const framesAfterMs = performance.now() - recoveredAt;
     const after = stats(showcase);
     const image = capture(showcase);
     const same = image.rgba.length === before.length && image.rgba.every((v, i) => v === before[i]);
@@ -128,7 +134,9 @@ async function runTask(showcase, startup) {
       errorsAfter: after.errors,
       status: status.textContent,
       sameImageAfterRecovery: same,
-      animationFramesInASecondAfter: animationFrames,
+      animationFramesAfter: animationFrames,
+      loopFramesAfter: after.drawn - drawnAtRecovery,
+      framesAfterMs,
       width: image.width,
       height: image.height,
       rgba: base64(image.rgba),

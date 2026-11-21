@@ -40,22 +40,21 @@ for browser in "${browsers[@]}"; do
       specs+=("$frame:$view")
     done
   done
+  # A recovery counts when the frames keep coming: 30 of the page's animation frames and 30 of the
+  # loop's within 10 s (Firefox 159 stopped serving them after a destroy, #135).
+  recovered='const r=JSON.parse(process.argv[1]); console.log(r.generation === 2 && r.sameImageAfterRecovery && r.animationFramesAfter >= 30 && r.loopFramesAfter >= 30'
   echo "-- device loss (destroy)"
   if r=$(node "$run" "$out" showcase tick1422 task=lose view=eye); then
-    show "$r" generation losses errorsAfter sameImageAfterRecovery animationFramesInASecondAfter status
-    [[ $(node -e 'const r=JSON.parse(process.argv[1]); console.log(r.generation === 2 && r.sameImageAfterRecovery && r.errorsAfter === 0)' "$r") == true ]] || failed=1
-    # Known: Firefox 159 serves the page no animation frames after the destroy (the new device
-    # renders, on demand); reported, not failed.
-    [[ $(node -e 'console.log(JSON.parse(process.argv[1]).animationFramesInASecondAfter > 0)' "$r") == true ]] ||
-      echo "note: no animation frames after the loss in $browser"
+    show "$r" generation losses errorsAfter sameImageAfterRecovery animationFramesAfter loopFramesAfter framesAfterMs status
+    [[ $(node -e "$recovered && r.errorsAfter === 0)" "$r") == true ]] || failed=1
   else
     failed=1
   fi
   if [[ $browser == chromium ]]; then
     echo "-- device loss (GPU process crash)"
     if r=$(node "$run" "$out" showcase tick1422 task=lose view=eye how=crash); then
-      show "$r" generation losses errorsAfter sameImageAfterRecovery animationFramesInASecondAfter status
-      [[ $(node -e 'const r=JSON.parse(process.argv[1]); console.log(r.generation === 2 && r.sameImageAfterRecovery)' "$r") == true ]] || failed=1
+      show "$r" generation losses errorsAfter sameImageAfterRecovery animationFramesAfter loopFramesAfter framesAfterMs status
+      [[ $(node -e "$recovered)" "$r") == true ]] || failed=1
     else
       failed=1
     fi
