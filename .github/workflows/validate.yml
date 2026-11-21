@@ -231,7 +231,7 @@ jobs:
       - name: Oracle images and Bevy runs
         run: |
           mkdir -p target/oracle
-          cp shards/*/*.png shards/*/*.json target/oracle/
+          cp shards/*/*.png shards/*/*.bevy.json target/oracle/
 
       - name: Browser gate (Firefox, WebGPU on lavapipe)
         env:
