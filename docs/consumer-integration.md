@@ -712,7 +712,9 @@ per-view culled counts must equal native's), every D9 particle scenario by its t
 and alive counts (read with the async `read_alive_particles` each frame; `particles_soft` tests soft
 particles against Bevy), and
 `particles_textured` and `smoke_and_sparks` with every emitter soft (`depth_fade` 0.5 m) against
-the same run natively. CI's `browser` job runs it in Playwright's Firefox on lavapipe; Chromium's
+the same run natively. CI's `browser` job runs it in Playwright's Firefox on lavapipe, under Xvfb (without a display
+Firefox offers no WebGPU and reports it "disabled by blocklist"; the gate then stops at its first
+scenario); Chromium's
 software adapter (SwiftShader) cannot be compared with Bevy on lavapipe (D8).
 
 **Evidence** (#129): RTX 3060 Ti, driver 595.99.02, Linux 7.0, Playwright's Chromium 159 and

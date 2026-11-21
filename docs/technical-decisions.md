@@ -381,7 +381,8 @@ As built (#11):
   counts must equal native's), the D9 particle scenarios by their tiers and spawn and alive
   counts (`particles_soft`, soft particles against Bevy's `StandardMaterial` quads, included), and
   two more particle scenarios with every emitter soft against native render-engine.
-  `scripts/browser-gate.sh` runs it; the CI job `browser` runs it in Playwright's Firefox against
+  `scripts/browser-gate.sh` runs it; the CI job `browser` runs it in Playwright's Firefox (under Xvfb: without a display
+  Firefox offers no WebGPU) against
   the oracle slices' images and is required by `merge-ready`. Why Firefox: its WebGPU is wgpu on
   Vulkan, so on a runner it gets lavapipe, the device Bevy and native render-engine run on there.
   Measured here with only lavapipe's ICD visible, every capture is within D3's gates and

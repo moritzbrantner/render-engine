@@ -208,6 +208,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libvulkan1
+          # Firefox offers WebGPU only with a display: Xvfb, with Mesa's GL for its driver probe.
+          sudo apt-get install -y --no-install-recommends xvfb xauth libgl1-mesa-dri
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
@@ -236,7 +238,7 @@ jobs:
       - name: Browser gate (Firefox, WebGPU on lavapipe)
         env:
           SMOKE_BROWSER: firefox
-        run: bash scripts/browser-gate.sh target/oracle
+        run: xvfb-run -a bash scripts/browser-gate.sh target/oracle
 
       - name: Upload the browser captures
         if: always()

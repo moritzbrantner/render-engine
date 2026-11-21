@@ -39,6 +39,18 @@ run() {
   fi
 }
 
+# Fail fast when the browser offers no WebGPU adapter (every scenario would fail the same way).
+# Firefox without a display reports "WebGPU is disabled by blocklist": run it under xvfb-run.
+echo "== WebGPU adapter (${SMOKE_BROWSER:-chromium})"
+if ! probe=$(node oracle/webgpu-smoke/run.mjs "$out" render sun_shadows 2>&1); then
+  reason=$(grep -oE 'WebGPU is disabled by blocklist|found no adapters|navigator\.gpu is missing|no WebGPU adapter' <<<"$probe" | head -1)
+  echo "browser gate: ${SMOKE_BROWSER:-chromium} gave no working WebGPU adapter (${reason:-see below}); nothing else was run."
+  echo "Firefox needs a display for WebGPU (xvfb-run) and a Vulkan driver (lavapipe on CI)."
+  head -c 4000 <<<"$probe"
+  exit 1
+fi
+echo "ok"
+
 echo "== Lighting (${SMOKE_BROWSER:-chromium}): engine on WebGPU vs Bevy"
 for s in "${lighting[@]}"; do run render "$s"; done
 $compare images "$out" "${lighting[@]}" || failed=1

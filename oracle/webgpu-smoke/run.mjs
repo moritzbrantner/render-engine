@@ -76,6 +76,11 @@ const browser =
         headless: true,
         firefoxUserPrefs: {
           'dom.webgpu.enabled': process.env.SMOKE_WEBGPU !== '0',
+          // Firefox's driver blocklist disables WebGPU on Mesa older than 25.0.4 (its bug 1979007),
+          // llvmpipe included; the gate wants lavapipe, the oracle's adapter, whatever the Mesa.
+          // Without a display Firefox has no WebGPU at all ("disabled by blocklist"): run it
+          // under Xvfb where there is none (CI: xvfb-run).
+          'gfx.webgpu.ignore-blocklist': true,
           ...(process.env.SMOKE_WEBGL === '0' ? { 'webgl.disabled': true } : {}),
         },
       })
