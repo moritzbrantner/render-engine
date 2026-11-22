@@ -7,7 +7,12 @@
 //! cargo run --release --example kit_showcase                   # every scene
 //! cargo run --release --example kit_showcase -- campfire_day   # one scene
 //! cargo run --release --example kit_showcase -- --scaling      # particle-count scaling
+//! cargo run --release --example kit_showcase -- --plain combat_bursts   # emitters only
 //! ```
+//!
+//! `--plain <scene>` draws only the scene's emitters, over a plain background (no terrain, props,
+//! sky or sun), into `target/kit-showcase/<scene>.plain.png`: the native side of the WebGL 2
+//! particle comparison (`examples/kit_web/`, docs/particle-kit-showcase.md).
 //!
 //! Each scene writes `target/kit-showcase/<scene>.png` and a line of `report.json`: alive
 //! particles, draws, particle GPU memory, the step's upload, CPU time of a frame's engine calls
@@ -45,6 +50,8 @@ static HARD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(
 const WIDTH: u32 = 1280;
 const HEIGHT: u32 = 720;
 const DT: f32 = 1.0 / 60.0;
+/// `--plain`'s background (linear), as `examples/kit_web/` clears to.
+const PLAIN_BACKGROUND: Vec3 = Vec3::splat(0.02);
 /// `Particle` + `Quad` + dead slot + two alive-list entries (`particle_sim.rs`).
 const BYTES_PER_SLOT: u64 = 64 + 64 + 4 + 4 + 4;
 /// `StepHeader` and one `GpuEmitterStep` per emitter (`particle_sim.rs`).
@@ -1535,6 +1542,23 @@ fn main() {
     println!("adapter: {} ({:?})", gpu.adapter.name, gpu.adapter.backend);
     let mut report = serde_json::Map::new();
     report.insert("adapter".into(), gpu.adapter.name.clone().into());
+    if let Some(at) = args.iter().position(|a| a == "--plain") {
+        let name = args[at + 1].as_str();
+        let mut b = build(name, &a, &gpu).expect("a scene name");
+        b.instances.clear();
+        b.scene.sky = None;
+        b.scene.sun = None;
+        b.scene.clear_color = PLAIN_BACKGROUND;
+        step(&gpu, &mut b.world, b.warmup);
+        let mut viewport = Viewport::new(gpu.renderer(), WIDTH, HEIGHT);
+        let frame = gpu
+            .render(&mut viewport, &b.world, &b.scene, &b.instances)
+            .expect("render");
+        let path = out.join(format!("{name}.plain.png"));
+        save(&frame, &path);
+        println!("{}", path.display());
+        return;
+    }
     if let Some(at) = args.iter().position(|a| a == "--record") {
         // `--record <scene> [frames]`: one PNG per 1/30 s after the warmup, for a short clip
         // (`ffmpeg -framerate 30 -i <scene>/%03d.png <scene>.webp`).

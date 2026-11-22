@@ -36,7 +36,7 @@ processing in asset-tooling. The engine never depends on Bevy outside `oracle/`.
 | `assets/ibl/` | CC0 HDRI and its prefiltered environment cube maps (`oracle/src/bin/bake_ibl.rs`; provenance in its README) |
 | `assets/props/` | CC0 glTF props for `textured_props` (provenance in its README) |
 | `assets/figure/` | CC0 rigged character for `skinned_figure` (provenance in its README) |
-| `examples/kit_showcase.rs`, `scripts/fetch-kits.sh`, `docs/particle-kit-showcase.md` | Particles on the owner's asset-tooling kits (Greyhaven terrain and nature, crag kit, combat and zoo flipbooks; SHA-256-pinned rolling releases in `target/kits/`): screenshots, recordings and particle/emitter scaling. Evidence, not a gate |
+| `examples/kit_showcase.rs`, `examples/kit_web/`, `scripts/fetch-kits.sh`, `docs/particle-kit-showcase.md` | Particles on the owner's asset-tooling kits (Greyhaven terrain and nature, crag kit, combat and zoo flipbooks; SHA-256-pinned rolling releases in `target/kits/`): screenshots, recordings and particle/emitter scaling. `examples/kit_web/` draws the combat and zoo bursts on WebGL 2 (`ParticleEmitter`) against `kit_showcase --plain`. Evidence, not a gate |
 | `examples/emitter_cost.rs` | Microbenchmark: per-emitter CPU cost of particles (step, prepare, encode, submit) at 1 to 2000 small burst emitters (#85) |
 | `examples/mesh_upload.rs` | Microbenchmark: per-frame pose uploads (`set_mesh`, `set_mesh_positions_normals`, `set_skin`) |
 | `examples/retained_instances.rs` | Microbenchmark: `prepare` on a Greyhaven-sized scene, every instance listed against the scenery retained (`World::add_instance`) |
