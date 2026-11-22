@@ -86,6 +86,7 @@ table into the PR.
 
 - **One task = one branch = one PR**, targeting `main`, closing its issue (`Closes #n`). A task is one eligible issue. Deliver its
   scope, its oracle scenario and the docs it changes on that branch.
+- **Merge automation.** A non-draft PR is ready to merge after required checks pass; use draft for deliberate manual review. `.github/workflows/owner-auto-merge.yml` queues squash auto-merge for owner-authored same-repository PRs while checks are pending. Agents also run `gh pr merge --auto --squash` for eligible PRs; if `merge-ready` is already green, use `gh pr merge --squash` directly. Never bypass failed checks or override Renovate's separate policy. Keep `main` push workflows triggering normally.
 - **Bevy oracle.** Every parity PR adds its scenario to `oracle/src/scenarios.rs` (particles:
   `oracle/src/particles.rs`, with thresholds from `--calibrate`) and its Bevy translation to
   `oracle/src/bevy_side.rs`. Do not add other ratchets, evidence packaging or
