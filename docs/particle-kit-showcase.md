@@ -113,6 +113,38 @@ oracle scenario `particles_lit_fog` gates the shading against Bevy `StandardMate
 (D9). These kit images have not been re-rendered with it yet (the kit bundles were not
 available when it landed).
 
+## The kits on WebGL 2 (#126)
+
+The browser's WebGL 2 fallback draws particles with `ParticleEmitter`
+(`packages/three-lighting/particles.js`), a CPU replay of the engine's simulation. A web game builds
+its emitters from the kit's descriptor itself, so `examples/kit_web/` does what such a game would:
+it reads `combat-effects` and `zoo-effects` (descriptor, manifest, PNG atlases decoded without
+premultiplication and box-filtered into the same mip chain), maps each burst preset as
+`kit_showcase`'s `burst()` does, steps the same seeds through the same warm-up and renders through
+`Lighting`. `kit_showcase --plain <scene>` renders the same emitters natively over the same plain
+background (no terrain, sky or sun, so only the particles differ).
+
+![Combat bursts on WebGL 2](particle-kit-showcase/combat_bursts_webgl2.jpg)
+![Zoo bursts on WebGL 2](particle-kit-showcase/zoo_bursts_webgl2.jpg)
+
+| Scene | Particles alive | Covered pixels, native / web | Pixels differing from native |
+| --- | --- | --- | --- |
+| `combat_bursts` (spark, block-spark, impact-dust, trail) | 10 / 18 / 6 / 1 | 1.76 % / 1.76 % | 258 of 921,600, each by one 8-bit step |
+| `zoo_bursts` (dust, leaf, splash) | 15 / 12 / 14 | 2.83 % / 2.83 % | 129 of 921,600, each by one 8-bit step |
+
+Headless Chromium 159 through ANGLE on lavapipe, against render-engine on lavapipe, 2026-11-22.
+Every flipbook frame, fade, size curve and blend mode of the kit presets comes out the same; the
+remaining one-step differences are rounding in the two drivers' paths. The plain background leaves
+the soft particles' depth fade nothing to fade against, so it is not compared here; the oracle
+gates it.
+
+```sh
+bash scripts/fetch-kits.sh
+cargo run --release --locked --example kit_showcase -- --plain combat_bursts
+cargo run --release --locked --example kit_showcase -- --plain zoo_bursts
+KIT_VK_ICD=$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -1) node examples/kit_web/run.mjs   # lavapipe, as the native side
+```
+
 ## Measurements
 
 **Adapter:** llvmpipe (lavapipe, LLVM 21, software Vulkan) under WSL2. This machine has no
@@ -173,7 +205,8 @@ many small emitters, not one big one.
 ## Not verified
 
 - GPU time on a hardware adapter, and the D3 GPU-time gate (no hardware adapter here).
-- The browser: `oracle/webgpu-smoke/` was not run for this. The particle path uses compute,
-  storage buffers and `draw_indirect`, which the assessment found available in Chromium WebGPU.
+- The full kit scenes in the browser: only the combat and zoo bursts ran on WebGL 2, over a plain
+  background ([above](#the-kits-on-webgl-2-126)); the terrain, props, rain, snow, fire and
+  waterfall scenes were not rendered there, nor any kit scene through the WebGPU build.
 - Characters: no rigged kit is loaded yet. The Greyhaven bundles have none, and the mmorpg's
   humanoids come from their own releases.
