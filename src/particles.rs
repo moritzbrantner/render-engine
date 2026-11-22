@@ -45,6 +45,7 @@ use rand::{RngExt as _, SeedableRng as _};
 ///
 /// A cycle lasts `period` seconds; `count` particles are spawned spread evenly over its first
 /// `spawn_duration` seconds (all at once when that is zero). `cycles` cycles run, 0 = forever.
+/// Unless `cycles` is 1, `period` must be positive.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Spawner {
     pub count: f32,
@@ -286,7 +287,7 @@ impl ParticleLighting {
 /// An effect: what spawns, how each particle starts, moves and looks.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Emitter {
-    /// Most particles alive at once; spawns beyond it are dropped.
+    /// Most particles alive at once (at least 1); spawns beyond it are dropped.
     pub capacity: u32,
     pub spawner: Spawner,
     /// Effect PRNG seed (hanabi `EffectAsset::prng_seed`).
@@ -319,6 +320,18 @@ pub struct Emitter {
     pub blend: ParticleBlend,
     /// Whether the spawner runs; an inactive emitter keeps simulating its particles.
     pub active: bool,
+}
+
+impl Emitter {
+    /// Panics on a description the simulation cannot run: no capacity (its slot range would be
+    /// empty), or a repeating spawner whose cycles take no time (its tick would never end).
+    pub(crate) fn validate(&self) {
+        assert!(self.capacity > 0, "emitter capacity must be positive");
+        assert!(
+            self.spawner.cycles == 1 || self.spawner.period > 0.0,
+            "a repeating spawner needs a positive period"
+        );
+    }
 }
 
 /// One particle as the consumer sets it
@@ -537,6 +550,38 @@ mod tests {
         let once = Spawner::once(96.0);
         let counts: Vec<u32> = (0..3).map(|_| s.tick(&once, DT)).collect();
         assert_eq!(counts, [96, 0, 0]);
+    }
+
+    #[test]
+    #[should_panic(expected = "positive period")]
+    fn repeating_spawner_without_a_period_is_rejected() {
+        emitter(1, Spawner::burst(4.0, 0.0)).validate();
+    }
+
+    #[test]
+    #[should_panic(expected = "capacity must be positive")]
+    fn emitter_without_capacity_is_rejected() {
+        emitter(0, Spawner::once(1.0)).validate();
+    }
+
+    fn emitter(capacity: u32, spawner: Spawner) -> Emitter {
+        Emitter {
+            capacity,
+            spawner,
+            seed: 0,
+            init: Vec::new(),
+            accel: Vec3::ZERO,
+            size_over_life: None,
+            color_over_life: None,
+            orient: Orient::default(),
+            texture: None,
+            roundness: 0.0,
+            depth_fade: 0.0,
+            lighting: None,
+            fog: false,
+            blend: ParticleBlend::Alpha,
+            active: true,
+        }
     }
 
     #[test]

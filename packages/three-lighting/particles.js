@@ -183,6 +183,8 @@ export function emitterDescription(desc) {
     active: true,
     ...desc,
   };
+  // A repeating spawner whose cycles take no time would never finish its tick.
+  if (d.spawner.cycles !== 1 && !(d.spawner.period > 0)) throw new RangeError('a repeating spawner needs a positive period');
   if (d.init.length > MAX_INIT_MODIFIERS) throw new RangeError(`at most ${MAX_INIT_MODIFIERS} init modifiers`);
   for (const g of [d.sizeOverLife, d.colorOverLife?.gradient]) {
     if (g && (g.length === 0 || g.length > MAX_GRADIENT_KEYS)) throw new RangeError(`gradients take 1 to ${MAX_GRADIENT_KEYS} keys`);

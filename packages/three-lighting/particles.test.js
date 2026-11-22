@@ -192,6 +192,7 @@ describe('simulation', () => {
 
   test('descriptions are validated', () => {
     expect(() => new ParticleEmitter({ capacity: 0, spawner: Spawner.once(1) })).toThrow(RangeError);
+    expect(() => new ParticleEmitter({ capacity: 8, spawner: Spawner.burst(4, 0) })).toThrow(RangeError);
     expect(() => new ParticleEmitter({ capacity: 1 })).toThrow(TypeError);
     expect(() => sparks({ blend: 'multiply' })).toThrow(TypeError);
   });
