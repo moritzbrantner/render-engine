@@ -595,6 +595,7 @@ impl World {
     /// Adds a particle emitter with no particles yet. Its seed chain starts with the next
     /// [`World::step_particles`].
     pub fn add_emitter(&mut self, emitter: &Emitter) -> EmitterId {
+        emitter.validate();
         EmitterId(self.emitters.insert(EmitterState::new(emitter)))
     }
 
@@ -602,6 +603,7 @@ impl World {
     /// particles keep their attributes and keep moving; the new update and render modifiers
     /// apply to them. A different capacity drops them.
     pub fn set_emitter(&mut self, id: EmitterId, emitter: &Emitter) {
+        emitter.validate();
         let e = self.emitters_mut(id);
         if emitter.capacity != e.desc.capacity
             && let Some(base) = e.base.take()
