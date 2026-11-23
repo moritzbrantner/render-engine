@@ -145,6 +145,22 @@ cargo run --release --locked --example kit_showcase -- --plain zoo_bursts
 KIT_VK_ICD=$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -1) node examples/kit_web/run.mjs   # lavapipe, as the native side
 ```
 
+On a hardware GPU, the same page under WSL2 runs on the Intel Arc 140V (integrated) through ANGLE
+on Mesa's D3D12 OpenGL driver ([WebGL 2 fallback](webgl2-fallback.md#on-an-integrated-gpu-intel-arc-140v)),
+against the same lavapipe native images, 2026-11-23:
+
+```sh
+GALLIUM_DRIVER=d3d12 KIT_ANGLE=gl node examples/kit_web/run.mjs
+```
+
+| Scene | Particles alive | Covered pixels, native / web | Pixels off by more than 2 steps | Mean max-channel difference |
+| --- | --- | --- | --- | --- |
+| `combat_bursts` | 10 / 18 / 6 / 1 | 1.76 % / 1.77 % | 0.03 % | 0.011 steps |
+| `zoo_bursts` | 15 / 12 / 14 | 2.83 % / 2.83 % | 0.00 % | 0.011 steps |
+
+Every burst spawns the same particles, and the bursts cover the same pixels. The small offset is the
+Arc's rounding against lavapipe's, as in the oracle scenarios on the Arc.
+
 ## Measurements
 
 **Adapter:** llvmpipe (lavapipe, LLVM 21, software Vulkan) under WSL2. This machine has no

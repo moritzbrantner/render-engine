@@ -147,6 +147,94 @@ The spawn and alive counts match Bevy's on every frame of every scenario. `parti
 colour distance varies between runs because Bevy's GPU decides the alpha-blended draw order
 within an emitter; the three.js side's is deterministic.
 
+### On an integrated GPU (Intel Arc 140V)
+
+WSL2 exposes the Windows GPU only through D3D12 (`/dev/dxg`), which no Vulkan driver reaches, but Mesa's
+D3D12 OpenGL driver does. With `GALLIUM_DRIVER=d3d12` and ANGLE on OpenGL
+(`THREE_BACKEND=gl` for `oracle/three/render.mjs`, `SMOKE_ANGLE=gl` for the smoke's `select`
+mode and `KIT_ANGLE=gl` for `examples/kit_web/`),
+headless Chromium 159's WebGL 2 runs on the Intel Arc 140V (integrated; ANGLE reports
+`D3D12 (Intel(R) Arc(TM) 140V GPU (16GB)), OpenGL ES 3.1`). Firefox 159's WebGL 2 reaches it too
+(it reports `Intel(R) Arc(TM) A750 Graphics, or similar`) and its `sun_shadows` frame has the same FLIP against Bevy.
+Browser WebGPU here is still SwiftShader and native wgpu is still lavapipe, so Bevy and native
+render-engine are lavapipe's frames. 2026-11-23, commit 83f9462.
+
+```sh
+WGPU_FORCE_FALLBACK_ADAPTER=1 cargo run --release --locked --manifest-path oracle/Cargo.toml -- --no-timing
+cp -r target/oracle target/oracle-arc
+GALLIUM_DRIVER=d3d12 THREE_BACKEND=gl THREE_FRAMES=100 node oracle/three/render.mjs target/oracle-arc <scenario>...
+oracle/target/release/oracle --flip-images target/oracle/<frame>.bevy.png target/oracle-arc/<frame>.three.png <heat map>
+```
+
+All 36 exported scenarios render on the Arc. **Against lavapipe's Bevy frames they are outside
+D3's FLIP gates (0.005 / 0.05)**, because the GPU's 8-bit sRGB stores round differently, not
+because the shading differs. The fallback renders on lavapipe at 0.0000 FLIP because both sides
+round the same way, while on the Arc 10–99 % of pixels are one 8-bit step off. Almost no pixel is
+off by more, and on flat dark backgrounds a one-step difference costs FLIP about 0.03. The
+exceptions are the
+sky scenarios (1–3 % of pixels more than one step off, in a band of ground at grazing angles
+below the horizon, up to about four steps) and `textured_props` (0.24 %, isolated pixels on
+alpha-cut foliage edges and specular highlights), both precision or coverage differences of the
+hardware path. `particles_alpha` and `smoke_and_sparks` are statistical captures whose
+multi-step differences are the same as on lavapipe. This is not a gate: a hardware gate needs
+Bevy on the same GPU.
+
+GPU time is the median of 100 `Lighting.render` calls with `EXT_disjoint_timer_query_webgl2`, at
+1280×720 and advisory.
+
+| Frame | FLIP vs Bevy (mean / p99) | Pixels off by > 0 steps (%) | > 1 step (%) | > 2 steps (%) | > 1 step on lavapipe (%) | GPU ms |
+| --- | --- | --- | --- | --- | --- | --- |
+| `fog_atmospheric` | 0.0068 / 0.0461 | 16.09 | 0.00 | 0.00 | 0.00 | 0.84 |
+| `fog_atmospheric_sun` | 0.0067 / 0.0461 | 16.04 | 0.01 | 0.01 | 0.00 | 1.15 |
+| `fog_exponential` | 0.0044 / 0.0328 | 10.42 | 0.00 | 0.00 | 0.00 | 1.91 |
+| `fog_exponential_squared` | 0.0077 / 0.0456 | 19.06 | 0.00 | 0.00 | 0.00 | 3.21 |
+| `fog_exponential_squared_sun` | 0.0077 / 0.0456 | 19.16 | 0.01 | 0.01 | 0.00 | 4.26 |
+| `fog_exponential_sun` | 0.0044 / 0.0290 | 10.77 | 0.01 | 0.01 | 0.00 | 3.94 |
+| `fog_linear` | 0.0060 / 0.0530 | 14.39 | 0.00 | 0.00 | 0.00 | 2.00 |
+| `fog_linear_sun` | 0.0061 / 0.0530 | 14.76 | 0.01 | 0.01 | 0.00 | 4.08 |
+| `ibl_materials` | 0.0315 / 0.0464 | 90.39 | 0.00 | 0.00 | 0.00 | 1.13 |
+| `ibl_materials_sun` | 0.0223 / 0.0492 | 50.47 | 0.00 | 0.00 | 0.00 | 2.81 |
+| `many_instances` | 0.0238 / 0.0477 | 55.87 | 0.00 | 0.00 | 0.00 | 10.32 |
+| `many_lights` | 0.0082 / 0.0252 | 29.79 | 0.00 | 0.00 | 0.01 | 49.14 |
+| `particles_100k t0750` | 0.0314 / 0.0338 | 96.83 | 0.02 | 0.02 | 0.01 | – |
+| `particles_100k t3000` | 0.0299 / 0.0331 | 93.14 | 0.05 | 0.04 | 0.01 | – |
+| `particles_alpha t1000` | 0.0018 / 0.0638 | 3.01 | 1.52 | 0.82 | 1.50 | – |
+| `particles_alpha t3000` | 0.0037 / 0.0783 | 7.14 | 2.53 | 1.31 | 2.44 | – |
+| `particles_cone t0500` | 0.0326 / 0.0366 | 98.69 | 0.00 | 0.00 | 0.00 | – |
+| `particles_cone t2500` | 0.0327 / 0.0342 | 99.03 | 0.00 | 0.00 | 0.00 | – |
+| `particles_fountain t0500` | 0.0329 / 0.0348 | 99.69 | 0.00 | 0.00 | 0.00 | – |
+| `particles_fountain t2000` | 0.0329 / 0.0332 | 99.49 | 0.00 | 0.00 | 0.00 | – |
+| `particles_lit_fog t0500` | 0.0078 / 0.0439 | 18.44 | 0.01 | 0.00 | 0.00 | – |
+| `particles_lit_fog t2500` | 0.0081 / 0.0441 | 19.60 | 0.01 | 0.00 | 0.00 | – |
+| `particles_snapshot t0500` | 0.0330 / 0.0350 | 99.73 | 0.00 | 0.00 | 0.00 | – |
+| `particles_snapshot t1000` | 0.0329 / 0.0333 | 99.58 | 0.00 | 0.00 | 0.00 | – |
+| `particles_soft t0500` | 0.0073 / 0.0449 | 16.51 | 0.03 | 0.01 | 0.00 | – |
+| `particles_soft t2500` | 0.0073 / 0.0449 | 16.83 | 0.04 | 0.01 | 0.00 | – |
+| `particles_textured t0625` | 0.0073 / 0.0452 | 16.12 | 0.00 | 0.00 | 0.00 | – |
+| `particles_textured t2500` | 0.0076 / 0.0452 | 17.08 | 0.00 | 0.00 | 0.00 | – |
+| `point_spot` | 0.0066 / 0.0264 | 19.30 | 0.00 | 0.00 | 0.00 | 5.55 |
+| `point_spot_hardware` | 0.0066 / 0.0264 | 19.30 | 0.00 | 0.00 | 0.00 | 3.57 |
+| `point_spot_soft` | 0.0092 / 0.0347 | 25.47 | 0.02 | 0.00 | 0.02 | 8.53 |
+| `skinned_figure` | 0.0282 / 0.0496 | 63.55 | 0.02 | 0.00 | 0.00 | 3.56 |
+| `sky_day_cycle_dusk` | 0.0117 / 0.0522 | 25.24 | 1.25 | 0.12 | 0.01 | 18.34 |
+| `sky_day_cycle_golden` | 0.0133 / 0.0526 | 28.88 | 2.23 | 0.29 | 0.01 | 14.59 |
+| `sky_day_cycle_night` | 0.0097 / 0.0339 | 33.36 | 0.12 | 0.12 | 0.01 | 15.10 |
+| `sky_day_cycle_noon` | 0.0129 / 0.0590 | 27.46 | 2.66 | 0.43 | 0.01 | 15.12 |
+| `smoke_and_sparks t1000` | 0.0077 / 0.0465 | 16.81 | 0.52 | 0.23 | 0.51 | – |
+| `smoke_and_sparks t3000` | 0.0110 / 0.0746 | 23.99 | 3.17 | 1.92 | 3.20 | – |
+| `sun_cascades` | 0.0257 / 0.0486 | 58.96 | 0.00 | 0.00 | 0.00 | 3.59 |
+| `sun_shadows` | 0.0237 / 0.0492 | 54.76 | 0.00 | 0.00 | 0.00 | 2.04 |
+| `textured_props` | 0.0236 / 0.0491 | 55.46 | 0.24 | 0.06 | 0.00 | 3.91 |
+| `tonemap_range_dim_agx` | 0.0130 / 0.0397 | 48.34 | 0.00 | 0.00 | 0.00 | 2.02 |
+| `tonemap_range_dim_tony` | 0.0065 / 0.0413 | 22.96 | 0.00 | 0.00 | 0.00 | 2.07 |
+| `tonemap_range_noon_agx` | 0.0150 / 0.0506 | 48.12 | 0.00 | 0.00 | 0.00 | 2.02 |
+| `tonemap_range_noon_tony` | 0.0108 / 0.0493 | 25.34 | 0.00 | 0.00 | 0.00 | 2.03 |
+
+The backend selection (`check-backends.mjs` with `SMOKE_ANGLE=gl`) passes all five cases, the WebGPU
+ones on SwiftShader. The forced WebGL 2 frames of `sun_shadows` and `textured_props`
+(`compare select`) match the oracle's three.js frames on the Arc to the pixel. The kit bursts
+are in [the kit showcase](particle-kit-showcase.md#the-kits-on-webgl-2-126).
+
 ## Tests
 
 - `packages/three-lighting/backend.test.js` (`bun test packages`, on CI): WebGPU preferred;
@@ -174,9 +262,10 @@ bash scripts/browser-backends.sh
 
 ## Not verified
 
-- Safari, Chrome or Firefox on a real window, mobile browsers and any hardware GPU: everything here
-  ran headless in Playwright's Chromium and Firefox on software adapters
-  (`scripts/browser-hardware.sh` is the run that covers the hardware GPU).
+- Safari, Chrome or Firefox on a real window, and mobile browsers: everything here ran headless
+  in Playwright's Chromium and Firefox. The only hardware GPU is the WebGL 2 run on the Intel
+  Arc 140V above, and there Bevy is not on the same GPU. The fallback against Bevy and the
+  engine's WebGPU on one hardware GPU is `scripts/browser-hardware.sh`'s run.
 - A real consumer: the mmorpg web client stays on three.js (mmorpg#80) and has no WebGPU build
   to fall back from; there is no consumer-facing wasm build (D10, #75's prototype scope).
 - WebGL context loss and WebGPU device loss after start, and WebGL 1.
