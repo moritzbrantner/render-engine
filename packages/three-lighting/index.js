@@ -177,6 +177,37 @@ const TONEMAPPING = { acesFitted: 0, tonyMcMapface: 1, agx: 2 };
 // Negates clip-space y: the main pass renders upside down (Lighting.render).
 const FLIP_Y = new Matrix4().makeScale(1, -1, 1);
 
+// The camera Lighting.prepare compiles fullscreen passes with: three's programs do not depend on
+// the camera.
+const FULLSCREEN_CAMERA = new OrthographicCamera(-1, 1, 1, -1, 0, 1);
+
+/** Draws a FullScreenQuad into the bound target, or with `compile` compiles its mesh. */
+function fullscreen(renderer, quad, compile) {
+  if (compile) compile(quad._mesh, FULLSCREEN_CAMERA);
+  else quad.render(renderer);
+}
+
+/**
+ * Waits until every program of `renderer` has linked, polling `KHR_parallel_shader_compile`
+ * without blocking (without it, three counts a program ready at once), then gives each of
+ * `programs` its first use (its link status and uniform and attribute lists), so a frame that
+ * draws with them waits on nothing.
+ */
+async function linkPrograms(renderer, programs) {
+  const parallel = renderer.extensions.has('KHR_parallel_shader_compile');
+  // `info.programs` holds the live programs: one released meanwhile (its material disposed) leaves it.
+  while (renderer.info.programs.some((p) => !p.isReady())) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  for (const program of programs) {
+    // Without the extension each first use waits on its link: yield between them.
+    if (!parallel) await new Promise((resolve) => setTimeout(resolve, 0));
+    if (!renderer.info.programs.includes(program)) continue;
+    program.getUniforms();
+    program.getAttributes();
+  }
+}
+
 let zstd;
 async function decoder() {
   zstd ??= (async () => {
@@ -956,10 +987,16 @@ export class Lighting {
     }
   }
 
-  #renderShadows(renderer, scene, cascades, local) {
+  /**
+   * The sun's cascades, then the spot and point-light views. With `compile` (Lighting.prepare)
+   * the casters take the same materials, and `compile(scene, camera)` takes the place of
+   * clearing and drawing; all views of a kind draw the same programs (later cascades a subset of
+   * the first's), so it compiles one of each.
+   */
+  #renderShadows(renderer, scene, cascades, local, compile) {
     const cam = this.shadowCamera;
     const state = renderer.state;
-    if (!this.shadowTargetsReady) {
+    if (!compile && !this.shadowTargetsReady) {
       // Unused cascades stay bound to the shader: give every depth texture its comparison
       // sampler state (set when three.js first sets up the target) and a cleared map.
       state.buffers.depth.setClear(0);
@@ -1019,6 +1056,7 @@ export class Lighting {
       if (!notShadowCaster(o) && shadowCascades(o) < cascades.length) nearOnly.push([o, o.material]);
     }
     cascades.forEach((c, i) => {
+      if (compile && i > 0) return;
       // Before culling, so a stand-in takes the material too.
       for (const [o, m] of nearOnly) {
         if (shadowCascades(o) <= i) o.material = Array.isArray(m) ? m.map(() => this.noShadow) : this.noShadow;
@@ -1031,19 +1069,24 @@ export class Lighting {
       cam.projectionMatrixInverse.copy(cam.projectionMatrix).invert();
       cam.matrixAutoUpdate = false;
       cam.matrixWorldAutoUpdate = false;
-      culling.view(i, cam);
+      if (compile) culling.standInVariants();
+      else culling.view(i, cam);
       this.shadowMaterial.uniforms.cascadeClip.value.fromArray(c.clipFromWorld);
       renderer.setRenderTarget(this.shadowTargets[i]);
-      state.buffers.depth.setClear(0);
-      renderer.clear(false, true, false);
-      renderer.render(scene, cam);
+      if (compile) {
+        compile(scene, cam);
+      } else {
+        state.buffers.depth.setClear(0);
+        renderer.clear(false, true, false);
+        renderer.render(scene, cam);
+      }
       // Culling gives hidden meshes back the material they had before theirs is restored.
       culling.reset();
       for (const [o, m] of nearOnly) o.material = m;
     });
     if (native) gl.disable(depthClamp.DEPTH_CLAMP_EXT);
     if (local.spotViews.length || local.pointViews.length) {
-      this.#renderLocalShadows(renderer, scene, local, () => assign(true));
+      this.#renderLocalShadows(renderer, scene, local, () => assign(true), compile);
     }
     culling.end();
     for (const [o, m] of casters) o.material = m;
@@ -1099,9 +1142,10 @@ export class Lighting {
 
   /**
    * Spot maps, then point-light cube faces (render-engine's pass order). `assign` gives the
-   * casters their local shadow materials, whose faces follow the shared material's side.
+   * casters their local shadow materials, whose faces follow the shared material's side. With
+   * `compile`, one spot view and one cube face (see #renderShadows).
    */
-  #renderLocalShadows(renderer, scene, local, assign) {
+  #renderLocalShadows(renderer, scene, local, assign, compile) {
     const state = renderer.state;
     const material = this.localShadowMaterial;
     const cam = this.localShadowCamera;
@@ -1119,22 +1163,28 @@ export class Lighting {
       cam.updateProjectionMatrix();
       cam.matrixWorld.copy(view.world);
       cam.matrixWorldInverse.copy(view.world).invert();
-      this.shadowCulling.view(index++, cam);
+      if (compile) this.shadowCulling.standInVariants();
+      else this.shadowCulling.view(index++, cam);
       material.uniforms.lightClip.value.copy(view.clipFromWorld);
       renderer.setRenderTarget(target, face);
+      if (compile) {
+        compile(scene, cam);
+        return;
+      }
       state.buffers.depth.setClear(0);
       renderer.clear(true, true, false);
       renderer.render(scene, cam);
     };
+    const views = (all) => (compile ? all.slice(0, 1) : all);
     material.uniforms.flipY.value = 1;
     material.side = FrontSide;
     assign();
-    local.spotViews.forEach((view, i) => pass(view, this.spotShadowTargets[i]));
+    views(local.spotViews).forEach((view, i) => pass(view, this.spotShadowTargets[i]));
     // Cube faces render upside down (see localShadowVertex), which flips the winding.
     material.uniforms.flipY.value = -1;
     material.side = BackSide;
     assign();
-    local.pointViews.forEach((view, i) => pass(view, this.pointShadowTargets[Math.floor(i / 6)], i % 6));
+    views(local.pointViews).forEach((view, i) => pass(view, this.pointShadowTargets[Math.floor(i / 6)], i % 6));
   }
 
   /** The sky's LUTs and environment cubes, created with the first sky. */
@@ -1177,6 +1227,29 @@ export class Lighting {
    * Renders `scene` from `camera` into `target` (null: the canvas), sized `width × height`.
    */
   render(renderer, scene, camera, target = null, width = target?.width, height = target?.height) {
+    this.#frame(renderer, scene, camera, target, width, height, null);
+  }
+
+  /**
+   * Compiles and links every program `render(renderer, scene, camera, target, width, height)`
+   * would draw with now, drawing nothing: each pass's materials (sky, sun cascades, spot and
+   * point-light views, the HDR pass, tone mapping and output) with the defines and render target
+   * that pass gives them, through the same code as `render`. Linking runs in parallel where the
+   * browser has `KHR_parallel_shader_compile`; the promise resolves once every program has
+   * linked, so that frame compiles and links nothing. The lights, sky and scene must be as they
+   * will be for that frame: a different light count or new material is a new program. Resolves
+   * to how many programs it created.
+   */
+  async prepare(renderer, scene, camera, target = null, width = target?.width, height = target?.height) {
+    const before = new Set(renderer.info.programs);
+    this.#frame(renderer, scene, camera, target, width, height, (object, view) => renderer.compile(object, view));
+    const programs = renderer.info.programs.filter((p) => !before.has(p));
+    await linkPrograms(renderer, programs);
+    return programs.length;
+  }
+
+  /** `render`, or with `compile` its programs (`prepare`). */
+  #frame(renderer, scene, camera, target, width, height, compile) {
     if (width === undefined) {
       const size = renderer.getDrawingBufferSize(new Vector3());
       [width, height] = [size.x, size.y];
@@ -1193,7 +1266,7 @@ export class Lighting {
     const matrixWorldAutoUpdate = scene.matrixWorldAutoUpdate;
     scene.matrixWorldAutoUpdate = false;
     try {
-      this.#renderPasses(renderer, scene, camera, target, width, height);
+      this.#renderPasses(renderer, scene, camera, target, width, height, compile);
     } finally {
       scene.matrixWorldAutoUpdate = matrixWorldAutoUpdate;
       renderer.setClearColor(clearColor, clearAlpha);
@@ -1201,7 +1274,11 @@ export class Lighting {
     }
   }
 
-  #renderPasses(renderer, scene, camera, target, width, height) {
+  /**
+   * Every pass of a frame. With `compile(object, camera)` each pass compiles what it would draw
+   * instead (with its target bound, which three's programs depend on), and nothing is drawn.
+   */
+  #renderPasses(renderer, scene, camera, target, width, height, compile) {
     const cascades = this.cascades(camera, width / height);
     const local = packLocalLights(this.pointLights, this.spotLights, this.shadowMapSize, this.pointShadowMapSize);
     while (this.spotShadowTargets.length < local.spotViews.length) {
@@ -1210,7 +1287,8 @@ export class Lighting {
     while (this.pointShadowTargets.length < local.pointViews.length / 6) {
       this.pointShadowTargets.push(pointShadowTarget(this.pointShadowMapSize));
     }
-    if (this.sky) this.#renderSky(renderer, camera, width / height);
+    if (this.sky && compile) this.skyPasses.compile(renderer, compile);
+    else if (this.sky) this.#renderSky(renderer, camera, width / height);
     this.#updateUniforms(camera, cascades, local);
     const definesKey = JSON.stringify(local.defines);
     const sceneMaterials = new Set();
@@ -1235,9 +1313,32 @@ export class Lighting {
       }
     });
 
-    this.#renderShadows(renderer, scene, cascades, local);
+    this.#renderShadows(renderer, scene, cascades, local, compile);
 
     renderer.setRenderTarget(this.hdrTarget);
+    this.uniforms.sceneDepth.value = readsSceneDepth ? this.hdrTarget.depthTexture : null;
+    // One compile covers the opaque and the blended draws: the split only toggles visibility.
+    // The sky's composite compiled with its other passes.
+    if (compile) compile(scene, camera);
+    else this.#renderMain(renderer, scene, camera, sceneMaterials, readsSceneDepth);
+
+    const tm = this.tonemapQuad.material.uniforms;
+    tm.hdrTexture.value = this.hdrTarget.texture;
+    tm.method.value = TONEMAPPING[this.tonemapping];
+    // Like Bevy, operators without a LUT still bind one (the small AgX LUT).
+    tm.lutTexture.value = this.tonemapping === 'tonyMcMapface' ? this.luts.tonyMcMapface : this.luts.agx;
+    renderer.setRenderTarget(this.postTarget);
+    fullscreen(renderer, this.tonemapQuad, compile);
+
+    this.outputQuad.material.uniforms.postTexture.value = this.postTarget.texture;
+    // An sRGB target (SRGB8_ALPHA8) encodes on store, like Bevy's output; otherwise the shader does.
+    this.outputQuad.material.uniforms.encodeSrgb.value = target?.texture.colorSpace === SRGBColorSpace ? 0 : 1;
+    renderer.setRenderTarget(target);
+    fullscreen(renderer, this.outputQuad, compile);
+  }
+
+  /** The 4× MSAA HDR pass, its render target bound: the scene with the sky composited in. */
+  #renderMain(renderer, scene, camera, sceneMaterials, readsSceneDepth) {
     // Premultiplied, so a transparent clear leaves nothing behind for the page.
     const alpha = Math.min(1, Math.max(0, this.clearAlpha));
     renderer.setClearColor(new Color(...this.clearColor).multiplyScalar(alpha), alpha);
@@ -1265,7 +1366,6 @@ export class Lighting {
         projection.copy(upright);
       }
     };
-    this.uniforms.sceneDepth.value = readsSceneDepth ? this.hdrTarget.depthTexture : null;
     if (this.sky || readsSceneDepth) {
       // Like Bevy's main pass with a sky: the opaque and alpha-masked draws, the sky over them
       // (reading their depth), then the blended draws. Soft particles read the same resolved
@@ -1287,20 +1387,6 @@ export class Lighting {
     }
     renderer.setOpaqueSort(null);
     renderer.setTransparentSort(null);
-
-    const tm = this.tonemapQuad.material.uniforms;
-    tm.hdrTexture.value = this.hdrTarget.texture;
-    tm.method.value = TONEMAPPING[this.tonemapping];
-    // Like Bevy, operators without a LUT still bind one (the small AgX LUT).
-    tm.lutTexture.value = this.tonemapping === 'tonyMcMapface' ? this.luts.tonyMcMapface : this.luts.agx;
-    renderer.setRenderTarget(this.postTarget);
-    this.tonemapQuad.render(renderer);
-
-    this.outputQuad.material.uniforms.postTexture.value = this.postTarget.texture;
-    // An sRGB target (SRGB8_ALPHA8) encodes on store, like Bevy's output; otherwise the shader does.
-    this.outputQuad.material.uniforms.encodeSrgb.value = target?.texture.colorSpace === SRGBColorSpace ? 0 : 1;
-    renderer.setRenderTarget(target);
-    this.outputQuad.render(renderer);
   }
 
   dispose() {
