@@ -161,6 +161,31 @@ GALLIUM_DRIVER=d3d12 KIT_ANGLE=gl node examples/kit_web/run.mjs
 Every burst spawns the same particles, and the bursts cover the same pixels. The small offset is the
 Arc's rounding against lavapipe's, as in the oracle scenarios on the Arc.
 
+On the RTX 3060 Ti both sides ran on the same GPU: `kit_showcase --plain` natively and the page
+in headless Chromium 159 through ANGLE on Vulkan, 2026-11-23 (#154):
+
+```sh
+cargo run --release --locked --example kit_showcase -- --plain combat_bursts   # and zoo_bursts
+node examples/kit_web/run.mjs
+```
+
+| Scene | Particles alive | Covered pixels, native / web | Pixels off by more than 2 steps | Mean max-channel difference |
+| --- | --- | --- | --- | --- |
+| `combat_bursts` | 10 / 18 / 6 / 1 | 1.77 % / 1.77 % | 0.21 % | 0.033 steps |
+| `zoo_bursts` | 15 / 12 / 14 | 2.83 % / 2.83 % | 0.03 % | 0.009 steps |
+
+Counts and coverage match. Nearly all the larger differences (up to 51 steps in `combat_bursts`,
+98 in `zoo_bursts`) are inside alpha-blended bursts: 1,935 of `combat_bursts`' 1,936 pixels off by more
+than 2 steps are on `impact-dust`. There the puffs are the same and cover the same
+silhouette, but a different puff lies on top. Inside an alpha-blended emitter, the engine draws in
+the GPU's alive-list order, which comes from atomics, as hanabi does (D9). The web side's CPU
+replay draws in slot order. Lavapipe happens to keep slot order, so it matched there: native
+lavapipe against this NVIDIA web frame differs by at most 6 steps. NVIDIA does not keep it.
+This is the draw-order difference D9 already judges statistically, not a difference in the port.
+The scenery kits were the current releases rather than `fetch-kits.sh`'s pins, which no longer
+match the replaced rolling releases. `--plain` draws none of them. The effect kits match their
+pins.
+
 ## Measurements
 
 **Adapter:** llvmpipe (lavapipe, LLVM 21, software Vulkan) under WSL2. This machine has no

@@ -14,6 +14,11 @@
 #
 # A step that fails is recorded in the report and the run goes on; the exit code is 1 if any did.
 set -uo pipefail
+# Firefox offers WebGPU only with a display (headless, it reports "WebGPU is disabled by
+# blocklist"), so without one the whole run goes under Xvfb; headless Chromium is unaffected.
+if [[ -z ${DISPLAY:-} && -z ${WAYLAND_DISPLAY:-} && -z ${BROWSER_HARDWARE_XVFB:-} ]] && command -v xvfb-run >/dev/null; then
+  BROWSER_HARDWARE_XVFB=1 exec xvfb-run -a bash "$0" "$@"
+fi
 cd "$(dirname "$0")/.."
 out="$PWD/target/oracle"
 report_dir="$PWD/target/browser-hardware"
