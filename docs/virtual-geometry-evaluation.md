@@ -445,7 +445,11 @@ GALLIUM_DRIVER=d3d12 VG_ANGLE=gl node oracle/virtual-geometry/run.mjs http://127
   `greyhaven-browser-buttress.json.gz`). The asset comes from the repository-pinned crag kit
   (`scripts/fetch-kits.sh`, `63bb39f4…`), because the evaluated `f3419e27…` is no longer in
   the rolling release. It has the same 8,999 source triangles and kit LOD1/LOD2, but a different
-  source file hash and 175 rather than 176 clusters.
+  source file hash and 175 rather than 176 clusters. The current `crag-kit` release
+  (`6c35ac10…`) is closer: `bench-virtual-geometry.mjs` builds the evaluated buttress hierarchy
+  from it byte for byte (176 clusters, 534,652 bytes, `b7e933cd…`, 449,644 geometry bytes). Only
+  the glTF JSON differs (`inputSha256` `a5bdef2b…` against `2c3fa7be…`), so a rerun of this case
+  should use that release.
 - **Buttress grid: new.** The same asset as a dense grid (1, 64 and 256 instances). There is no
   RTX browser run of it.
 
