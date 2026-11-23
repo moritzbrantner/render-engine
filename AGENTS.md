@@ -51,7 +51,7 @@ processing in asset-tooling. The engine never depends on Bevy outside `oracle/`.
 | `web/`, `web/showcase/`, `scripts/build-web.sh`, `scripts/web-showcase.sh` | `render-engine-web` (#128, [Browser (WebGPU)](docs/consumer-integration.md#browser-webgpu)): the browser adapter (canvas surface, async device, resize and pixel ratio, frame loop, device-loss recovery), own manifest and lockfile, never a dependency of `render-engine` nor built by default or by CI (`cargo clippy --target wasm32-unknown-unknown --all-targets` in `web/`). Its `shooter_showcase` example is the showcase page's wasm: the shooter frames live under an orbiting camera behind `selectBackend`. `build-web.sh` builds it (release, wasm-opt), `web-showcase.sh` measures it against native in Chromium and Firefox (`run.mjs showcase`, `compare showcase`) |
 
 ```sh
-bun install                                           # three.js side: three + Playwright (needs node); --no-three skips it
+bun install --frozen-lockfile                         # three.js side: three + Playwright (needs node); --no-three skips it; latest stable Bun, no packageManager pin (owner decision 2026-11-23)
 cargo fmt --all -- --check && (cd oracle && cargo fmt -- --check)
 cargo clippy --all-targets --locked -- -D warnings
 (cd oracle && cargo clippy --release --all-targets --locked -- -D warnings)

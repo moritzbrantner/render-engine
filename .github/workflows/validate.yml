@@ -131,6 +131,8 @@ jobs:
         run: cargo test --release --locked
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
       - name: Install npm dependencies and headless Chromium
         run: |
           bun install --frozen-lockfile
@@ -170,6 +172,8 @@ jobs:
 
       # The oracle's three.js side (D8): three, Playwright and headless Chromium (SwiftShader).
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
       - name: Install npm dependencies and headless Chromium
         run: |
           bun install --frozen-lockfile
@@ -223,6 +227,8 @@ jobs:
         run: cargo install wasm-bindgen-cli --version 0.2.130 --locked
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
       - name: Install npm dependencies and Firefox
         run: |
           bun install --frozen-lockfile
