@@ -862,7 +862,28 @@ is left out of every sun cascade and spot or point view, per object and not inhe
 children (three's `castShadow` defaults to false, so it is not the switch). Small detail that
 covers less than a texel of the far cascades sets `object.userData.shadowCascades = n` to cast
 into only the nearest `n` sun cascades (per object, not inherited; spot and point views still draw
-it). Anything else in the
+it).
+
+Three more knobs cut the cost of the sun's cascades (#149); each is off by default, and the choices
+(which meshes, which thresholds) are the consumer's:
+
+- **Shadow proxies.** `object.userData.shadowGeometry` is drawn in place of the object's own
+  geometry by the shadow views: one `BufferGeometry`, or an array per cascade (the last entry for
+  later cascades; spot and point views take the first). A proxy keeps what the shadow pass reads:
+  positions, `skinIndex`/`skinWeight` on a skinned mesh, and UVs where the material cuts out by
+  alpha. An index-only simplification (the same vertices, fewer triangles) or a coarser LOD fits.
+- **Projected-size culling.** `lighting.minCasterTexels = n`: in each cascade, a mesh, or an
+  `InstancedMesh` instance, whose bounding sphere's radius is below `n` of that cascade's texels
+  casts nothing there. Batched meshes always cast.
+- **Staggered cascades.** `lighting.cascadeUpdateIntervals = [1, 2, 2]`: cascade `i` with an
+  interval `k > 1` is redrawn on the frames where `(frame + i) % k === 0` (so cascades of one
+  interval take turns) and in between keeps its map and the matrices it was drawn with, so its
+  texels stay put and nothing swims; a moving caster's shadow there lags by up to `k − 1` frames.
+  A staggered cascade is fitted with a margin of 5 % of its diameter in whole metres, and redrawn
+  early when the view slice no longer fits inside it with 8 texels to spare, when the sun turns by
+  more than half a degree, or when the settings or the scene change (`StaggeredCascades`).
+
+Anything else in the
 scene (sprites, overlays) is drawn into the HDR pass as three draws it, tone mapped but not exposed. A page that
 paints its own backdrop behind a transparent canvas (`new WebGLRenderer({ alpha: true })`) sets
 `lighting.clearAlpha = 0`: the output is premultiplied where nothing is drawn.

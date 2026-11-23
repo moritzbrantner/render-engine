@@ -1,4 +1,5 @@
 import type {
+  BufferGeometry,
   CubeTexture,
   Data3DTexture,
   DataTexture,
@@ -43,7 +44,56 @@ export function fitCascade(
   fovY: number,
   aspect: number,
   worldFromView: ArrayLike<number>,
-): { clipFromWorld: number[]; cascadeFromWorld: number[]; texelSize: number; diameter: number; depthRange: number };
+  /** Share of the diameter added on every side, in whole metres (default 0, Bevy's fit). */
+  marginProportion?: number,
+): Cascade;
+
+/** One fitted sun cascade (`fitCascade`). */
+export interface Cascade {
+  clipFromWorld: number[];
+  cascadeFromWorld: number[];
+  texelSize: number;
+  diameter: number;
+  depthRange: number;
+}
+
+/**
+ * Whether the view slice `near..far` lies inside `cascade` with `marginTexels` (default 8) of its
+ * texels to spare on every side.
+ */
+export function sliceInside(
+  cascade: Cascade,
+  near: number,
+  far: number,
+  fovY: number,
+  aspect: number,
+  worldFromView: ArrayLike<number>,
+  mapSize: number,
+  marginTexels?: number,
+): boolean;
+
+/** Share of a staggered cascade's diameter added on every side. */
+export const STAGGER_MARGIN: number;
+
+/**
+ * Which sun cascades a frame redraws (`Lighting.cascadeUpdateIntervals`): cascade `i` with interval
+ * `n > 1` on frames where `(frame + i) % n === 0`, keeping its map and matrices in between unless
+ * the view slice leaves it or the sun turns more than half a degree.
+ */
+export class StaggeredCascades {
+  reset(): void;
+  update(frame: {
+    shadows: SunShadows;
+    mapSize: number;
+    sunDirection: Vec3;
+    fovY: number;
+    aspect: number;
+    worldFromView: ArrayLike<number>;
+    intervals?: readonly number[];
+    scene?: unknown;
+    peek?: boolean;
+  }): (Cascade & { far: number; redraw: boolean })[];
+}
 
 /** Bevy `DirectionalLight`. */
 export interface Sun {
@@ -219,6 +269,19 @@ export function notShadowCaster(object: Object3D): boolean;
  * spot and point views ignore it.
  */
 export function shadowCascades(object: Object3D): number;
+/**
+ * The geometry `object` casts with into sun cascade `cascade` (default 0; spot and point views take
+ * 0): `object.userData.shadowGeometry`, one `BufferGeometry` or one per cascade (the last for later
+ * cascades), else its own. A proxy keeps the attributes the shadow pass reads (positions, skin
+ * joints and weights, UVs for alpha-masked materials). Per object, not inherited by its children.
+ */
+export function shadowGeometry(object: Object3D, cascade?: number): BufferGeometry;
+/**
+ * The world radius `Lighting.minCasterTexels` compares for `object`: its geometry's bounding
+ * sphere times its largest world scale; `Infinity` for batched and instanced meshes (instances are
+ * culled one by one) and objects without geometry.
+ */
+export function casterRadius(object: Object3D): number;
 export function decodeKtx2(bytes: Uint8Array): Promise<{
   vkFormat: number;
   faceCount: number;
@@ -338,6 +401,17 @@ export class Lighting {
   tonemapping: ToneMapping;
   /** Filter of the sun's shadows and of point and spot shadows that are not soft. */
   shadowFilter: ShadowFilter;
+  /**
+   * Per sun cascade, nearest first, every how many frames it is redrawn (default 1). In between a
+   * cascade keeps its map and matrices; it is fitted with a margin and redrawn early when the view
+   * leaves it or the sun turns (`StaggeredCascades`).
+   */
+  cascadeUpdateIntervals: number[];
+  /**
+   * Per sun cascade, a mesh or `InstancedMesh` instance whose bounding radius is below this many of
+   * the cascade's texels casts nothing there (default 0: every caster).
+   */
+  minCasterTexels: number;
   sun: Sun | null;
   /** Shaded with the sun (unshadowed lights first, Bevy's order); its disc shows under a sky. */
   moon: Moon | null;

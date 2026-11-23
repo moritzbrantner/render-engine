@@ -36,8 +36,10 @@ const maxScale = (m, o) =>
 // The spheres are stored in f32: round them out a little.
 const pad = (r) => r * 1.0001 + 1e-4;
 
-// Whether sphere `i` of `spheres` (x, y, z, radius) meets the six planes `p` (normal, constant).
-const meets = (p, spheres, i) => {
+// Whether sphere `i` of `spheres` (x, y, z, radius) meets the six planes `p` (normal, constant)
+// and has at least radius `min`.
+const meets = (p, spheres, i, min = 0) => {
+  if (spheres[i * 4 + 3] < min) return false;
   const x = spheres[i * 4];
   const y = spheres[i * 4 + 1];
   const z = spheres[i * 4 + 2];
@@ -106,6 +108,8 @@ export class ShadowCulling {
       s = {
         spheres: new Float32Array(0),
         all: new Float64Array(4),
+        smallest: 0,
+        largest: 0,
         revision: 0,
         version: -1,
         count: -1,
@@ -141,6 +145,8 @@ export class ShadowCulling {
     const spheres = s.spheres;
     const lo = [Infinity, Infinity, Infinity];
     const hi = [-Infinity, -Infinity, -Infinity];
+    let smallest = Infinity;
+    let largest = 0;
     for (let i = 0; i < n; i++) {
       const o = i * 16;
       // The sphere centre through the instance, then through the object.
@@ -153,7 +159,10 @@ export class ShadowCulling {
         lo[k] = Math.min(lo[k], c[k]);
         hi[k] = Math.max(hi[k], c[k]);
       }
-      spheres[i * 4 + 3] = pad(radius * objectScale * maxScale(a, o));
+      const r = pad(radius * objectScale * maxScale(a, o));
+      spheres[i * 4 + 3] = r;
+      smallest = Math.min(smallest, r);
+      largest = Math.max(largest, r);
     }
     // One sphere around them all, so a view can take or drop the whole mesh at once.
     const c = [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2];
@@ -165,6 +174,9 @@ export class ShadowCulling {
       reach = Math.max(reach, Math.sqrt(dx * dx + dy * dy + dz * dz) + spheres[i * 4 + 3]);
     }
     s.all.set([c[0], c[1], c[2], pad(reach)]);
+    // The instances' smallest and largest radii, so a size limit can take or drop the whole mesh.
+    s.smallest = n > 0 ? Math.fround(smallest) : 0;
+    s.largest = Math.fround(largest);
     s.attribute = instances;
     s.version = instances.version;
     s.count = n;
@@ -189,17 +201,18 @@ export class ShadowCulling {
 
   // The instances of `mesh`, straddling view `index`, it draws there: none, all, or (a view
   // record with a stand-in) some. Kept while neither the mesh nor the view's planes change.
-  #classify(mesh, s, index, stamp) {
-    const v = (s.views[index] ??= { result: null, revision: -1, stamp: -1, standIn: null, capacity: 0, indices: null, count: -1, filled: -1 });
-    if (v.revision === s.revision && v.stamp === stamp) return v.result;
+  #classify(mesh, s, index, stamp, min) {
+    const v = (s.views[index] ??= { result: null, revision: -1, stamp: -1, min: -1, standIn: null, capacity: 0, indices: null, count: -1, filled: -1 });
+    if (v.revision === s.revision && v.stamp === stamp && v.min === min) return v.result;
     v.revision = s.revision;
     v.stamp = stamp;
+    v.min = min;
     const p = this.#planes;
     const n = s.count;
     if (this.#indices.length < n) this.#indices = new Uint32Array(n);
     const indices = this.#indices;
     let visible = 0;
-    for (let i = 0; i < n; i++) if (meets(p, s.spheres, i)) indices[visible++] = i;
+    for (let i = 0; i < n; i++) if (meets(p, s.spheres, i, min)) indices[visible++] = i;
     if (visible === n || visible === 0) {
       v.result = visible === n;
       return v.result;
@@ -239,9 +252,10 @@ export class ShadowCulling {
 
   /**
    * Before shadow view `index` renders through `camera` (its culling camera, matrices set): each
-   * InstancedMesh draws only what of it meets the camera's frustum.
+   * InstancedMesh draws only what of it meets the camera's frustum, and of that only the instances
+   * whose bounding sphere has at least radius `min` (projected-size culling; 0 keeps all).
    */
-  view(index, camera) {
+  view(index, camera, min = 0) {
     this.reset();
     this.#clip.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     this.#frustum.setFromProjectionMatrix(this.#clip, camera.coordinateSystem, camera.reversedDepth);
@@ -267,12 +281,12 @@ export class ShadowCulling {
       const mesh = instanced[i];
       const s = this.#states[i];
       // The sphere around all instances first: wholly outside drops the mesh, wholly inside
-      // keeps it whole.
+      // keeps it whole, unless some instances are too small there. All too small drops it.
       const all = s.all;
       const ar = all[3];
-      let inside = true;
-      let outside = false;
-      for (let k = 0; k < 24; k += 4) {
+      let inside = s.smallest >= min;
+      let outside = s.largest < min;
+      for (let k = 0; k < 24 && !outside; k += 4) {
         const d = p[k] * all[0] + p[k + 1] * all[1] + p[k + 2] * all[2] + p[k + 3];
         if (d < -ar) {
           outside = true;
@@ -280,14 +294,15 @@ export class ShadowCulling {
         }
         if (d < ar) inside = false;
       }
-      if (inside) continue;
+      // Outside one plane is outside, whatever the planes before said.
+      if (inside && !outside) continue;
       if (!outside && s.count < PER_INSTANCE_MIN) {
         let any = false;
-        for (let j = 0; j < s.count && !any; j++) any = meets(p, s.spheres, j);
+        for (let j = 0; j < s.count && !any; j++) any = meets(p, s.spheres, j, min);
         if (any) continue;
         outside = true;
       }
-      const result = outside ? false : this.#classify(mesh, s, index, stamp);
+      const result = outside ? false : this.#classify(mesh, s, index, stamp, min);
       if (result === true) continue;
       if (result) {
         const standIn = result.standIn;
