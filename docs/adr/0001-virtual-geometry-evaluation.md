@@ -48,4 +48,9 @@ strict conservative error validation and open-mesh transition guarantees remain
 unverified. This decision rejects the current candidate for current consumers,
 not virtual geometry in general, and does not claim to deliver a mature Nanite API.
 
-Unavailable integrated/mobile hardware validation is tracked in [#121](https://github.com/moritzbrantner/render-engine/issues/121); it does not authorize an adoption switch.
+Integrated/mobile hardware validation is tracked in [#121](https://github.com/moritzbrantner/render-engine/issues/121); it does not authorize an adoption switch.
+On an integrated GPU (Intel Arc 140V, browser WebGL 2, 2026-11-23), clusters reduced GPU time only for
+the arch, with 2.5× the discrete LODs' image error and seven to ten times their CPU time. On the dense
+buttress they cost more GPU time than full source geometry, and on the real placements they made no
+difference ([evaluation](../virtual-geometry-evaluation.md#integrated-gpu-browser-comparison-121)).
+Native and WebGPU runs on integrated hardware, and mobile hardware, remain unverified.

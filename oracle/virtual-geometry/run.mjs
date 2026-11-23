@@ -11,7 +11,10 @@ let previous;
 try { previous = JSON.parse(await fs.readFile(reportPath, 'utf8')); }
 catch (error) { if (error.code !== 'ENOENT') throw error; }
 if (previous && previous.asset !== asset) throw new Error('Output belongs to another asset; choose a new directory');
-const browser = await chromium.launch({ headless: true, args: ['--enable-gpu', '--ignore-gpu-blocklist', '--use-angle=vulkan', '--enable-features=Vulkan', '--use-vulkan=native'] });
+// VG_ANGLE=gl runs ANGLE on the system's OpenGL instead of Vulkan (on WSL with
+// GALLIUM_DRIVER=d3d12: the Windows GPU through D3D12, which no Vulkan driver reaches).
+const angle = process.env.VG_ANGLE === 'gl' ? ['--use-angle=gl'] : ['--use-angle=vulkan', '--enable-features=Vulkan', '--use-vulkan=native'];
+const browser = await chromium.launch({ headless: true, args: ['--enable-gpu', '--ignore-gpu-blocklist', ...angle] });
 try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   page.on('pageerror', e => console.error(e));

@@ -407,6 +407,140 @@ target/virtual-geometry/inputs/arch-discrete
 target/virtual-geometry/shrine/shrine.kit.arch shrine.kit.arch
 OUTPUT_JSON`, with the repository-root server at `ORIGIN`.
 
-The five crag scene JSON files and every referenced buffer/texture were compared directly with the consumer’s current local crag payload and match. Integrated/mobile hardware follow-up: [#121](https://github.com/moritzbrantner/render-engine/issues/121).
+The five crag scene JSON files and every referenced buffer/texture were compared directly with the consumer’s current local crag payload and match. Integrated/mobile hardware follow-up: [#121](https://github.com/moritzbrantner/render-engine/issues/121); the browser comparisons on an integrated GPU are [below](#integrated-gpu-browser-comparison-121).
 
 The current Shooter catalog has Assembly Works and greybox arenas, not a shipped shipyard map. Assembly Works supplies the real factory gameplay baseline; the planned large arena remains in shooter#55. No artificial shipyard scene was substituted.
+
+
+## Integrated GPU browser comparison (#121)
+
+The browser comparisons were rerun on an integrated GPU on 2026-11-23: an Intel Arc 140V (Lunar
+Lake, 16 GB shared). The machine runs WSL2, whose only path to that GPU is D3D12, and Mesa's D3D12
+OpenGL driver puts WebGL 2 on it. The runs used headless Chromium 159 with
+`GALLIUM_DRIVER=d3d12 VG_ANGLE=gl`, at 1280×720. The page reported
+`ANGLE (Microsoft Corporation, D3D12 (Intel(R) Arc(TM) 140V GPU (16GB)), OpenGL ES 3.1)`, with multi-draw
+and GPU timers available, three.js 187, the same `bench.js` and two reverse-order rounds. The
+tables show round 2 (the reverse order), as the RTX figures above do. Raw reports:
+`benchmarks/virtual-geometry/browser-arc-*.json.gz`. RMSE is the four-capture mean sRGB RMSE
+against the source capture at the same count, as above. Timing is advisory: it is one laptop, and
+the WebGL calls go through ANGLE, then OpenGL, then D3D12. The source and cluster draws also go
+through different three.js paths (InstancedMesh against BatchedMesh).
+
+```sh
+python3 -c 'import gzip,json;json.dump(json.load(gzip.open("docs/benchmarks/virtual-geometry/greyhaven-browser-buttress.json.gz"))["scene"],open("target/virtual-geometry/greyhaven-buttress-scene.json","w"))'
+GALLIUM_DRIVER=d3d12 VG_ANGLE=gl node oracle/virtual-geometry/run.mjs http://127.0.0.1:8000 arch-discrete shrine.kit.arch OUTPUT shrine
+GALLIUM_DRIVER=d3d12 VG_ANGLE=gl VG_SCENE_URL=/target/virtual-geometry/greyhaven-buttress-scene.json \
+  node oracle/virtual-geometry/run.mjs http://127.0.0.1:8000 crag crag.kit.outcrop-buttress-1 OUTPUT
+GALLIUM_DRIVER=d3d12 VG_ANGLE=gl node oracle/virtual-geometry/run.mjs http://127.0.0.1:8000 crag crag.kit.outcrop-buttress-1 OUTPUT
+```
+
+**Inputs.**
+- **Arch: the same processed inputs as the RTX run.** The current `shrine-kit` release
+  (`02ad24aa…`), the 3d-lab `lod_chain` (3d-lab `1d185c6`, meshopt 0.7.0) and the
+  three-nanite reference at `b730aac` reproduce `arch-discrete-request.json`,
+  `arch-discrete-observations.json` and `arch-footprint.json` exactly: the same LOD triangle
+  counts and errors, and the same file and buffer bytes for source, LODs and hierarchy.
+- **Greyhaven buttress: the same scene and camera path, but not the same asset.** The scene is
+  the recorded one (placements, transforms and the 240 frames, written from
+  `greyhaven-browser-buttress.json.gz`). The asset comes from the repository-pinned crag kit
+  (`scripts/fetch-kits.sh`, `63bb39f4…`), because the evaluated `f3419e27…` is no longer in
+  the rolling release. It has the same 8,999 source triangles and kit LOD1/LOD2, but a different
+  source file hash and 175 rather than 176 clusters.
+- **Buttress grid: new.** The same asset as a dense grid (1, 64 and 256 instances). There is no
+  RTX browser run of it.
+
+**Results.**
+- **Arch.** With 64 and 256 instances the cluster cuts take the least GPU time on the integrated
+  GPU, more clearly than on the RTX. With 256 arches, the 1 px cut takes 3.7 ms against 8.1 ms
+  for source and 7.6–8.9 ms for the discrete LODs (the RTX gave 3.2 ms against 5.2 and 3.6–4.9
+  ms). It costs 1.5–2 ms of CPU against 0.2 ms, and has 2.5× LOD2's image error (RMSE 0.0071
+  against 0.0028). The discrete LODs barely help here because `lod_chain` stops at about 5,900
+  triangles from level 2 on. At a single instance, every mode costs about 0.85–0.95 ms, which is
+  the frame's fixed cost.
+- **Greyhaven buttress, real placements.** Every mode takes 1.05–1.20 ms of GPU time (source
+  1.20, 1 px clusters 1.13, LOD2 1.05). That spread is smaller than the round-to-round variation
+  (source's first round was 1.47 ms). At three placements, geometry is not the integrated GPU's
+  cost, and no candidate is a measurable win.
+- **Buttress grid.** The integrated GPU reverses the cluster result. With 256 buttresses, the 1 px
+  cut submits 24 % fewer triangles than source (3.48 M against 4.61 M), yet takes more GPU time
+  (20.2 ms against 14.0 ms) and 4 ms of CPU. The 4 px cut is level with source on the GPU (15.2
+  ms) at RMSE 0.015. The kit's discrete LODs are cheaper (LOD2 6.0 ms), but they are fixed levels
+  with no distance selection, at RMSE 0.044–0.056: visibly coarser on the nearby instances, so not
+  an equal-quality candidate.
+
+**Loading and payload.** Each latest page load (local HTTP, warm cache) took 463 ms for the arch
+(481 ms on the RTX) and about 1.5 s for the buttress pages. The arch's payload bytes are the
+recorded ones (`arch-transfer.json`), because its files are byte-identical.
+
+**Unavailable.** Native runs on this GPU: WSL2 has no Vulkan driver for it, so native wgpu sees
+only lavapipe. Browser WebGPU on it: Chromium gives only SwiftShader. Process and GPU memory:
+WSL2's D3D12 path reports no per-process GPU allocation. Mobile GPUs. The captures were inspected
+(`OUTPUT/<count>-<mode>-<frame>.png`); none is checked in.
+
+These results do not change the decision. On the integrated GPU, clusters win on the GPU only
+for the arch, and there with 2.5× the discrete LODs' image error and seven to ten times their CPU
+time (1.5–2 ms against 0.2 ms). On the buttress they lose to full source geometry. The real
+placements show no difference.
+
+Arch, 1, 64 and 256 instances (same inputs as `browser-arch-discrete.json.gz`):
+
+| Instances | Mode | Triangles submitted (all views) | CPU ms median / p95 | GPU ms median / p95 | RMSE vs source | RTX 3060 Ti GPU ms median / p95 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | source | 29,144 | 0.20 / 0.40 | 0.93 / 1.04 | 0 | 0.35 / 0.45 |
+| 1 | lod1 | 14,570 | 0.20 / 0.40 | 0.94 / 1.01 | 0.0001 | 0.28 / 0.36 |
+| 1 | lod2 | 11,824 | 0.30 / 0.40 | 0.87 / 0.93 | 0.0004 | 0.03 / 0.34 |
+| 1 | lod3 | 11,840 | 0.20 / 0.40 | 0.86 / 0.92 | 0.0004 | 0.30 / 0.35 |
+| 1 | lod4 | 11,840 | 0.20 / 0.30 | 0.84 / 0.92 | 0.0004 | 0.36 / 1.20 |
+| 1 | cluster-1 | 7,706 | 0.20 / 0.40 | 0.93 / 0.97 | 0.0008 | 0.29 / 0.31 |
+| 1 | cluster-2 | 7,706 | 0.30 / 0.50 | 0.92 / 0.97 | 0.0008 | 0.29 / 0.31 |
+| 1 | cluster-4 | 5,220 | 0.30 / 0.50 | 0.92 / 0.96 | 0.0010 | 0.29 / 0.31 |
+| 64 | source | 1,865,216 | 0.20 / 0.30 | 5.35 / 6.82 | 0 | 3.40 / 4.80 |
+| 64 | lod1 | 932,480 | 0.20 / 0.40 | 3.39 / 3.74 | 0.0010 | 2.51 / 2.82 |
+| 64 | lod2 | 756,736 | 0.20 / 0.40 | 3.12 / 3.49 | 0.0023 | 2.23 / 2.45 |
+| 64 | lod3 | 757,760 | 0.20 / 0.40 | 3.15 / 3.52 | 0.0023 | 2.24 / 2.45 |
+| 64 | lod4 | 757,760 | 0.30 / 0.40 | 3.11 / 3.47 | 0.0023 | 2.23 / 2.45 |
+| 64 | cluster-1 | 313,782 | 0.80 / 1.00 | 2.14 / 3.50 | 0.0045 | 1.00 / 1.16 |
+| 64 | cluster-2 | 240,305 | 0.70 / 0.90 | 1.88 / 2.33 | 0.0069 | 2.18 / 3.12 |
+| 64 | cluster-4 | 129,411 | 0.70 / 0.90 | 1.57 / 1.78 | 0.0187 | 0.63 / 0.72 |
+| 256 | source | 7,460,864 | 0.20 / 0.30 | 8.07 / 9.70 | 0 | 5.23 / 5.55 |
+| 256 | lod1 | 3,729,920 | 0.20 / 0.40 | 8.88 / 10.17 | 0.0015 | 4.74 / 5.91 |
+| 256 | lod2 | 3,026,944 | 0.20 / 0.40 | 7.97 / 9.96 | 0.0028 | 3.75 / 5.04 |
+| 256 | lod3 | 3,031,040 | 0.20 / 0.30 | 7.63 / 9.10 | 0.0028 | 3.64 / 4.92 |
+| 256 | lod4 | 3,031,040 | 0.30 / 0.40 | 7.94 / 10.00 | 0.0028 | 4.88 / 5.09 |
+| 256 | cluster-1 | 926,231 | 2.00 / 2.30 | 3.72 / 4.46 | 0.0071 | 3.25 / 3.63 |
+| 256 | cluster-2 | 534,203 | 1.60 / 1.90 | 2.65 / 3.30 | 0.0161 | 2.50 / 3.35 |
+| 256 | cluster-4 | 177,667 | 1.50 / 1.70 | 1.83 / 2.30 | 0.0312 | 0.90 / 1.79 |
+
+Greyhaven buttress, three real placements, 240 frames (recorded scene; pinned kit):
+
+| Instances | Mode | Triangles submitted (all views) | CPU ms median / p95 | GPU ms median / p95 | RMSE vs source | RTX 3060 Ti GPU ms median / p95 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 3 | source | 53,994 | 0.20 / 0.40 | 1.20 / 1.54 | 0 | 0.53 / 1.49 |
+| 3 | lod1 | 16,362 | 0.20 / 0.40 | 1.11 / 1.29 | 0.0068 | 0.39 / 0.43 |
+| 3 | lod2 | 4,530 | 0.20 / 0.40 | 1.05 / 1.11 | 0.0084 | 0.34 / 0.38 |
+| 3 | cluster-1 | 37,714 | 0.30 / 0.50 | 1.13 / 1.39 | 0.0004 | 0.39 / 0.42 |
+| 3 | cluster-2 | 37,087 | 0.30 / 0.60 | 1.18 / 1.30 | 0.0006 | 0.39 / 0.42 |
+| 3 | cluster-4 | 30,136 | 0.30 / 0.50 | 1.15 / 1.26 | 0.0029 | 0.38 / 0.41 |
+
+Buttress grid (pinned kit):
+
+| Instances | Mode | Triangles submitted (all views) | CPU ms median / p95 | GPU ms median / p95 | RMSE vs source |
+| --- | --- | --- | --- | --- | --- |
+| 1 | source | 17,998 | 0.20 / 0.40 | 0.89 / 1.02 | 0 |
+| 1 | lod1 | 5,454 | 0.20 / 0.40 | 0.72 / 0.93 | 0.0218 |
+| 1 | lod2 | 1,510 | 0.20 / 0.50 | 0.70 / 0.85 | 0.0289 |
+| 1 | cluster-1 | 16,318 | 0.30 / 0.70 | 0.89 / 1.00 | 0.0006 |
+| 1 | cluster-2 | 16,318 | 0.30 / 0.80 | 0.90 / 1.01 | 0.0006 |
+| 1 | cluster-4 | 16,318 | 0.30 / 0.80 | 0.60 / 0.70 | 0.0006 |
+| 64 | source | 1,151,872 | 0.30 / 0.90 | 7.81 / 9.58 | 0 |
+| 64 | lod1 | 349,056 | 0.40 / 1.30 | 5.02 / 6.32 | 0.0476 |
+| 64 | lod2 | 96,640 | 0.30 / 1.00 | 2.86 / 3.45 | 0.0609 |
+| 64 | cluster-1 | 985,955 | 2.00 / 4.00 | 6.19 / 12.95 | 0.0011 |
+| 64 | cluster-2 | 924,880 | 2.00 / 4.20 | 5.81 / 12.43 | 0.0034 |
+| 64 | cluster-4 | 767,115 | 2.30 / 4.80 | 5.25 / 14.25 | 0.0108 |
+| 256 | source | 4,607,488 | 0.20 / 0.30 | 14.02 / 21.19 | 0 |
+| 256 | lod1 | 1,396,224 | 0.20 / 0.40 | 8.25 / 17.15 | 0.0435 |
+| 256 | lod2 | 386,560 | 0.30 / 0.40 | 5.99 / 7.76 | 0.0556 |
+| 256 | cluster-1 | 3,482,522 | 4.00 / 4.50 | 20.22 / 24.12 | 0.0024 |
+| 256 | cluster-2 | 2,893,591 | 4.10 / 6.60 | 20.44 / 33.84 | 0.0059 |
+| 256 | cluster-4 | 1,911,049 | 4.00 / 9.40 | 15.15 / 29.29 | 0.0152 |
