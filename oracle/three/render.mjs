@@ -11,6 +11,8 @@
 // sets THREE_VK_ICD to lavapipe's ICD on a software adapter (CI), so the device's f16 and sRGB
 // stores round like Bevy's. THREE_BACKEND=swiftshader uses Chromium's SwiftShader instead (its
 // sRGB store rounds differently from lavapipe's, about one 8-bit step on a sixth of the pixels).
+// THREE_BACKEND=gl runs ANGLE on the system's OpenGL: on WSL with GALLIUM_DRIVER=d3d12, Mesa's
+// D3D12 driver on the Windows GPU, where no Vulkan driver reaches it.
 
 import { createServer } from 'node:http';
 import { readFile, writeFile, rm } from 'node:fs/promises';
@@ -61,6 +63,7 @@ const browser = await chromium.launch({
   args: {
     swiftshader: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--use-gl=angle'],
     vulkan,
+    gl: ['--enable-gpu', '--ignore-gpu-blocklist', '--use-angle=gl'],
   }[backend],
   env: { ...process.env, ...(process.env.THREE_VK_ICD ? { VK_ICD_FILENAMES: process.env.THREE_VK_ICD } : {}) },
 });

@@ -68,6 +68,10 @@ const args =
 if (process.env.SMOKE_WEBGL === '0') args.push('--disable-webgl');
 if (process.env.SMOKE_FALLBACK === '1') args.push('--use-webgpu-adapter=swiftshader');
 if (process.env.SMOKE_DEV === '1') args.push('--enable-webgpu-developer-features');
+// SMOKE_ANGLE=gl: WebGL through ANGLE on the system's OpenGL rather than Vulkan (on WSL with
+// GALLIUM_DRIVER=d3d12, the Windows GPU through D3D12, which no Vulkan driver reaches). WebGPU
+// keeps its Vulkan adapter.
+if (process.env.SMOKE_ANGLE === 'gl') args.push('--use-angle=gl');
 // SMOKE_BROWSER=firefox: Playwright's Firefox, the same switches as prefs (WebGPU is behind
 // `dom.webgpu.enabled` there; the Chromium-only switches do not apply).
 const browser =
