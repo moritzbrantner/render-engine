@@ -159,7 +159,40 @@ whether the difference is Tint's arithmetic or something else is not determined.
 
 On the software adapter (SwiftShader, different device from any native side, so advisory only):
 `sun_shadows` 0.0048 / 0.0495 and `sky_day_cycle_noon` 0.0139 / 0.0825 against the NVIDIA native
-engine. Do not read those as a browser-versus-native result.
+engine. Do not read those as a browser-versus-native result. Chromium 159 lands there by default
+on this machine unless ANGLE is on Vulkan (`--use-angle=vulkan`, which the smoke passes since
+#154). A browser on SwiftShader reproduces exactly these numbers.
+
+### Rerun on the RTX 3060 Ti in Chromium 159 and Firefox 159 (#154)
+
+`scripts/browser-hardware.sh`, 2026-11-23 (driver 595.99.02, headless Chromium 159.0.8154.6,
+Firefox 159.0 under Xvfb). It ran the browser gate (`scripts/browser-gate.sh`) on every oracle
+scenario, with Bevy and native render-engine on the same GPU. The full report is in the #154 PR.
+
+- **Every capture passes in both browsers**: 28 lighting scenarios, `Culling::GpuIndirect` on 3,
+  18 particle captures (tiers and spawn/alive counts) and 4 soft-particle captures. Against Bevy,
+  the lighting captures are at most 0.0009 / 0.0143 (Chromium) and 0.0001 / 0.0034 (Firefox).
+  GPU-culled instance counts equal native's in every view.
+- **The sky's differing pixels are Chromium's.** Chromium's four sky views differ from native in
+  7,037–13,813 pixels, as in #75. Firefox's, on wgpu like native, differ in 0–12. Every other
+  lighting scenario differs from native in at most 11 pixels in both browsers. So the sky
+  difference comes from Chromium's WebGPU implementation (Dawn and its Tint shader compiler), not
+  from the engine.
+- **The showcase** (`scripts/web-showcase.sh`): every shooter frame (10 in Chromium, 9 in
+  Firefox) is byte-identical to native. That includes those after device loss, recovered in both browsers
+  (Chromium's GPU-process crash included), and after a resize at device pixel ratio 2. Time to
+  the first frame is 565–579 ms in Chromium and 610–1015 ms in Firefox.
+
+| Scenario | Chromium GPU ms | Firefox GPU ms | Native GPU ms | `prepare` ms: Chromium / Firefox / native |
+| --- | ---: | ---: | ---: | ---: |
+| `sun_shadows` | 0.125 | 0.123 | 0.114 | 0.040 / 0.080 / 0.024 |
+| `many_instances` | 0.779 | 0.793 | 0.767 | 3.740 / 5.180 / 2.326 |
+| `point_spot` | 0.256 | 0.240 | 0.223 | 0.140 / 0.300 / 0.105 |
+| `sky_day_cycle_noon` | 0.650 | 0.613 | 0.618 | 0.045 / 0.100 / 0.029 |
+
+GPU time is within 0.04 ms of native in both browsers. `prepare` on `many_instances` is 1.6×
+native in Chromium and 2.2× in Firefox. Firefox's clock is coarser (20 µs steps). The numbers
+are the same protocol as above, one run each, and advisory.
 
 ## Load size and startup
 
@@ -261,13 +294,14 @@ would need to measure; this smoke does not show it either way.
 
 ## Not verified
 
-- Any browser other than the Playwright headless shell on this machine: Firefox, Safari, Chrome
-  stable (which returned no adapter under headless here), a headed window, mobile GPUs, and other
-  desktop drivers.
+- Any browser other than Playwright's headless Chromium and Firefox (on the RTX 3060 Ti since
+  #154): Safari, Chrome stable (which returned no adapter under headless here), a headed window,
+  mobile GPUs, and other desktop drivers.
 - Skinned meshes and `textured_props` drawing in a browser (pipelines compile; no image). Done
   in #129.
 - `Culling::GpuIndirect` and `LightAssignment::Clustered` in a browser. Done in #129.
-- The cause of the sky's 12–14k differing pixels against native.
+- The exact cause of the sky's 12–14k differing pixels against native. Since #154 it is
+  narrowed to Chromium's WebGPU implementation (Dawn and Tint): Firefox's sky views match native.
 - CPU time of the three.js renderer, and any real consumer's frame or workload. D10's consumer
   and adoption evidence is not provided by this assessment.
 - Device-loss recovery, canvas resize and `wasm-opt`.

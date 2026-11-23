@@ -17,9 +17,14 @@ below shows why. Native rendering is unchanged, and no engine code changed for t
 - **Backend selection** is `selectBackend` in `packages/three-lighting/backend.js`
   (`@moritzbrantner/three-lighting/backend`): WebGPU first, then WebGL 2, then
   `NoGraphicsBackendError`. A backend whose initialiser throws falls through to the next one.
-- In headless Chromium, the WebGL 2 frames of `sun_shadows` and `textured_props` (textured glTF
-  props, sun shadows, a blended sphere) are within D3's gates against Bevy (FLIP p99 ≤ 0.0006), and
-  within 0.0005 of native render-engine.
+- In headless Chromium and Firefox, the WebGL 2 frames of `sun_shadows` and `textured_props`
+  (textured glTF props, sun shadows, a blended sphere) are within D3's gates against Bevy (FLIP
+  p99 ≤ 0.0010), on lavapipe and on an RTX 3060 Ti with Bevy on the same GPU.
+- With Bevy on the same hardware GPU, 41 of the fallback's 45 frames differ from Bevy's in at
+  most 0.27 % of pixels, and in almost none by more than one 8-bit step. The other four are
+  the alpha-blended particle captures, whose draw order is the GPU's (D9's statistical tier). The rounding offset and the sky and foliage
+  differences measured on the Intel Arc were the mismatched GPUs, not the port
+  ([below](#on-a-hardware-gpu-rtx-3060-ti)).
 
 ## Feasibility: render-engine on wgpu's WebGL 2 backend
 
@@ -101,8 +106,9 @@ ported by hand (the D8 rule), and its CPU cost is three.js's, not measured here.
 
 ## Comparison
 
-Headless Chromium 159 and Firefox 159 on this machine (no hardware GPU: llvmpipe/lavapipe, WSL2),
-2026-11-20.
+On software adapters: headless Chromium 159 and Firefox 159 on a machine with no hardware GPU
+(llvmpipe/lavapipe, WSL2), 2026-11-20. The same comparison on a hardware GPU, with Bevy on it,
+is [below](#on-a-hardware-gpu-rtx-3060-ti).
 Bevy, native render-engine and the oracle's three.js frame come from the oracle
 (`--only sun_shadows --only textured_props`, lavapipe). FLIP mean / p99, D3's gates 0.005 / 0.05.
 
@@ -147,6 +153,88 @@ The spawn and alive counts match Bevy's on every frame of every scenario. `parti
 colour distance varies between runs because Bevy's GPU decides the alpha-blended draw order
 within an emitter; the three.js side's is deterministic.
 
+### On a hardware GPU (RTX 3060 Ti)
+
+`scripts/browser-hardware.sh` on the owner's desktop (Linux 7.0, RTX 3060 Ti, driver 595.99.02,
+headless Chromium 159.0.8154.6 and Firefox 159.0), 2026-11-23, #154. Bevy, native render-engine,
+the oracle's three.js side (ANGLE on Vulkan) and both browsers all ran on the RTX. Chromium 159
+needs `--use-angle=vulkan` here: without it, its GPU process starts on SwiftShader, and WebGPU and
+WebGL 2 both run on that. The smoke now passes it. Firefox offers WebGPU only with a display, so
+the script runs under `xvfb-run` when there is none.
+
+| Browser | Backend selection (5 cases) | `sun_shadows`: WebGL 2 vs Bevy / vs WebGPU | `textured_props`: WebGL 2 vs Bevy / vs native |
+| --- | --- | --- | --- |
+| Chromium 159 | all pass | 0.0000 / 0.0000; 0.0000 / 0.0000 | 0.0000 / 0.0008; 0.0000 / 0.0007 |
+| Firefox 159 | all pass | 0.0000 / 0.0000; 0.0000 / 0.0000 | 0.0000 / 0.0010; 0.0000 / 0.0008 |
+
+Chromium's forced WebGL 2 frames are byte-identical to the oracle's three.js frames. Firefox's
+differ from them in 3 and 46 pixels.
+
+**The one-step offset is gone with Bevy on the same GPU.** The oracle's three.js frames (ANGLE on
+Vulkan on the RTX), against Bevy on the RTX, in the same columns as the Arc table below. Outside
+the alpha-blended particle captures, at most 0.27 % of pixels differ at all, and at most 0.02 %
+by more than one step. The Arc's 10–99 % of pixels one step off came from comparing two GPUs.
+
+- **Sky, grazing angles.** No pixel is more than one step off in any sky view (0.00 %, against
+  1.25–2.66 % on the Arc). The ground band does not persist.
+- **`textured_props` foliage edges.** 0.04 % of pixels differ, none by more than one step (0.24 % on
+  the Arc). This does not persist either.
+- Neither needs a shading issue under D8.
+- `particles_alpha` and `smoke_and_sparks` differ as on lavapipe and the Arc. Inside an
+  alpha-blended emitter, the draw order is the GPU's alive-list order (D9's statistical tier).
+  Their p99 is above D3's FLIP gate, so the oracle judges them by its statistics, which pass.
+
+| Frame | FLIP vs Bevy (mean / p99) | Pixels off by > 0 steps (%) | > 1 step (%) | > 2 steps (%) | three.js GPU ms |
+| --- | --- | --- | --- | --- | --- |
+| `fog_atmospheric` | 0.0000 / 0.0002 | 0.01 | 0.00 | 0.00 | 0.23 |
+| `fog_atmospheric_sun` | 0.0000 / 0.0009 | 0.03 | 0.00 | 0.00 | 0.31 |
+| `fog_exponential` | 0.0000 / 0.0001 | 0.01 | 0.00 | 0.00 | 0.23 |
+| `fog_exponential_squared` | 0.0000 / 0.0002 | 0.01 | 0.00 | 0.00 | 0.23 |
+| `fog_exponential_squared_sun` | 0.0000 / 0.0009 | 0.03 | 0.00 | 0.00 | 0.31 |
+| `fog_exponential_sun` | 0.0001 / 0.0014 | 0.05 | 0.00 | 0.00 | 0.31 |
+| `fog_linear` | 0.0000 / 0.0002 | 0.01 | 0.00 | 0.00 | 0.23 |
+| `fog_linear_sun` | 0.0000 / 0.0010 | 0.03 | 0.00 | 0.00 | 0.33 |
+| `ibl_materials` | 0.0000 / 0.0000 | 0.00 | 0.00 | 0.00 | 0.12 |
+| `ibl_materials_sun` | 0.0000 / 0.0002 | 0.01 | 0.00 | 0.00 | 0.22 |
+| `many_instances` | 0.0000 / 0.0009 | 0.03 | 0.00 | 0.00 | 0.79 |
+| `many_lights` | 0.0000 / 0.0005 | 0.02 | 0.00 | 0.00 | 3.66 |
+| `particles_100k t0750` | 0.0001 / 0.0035 | 0.15 | 0.00 | 0.00 | – |
+| `particles_100k t3000` | 0.0002 / 0.0055 | 0.23 | 0.00 | 0.00 | – |
+| `particles_alpha t1000` | 0.0014 / 0.0567 | 2.58 | 1.51 | 0.92 | – |
+| `particles_alpha t3000` | 0.0031 / 0.0696 | 6.02 | 2.41 | 0.95 | – |
+| `particles_cone t0500` | 0.0000 / 0.0000 | 0.00 | 0.00 | 0.00 | – |
+| `particles_cone t2500` | 0.0000 / 0.0000 | 0.00 | 0.00 | 0.00 | – |
+| `particles_fountain t0500` | 0.0000 / 0.0000 | 0.00 | 0.00 | 0.00 | – |
+| `particles_fountain t2000` | 0.0000 / 0.0000 | 0.01 | 0.00 | 0.00 | – |
+| `particles_lit_fog t0500` | 0.0000 / 0.0004 | 0.03 | 0.00 | 0.00 | – |
+| `particles_lit_fog t2500` | 0.0000 / 0.0009 | 0.04 | 0.00 | 0.00 | – |
+| `particles_snapshot t0500` | 0.0000 / 0.0000 | 0.00 | 0.00 | 0.00 | – |
+| `particles_snapshot t1000` | 0.0000 / 0.0000 | 0.01 | 0.00 | 0.00 | – |
+| `particles_soft t0500` | 0.0000 / 0.0011 | 0.04 | 0.00 | 0.00 | – |
+| `particles_soft t2500` | 0.0000 / 0.0009 | 0.03 | 0.00 | 0.00 | – |
+| `particles_textured t0625` | 0.0001 / 0.0018 | 0.06 | 0.00 | 0.00 | – |
+| `particles_textured t2500` | 0.0001 / 0.0050 | 0.23 | 0.00 | 0.00 | – |
+| `point_spot` | 0.0000 / 0.0010 | 0.04 | 0.00 | 0.00 | 0.39 |
+| `point_spot_hardware` | 0.0000 / 0.0010 | 0.04 | 0.00 | 0.00 | 0.27 |
+| `point_spot_soft` | 0.0001 / 0.0020 | 0.13 | 0.02 | 0.00 | 0.56 |
+| `skinned_figure` | 0.0000 / 0.0003 | 0.01 | 0.00 | 0.00 | 0.27 |
+| `sky_day_cycle_dusk` | 0.0002 / 0.0043 | 0.20 | 0.00 | 0.00 | 1.43 |
+| `sky_day_cycle_golden` | 0.0001 / 0.0025 | 0.11 | 0.00 | 0.00 | 1.44 |
+| `sky_day_cycle_night` | 0.0002 / 0.0053 | 0.27 | 0.00 | 0.00 | 1.55 |
+| `sky_day_cycle_noon` | 0.0001 / 0.0033 | 0.16 | 0.00 | 0.00 | 1.44 |
+| `smoke_and_sparks t1000` | 0.0006 / 0.0208 | 1.14 | 0.57 | 0.28 | – |
+| `smoke_and_sparks t3000` | 0.0032 / 0.0710 | 6.68 | 3.22 | 1.81 | – |
+| `sun_cascades` | 0.0000 / 0.0005 | 0.02 | 0.00 | 0.00 | 0.23 |
+| `sun_shadows` | 0.0000 / 0.0000 | 0.00 | 0.00 | 0.00 | 0.11 |
+| `textured_props` | 0.0000 / 0.0008 | 0.04 | 0.00 | 0.00 | 0.41 |
+| `tonemap_range_dim_agx` | 0.0000 / 0.0000 | 0.00 | 0.00 | 0.00 | 0.12 |
+| `tonemap_range_dim_tony` | 0.0000 / 0.0000 | 0.00 | 0.00 | 0.00 | 0.11 |
+| `tonemap_range_noon_agx` | 0.0000 / 0.0000 | 0.00 | 0.00 | 0.00 | 0.11 |
+| `tonemap_range_noon_tony` | 0.0000 / 0.0000 | 0.00 | 0.00 | 0.00 | 0.11 |
+
+GPU time is the oracle's three.js timer-query median and is advisory (D8). The step counts are
+the largest per-channel difference per pixel between `<frame>.three.png` and `<frame>.bevy.png`.
+
 ### On an integrated GPU (Intel Arc 140V)
 
 WSL2 exposes the Windows GPU only through D3D12 (`/dev/dxg`), which no Vulkan driver reaches, but Mesa's
@@ -177,7 +265,8 @@ below the horizon, up to about four steps) and `textured_props` (0.24 %, isolate
 alpha-cut foliage edges and specular highlights), both precision or coverage differences of the
 hardware path. `particles_alpha` and `smoke_and_sparks` are statistical captures whose
 multi-step differences are the same as on lavapipe. This is not a gate: a hardware gate needs
-Bevy on the same GPU.
+Bevy on the same GPU. With Bevy on the same GPU (the RTX 3060 Ti, [above](#on-a-hardware-gpu-rtx-3060-ti)),
+the offset, the sky band and the foliage edges all disappear.
 
 GPU time is the median of 100 `Lighting.render` calls with `EXT_disjoint_timer_query_webgl2`, at
 1280×720 and advisory.
@@ -263,9 +352,8 @@ bash scripts/browser-backends.sh
 ## Not verified
 
 - Safari, Chrome or Firefox on a real window, and mobile browsers: everything here ran headless
-  in Playwright's Chromium and Firefox. The only hardware GPU is the WebGL 2 run on the Intel
-  Arc 140V above, and there Bevy is not on the same GPU. The fallback against Bevy and the
-  engine's WebGPU on one hardware GPU is `scripts/browser-hardware.sh`'s run.
+  in Playwright's Chromium and Firefox. The hardware GPUs are an RTX 3060 Ti, with Bevy on the same
+  GPU, and the Intel Arc 140V, without it. Other vendors and drivers are not covered.
 - A real consumer: the mmorpg web client stays on three.js (mmorpg#80) and has no WebGPU build
   to fall back from; there is no consumer-facing wasm build (D10, #75's prototype scope).
 - WebGL context loss and WebGPU device loss after start, and WebGL 1.

@@ -68,10 +68,12 @@ const args =
 if (process.env.SMOKE_WEBGL === '0') args.push('--disable-webgl');
 if (process.env.SMOKE_FALLBACK === '1') args.push('--use-webgpu-adapter=swiftshader');
 if (process.env.SMOKE_DEV === '1') args.push('--enable-webgpu-developer-features');
-// SMOKE_ANGLE=gl: WebGL through ANGLE on the system's OpenGL rather than Vulkan (on WSL with
+// ANGLE on Vulkan, as the oracle's three.js side runs it: without it, Chromium 159 on a hardware GPU
+// (an RTX 3060 Ti, #154) starts its GPU process on SwiftShader, and WebGPU and WebGL 2 then both
+// run there. SMOKE_ANGLE=gl: WebGL through ANGLE on the system's OpenGL instead (on WSL with
 // GALLIUM_DRIVER=d3d12, the Windows GPU through D3D12, which no Vulkan driver reaches). WebGPU
 // keeps its Vulkan adapter.
-if (process.env.SMOKE_ANGLE === 'gl') args.push('--use-angle=gl');
+args.push(process.env.SMOKE_ANGLE === 'gl' ? '--use-angle=gl' : '--use-angle=vulkan');
 // SMOKE_BROWSER=firefox: Playwright's Firefox, the same switches as prefs (WebGPU is behind
 // `dom.webgpu.enabled` there; the Chromium-only switches do not apply).
 const browser =
