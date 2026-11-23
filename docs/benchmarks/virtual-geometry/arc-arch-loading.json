@@ -1,0 +1,231 @@
+{
+  "scope": "Fresh-process loading and post-warm residency on one Windows adapter. Working set and GPU process memory are sampled from Windows while the child holds its resources; they include driver state and are not isolated mesh allocations. Filesystem caches are not flushed. No network/loading claims for browser or cold OS boot.",
+  "adapter": "Arc",
+  "rows": [
+    {
+      "adapter": "AdapterInfo { name: \"Intel(R) Arc(TM) 140V GPU (16GB)\", vendor: 32902, device: 25760, device_type: IntegratedGpu, device_pci_bus_id: \"\", driver: \"Intel Corporation\", driver_info: \"101.8991\", backend: Vulkan, subgroup_min_size: 16, subgroup_max_size: 32, transient_saves_memory: Some(false), limit_bucket: None }",
+      "asset": "shrine.kit.arch",
+      "cluster_mesh_upload_bytes": 0,
+      "load_ms": 70.6972,
+      "mode": "source",
+      "note": "Fresh process, warm filesystem; load span excludes device setup and the following 16 rendered warm frames. RSS/HWM include allocator and driver state. Discrete retains source and LODs; cluster retains source fallback and all cluster buffers. No streaming or eviction.",
+      "pid": 24392,
+      "process_memory_kib": [],
+      "world_upload_bytes": 18074764,
+      "windows_process_bytes": {
+        "working_set": 602787840,
+        "peak_working_set": 610140160,
+        "private_bytes": 594128896
+      },
+      "windows_gpu_process_memory": [
+        {
+          "Name": "pid_24392_luid_0x00000000_0x000125F4_phys_0",
+          "DedicatedUsage": 0,
+          "SharedUsage": 542494720,
+          "TotalCommitted": 542494720
+        }
+      ],
+      "round": 0
+    },
+    {
+      "adapter": "AdapterInfo { name: \"Intel(R) Arc(TM) 140V GPU (16GB)\", vendor: 32902, device: 25760, device_type: IntegratedGpu, device_pci_bus_id: \"\", driver: \"Intel Corporation\", driver_info: \"101.8991\", backend: Vulkan, subgroup_min_size: 16, subgroup_max_size: 32, transient_saves_memory: Some(false), limit_bucket: None }",
+      "asset": "shrine.kit.arch",
+      "cluster_mesh_upload_bytes": 0,
+      "load_ms": 122.2698,
+      "mode": "discrete",
+      "note": "Fresh process, warm filesystem; load span excludes device setup and the following 16 rendered warm frames. RSS/HWM include allocator and driver state. Discrete retains source and LODs; cluster retains source fallback and all cluster buffers. No streaming or eviction.",
+      "pid": 25668,
+      "process_memory_kib": [],
+      "world_upload_bytes": 22865960,
+      "windows_process_bytes": {
+        "working_set": 602931200,
+        "peak_working_set": 610283520,
+        "private_bytes": 594677760
+      },
+      "windows_gpu_process_memory": [
+        {
+          "Name": "pid_25668_luid_0x00000000_0x000125F4_phys_0",
+          "DedicatedUsage": 0,
+          "SharedUsage": 542543872,
+          "TotalCommitted": 542543872
+        }
+      ],
+      "round": 0
+    },
+    {
+      "adapter": "AdapterInfo { name: \"Intel(R) Arc(TM) 140V GPU (16GB)\", vendor: 32902, device: 25760, device_type: IntegratedGpu, device_pci_bus_id: \"\", driver: \"Intel Corporation\", driver_info: \"101.8991\", backend: Vulkan, subgroup_min_size: 16, subgroup_max_size: 32, transient_saves_memory: Some(false), limit_bucket: None }",
+      "asset": "shrine.kit.arch",
+      "cluster_mesh_upload_bytes": 3013744,
+      "load_ms": 144.0586,
+      "mode": "cluster",
+      "note": "Fresh process, warm filesystem; load span excludes device setup and the following 16 rendered warm frames. RSS/HWM include allocator and driver state. Discrete retains source and LODs; cluster retains source fallback and all cluster buffers. No streaming or eviction.",
+      "pid": 20628,
+      "process_memory_kib": [],
+      "world_upload_bytes": 21088508,
+      "windows_process_bytes": {
+        "working_set": 616898560,
+        "peak_working_set": 624197632,
+        "private_bytes": 608731136
+      },
+      "windows_gpu_process_memory": [
+        {
+          "Name": "pid_20628_luid_0x00000000_0x000125F4_phys_0",
+          "DedicatedUsage": 0,
+          "SharedUsage": 543244288,
+          "TotalCommitted": 543244288
+        }
+      ],
+      "round": 0
+    },
+    {
+      "adapter": "AdapterInfo { name: \"Intel(R) Arc(TM) 140V GPU (16GB)\", vendor: 32902, device: 25760, device_type: IntegratedGpu, device_pci_bus_id: \"\", driver: \"Intel Corporation\", driver_info: \"101.8991\", backend: Vulkan, subgroup_min_size: 16, subgroup_max_size: 32, transient_saves_memory: Some(false), limit_bucket: None }",
+      "asset": "shrine.kit.arch",
+      "cluster_mesh_upload_bytes": 3013744,
+      "load_ms": 118.54570000000001,
+      "mode": "cluster",
+      "note": "Fresh process, warm filesystem; load span excludes device setup and the following 16 rendered warm frames. RSS/HWM include allocator and driver state. Discrete retains source and LODs; cluster retains source fallback and all cluster buffers. No streaming or eviction.",
+      "pid": 23632,
+      "process_memory_kib": [],
+      "world_upload_bytes": 21088508,
+      "windows_process_bytes": {
+        "working_set": 616873984,
+        "peak_working_set": 624177152,
+        "private_bytes": 608813056
+      },
+      "windows_gpu_process_memory": [
+        {
+          "Name": "pid_23632_luid_0x00000000_0x000125F4_phys_0",
+          "DedicatedUsage": 0,
+          "SharedUsage": 543244288,
+          "TotalCommitted": 543244288
+        }
+      ],
+      "round": 1
+    },
+    {
+      "adapter": "AdapterInfo { name: \"Intel(R) Arc(TM) 140V GPU (16GB)\", vendor: 32902, device: 25760, device_type: IntegratedGpu, device_pci_bus_id: \"\", driver: \"Intel Corporation\", driver_info: \"101.8991\", backend: Vulkan, subgroup_min_size: 16, subgroup_max_size: 32, transient_saves_memory: Some(false), limit_bucket: None }",
+      "asset": "shrine.kit.arch",
+      "cluster_mesh_upload_bytes": 0,
+      "load_ms": 127.63070000000002,
+      "mode": "discrete",
+      "note": "Fresh process, warm filesystem; load span excludes device setup and the following 16 rendered warm frames. RSS/HWM include allocator and driver state. Discrete retains source and LODs; cluster retains source fallback and all cluster buffers. No streaming or eviction.",
+      "pid": 36924,
+      "process_memory_kib": [],
+      "world_upload_bytes": 22865960,
+      "windows_process_bytes": {
+        "working_set": 603205632,
+        "peak_working_set": 610557952,
+        "private_bytes": 594661376
+      },
+      "windows_gpu_process_memory": [
+        {
+          "Name": "pid_36924_luid_0x00000000_0x000125F4_phys_0",
+          "DedicatedUsage": 0,
+          "SharedUsage": 542543872,
+          "TotalCommitted": 542543872
+        }
+      ],
+      "round": 1
+    },
+    {
+      "adapter": "AdapterInfo { name: \"Intel(R) Arc(TM) 140V GPU (16GB)\", vendor: 32902, device: 25760, device_type: IntegratedGpu, device_pci_bus_id: \"\", driver: \"Intel Corporation\", driver_info: \"101.8991\", backend: Vulkan, subgroup_min_size: 16, subgroup_max_size: 32, transient_saves_memory: Some(false), limit_bucket: None }",
+      "asset": "shrine.kit.arch",
+      "cluster_mesh_upload_bytes": 0,
+      "load_ms": 71.4018,
+      "mode": "source",
+      "note": "Fresh process, warm filesystem; load span excludes device setup and the following 16 rendered warm frames. RSS/HWM include allocator and driver state. Discrete retains source and LODs; cluster retains source fallback and all cluster buffers. No streaming or eviction.",
+      "pid": 11160,
+      "process_memory_kib": [],
+      "world_upload_bytes": 18074764,
+      "windows_process_bytes": {
+        "working_set": 602677248,
+        "peak_working_set": 610029568,
+        "private_bytes": 594255872
+      },
+      "windows_gpu_process_memory": [
+        {
+          "Name": "pid_11160_luid_0x00000000_0x000125F4_phys_0",
+          "DedicatedUsage": 0,
+          "SharedUsage": 542494720,
+          "TotalCommitted": 542494720
+        }
+      ],
+      "round": 1
+    },
+    {
+      "adapter": "AdapterInfo { name: \"Intel(R) Arc(TM) 140V GPU (16GB)\", vendor: 32902, device: 25760, device_type: IntegratedGpu, device_pci_bus_id: \"\", driver: \"Intel Corporation\", driver_info: \"101.8991\", backend: Vulkan, subgroup_min_size: 16, subgroup_max_size: 32, transient_saves_memory: Some(false), limit_bucket: None }",
+      "asset": "shrine.kit.arch",
+      "cluster_mesh_upload_bytes": 0,
+      "load_ms": 73.0024,
+      "mode": "source",
+      "note": "Fresh process, warm filesystem; load span excludes device setup and the following 16 rendered warm frames. RSS/HWM include allocator and driver state. Discrete retains source and LODs; cluster retains source fallback and all cluster buffers. No streaming or eviction.",
+      "pid": 32832,
+      "process_memory_kib": [],
+      "world_upload_bytes": 18074764,
+      "windows_process_bytes": {
+        "working_set": 602857472,
+        "peak_working_set": 610209792,
+        "private_bytes": 594419712
+      },
+      "windows_gpu_process_memory": [
+        {
+          "Name": "pid_32832_luid_0x00000000_0x000125F4_phys_0",
+          "DedicatedUsage": 0,
+          "SharedUsage": 542494720,
+          "TotalCommitted": 542494720
+        }
+      ],
+      "round": 2
+    },
+    {
+      "adapter": "AdapterInfo { name: \"Intel(R) Arc(TM) 140V GPU (16GB)\", vendor: 32902, device: 25760, device_type: IntegratedGpu, device_pci_bus_id: \"\", driver: \"Intel Corporation\", driver_info: \"101.8991\", backend: Vulkan, subgroup_min_size: 16, subgroup_max_size: 32, transient_saves_memory: Some(false), limit_bucket: None }",
+      "asset": "shrine.kit.arch",
+      "cluster_mesh_upload_bytes": 0,
+      "load_ms": 123.92450000000001,
+      "mode": "discrete",
+      "note": "Fresh process, warm filesystem; load span excludes device setup and the following 16 rendered warm frames. RSS/HWM include allocator and driver state. Discrete retains source and LODs; cluster retains source fallback and all cluster buffers. No streaming or eviction.",
+      "pid": 23444,
+      "process_memory_kib": [],
+      "world_upload_bytes": 22865960,
+      "windows_process_bytes": {
+        "working_set": 602750976,
+        "peak_working_set": 610103296,
+        "private_bytes": 594313216
+      },
+      "windows_gpu_process_memory": [
+        {
+          "Name": "pid_23444_luid_0x00000000_0x000125F4_phys_0",
+          "DedicatedUsage": 0,
+          "SharedUsage": 542543872,
+          "TotalCommitted": 542543872
+        }
+      ],
+      "round": 2
+    },
+    {
+      "adapter": "AdapterInfo { name: \"Intel(R) Arc(TM) 140V GPU (16GB)\", vendor: 32902, device: 25760, device_type: IntegratedGpu, device_pci_bus_id: \"\", driver: \"Intel Corporation\", driver_info: \"101.8991\", backend: Vulkan, subgroup_min_size: 16, subgroup_max_size: 32, transient_saves_memory: Some(false), limit_bucket: None }",
+      "asset": "shrine.kit.arch",
+      "cluster_mesh_upload_bytes": 3013744,
+      "load_ms": 133.1292,
+      "mode": "cluster",
+      "note": "Fresh process, warm filesystem; load span excludes device setup and the following 16 rendered warm frames. RSS/HWM include allocator and driver state. Discrete retains source and LODs; cluster retains source fallback and all cluster buffers. No streaming or eviction.",
+      "pid": 19132,
+      "process_memory_kib": [],
+      "world_upload_bytes": 21088508,
+      "windows_process_bytes": {
+        "working_set": 616824832,
+        "peak_working_set": 624128000,
+        "private_bytes": 608612352
+      },
+      "windows_gpu_process_memory": [
+        {
+          "Name": "pid_19132_luid_0x00000000_0x000125F4_phys_0",
+          "DedicatedUsage": 0,
+          "SharedUsage": 543244288,
+          "TotalCommitted": 543244288
+        }
+      ],
+      "round": 2
+    }
+  ]
+}

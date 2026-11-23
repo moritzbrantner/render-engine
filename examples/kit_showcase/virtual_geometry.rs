@@ -613,7 +613,7 @@ pub(super) fn run(args: &[String]) {
             .lines()
             .filter(|l| l.starts_with("VmRSS:") || l.starts_with("VmHWM:"))
             .collect();
-        let result = serde_json::json!({"mode":kind,"asset":name,"adapter":format!("{:?}",gpu.adapter),"load_ms":load_ms,"world_upload_bytes":world.work().upload_bytes,"process_memory_kib":memory,"cluster_mesh_upload_bytes":asset.uploaded_bytes,"note":"Fresh process, warm filesystem; load span excludes device setup and the following 16 rendered warm frames. RSS/HWM include allocator and driver state. Discrete retains source and LODs; cluster retains source fallback and all cluster buffers. No streaming or eviction."});
+        let result = serde_json::json!({"mode":kind,"asset":name,"pid":std::process::id(),"adapter":format!("{:?}",gpu.adapter),"load_ms":load_ms,"world_upload_bytes":world.work().upload_bytes,"process_memory_kib":memory,"cluster_mesh_upload_bytes":asset.uploaded_bytes,"note":"Fresh process, warm filesystem; load span excludes device setup and the following 16 rendered warm frames. RSS/HWM include allocator and driver state. Discrete retains source and LODs; cluster retains source fallback and all cluster buffers. No streaming or eviction."});
         println!("VG_LOAD {result}");
         std::io::stdout().flush().unwrap();
         std::io::stdin().read_line(&mut String::new()).unwrap();
