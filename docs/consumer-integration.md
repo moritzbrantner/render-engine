@@ -797,6 +797,16 @@ mapping and the sRGB output. Environment maps are the same prefiltered KTX2 cube
 native client loads (`assets/ibl`); the tone-mapping LUTs ship with the package. The port
 covers what the oracle's three.js side passes; the report lists the rest with its issues.
 
+`Lighting.prepare(renderer, scene, camera)` (same arguments as `render`) compiles and links the
+programs that frame will draw with, without drawing, and resolves once they have all linked
+(in parallel where the browser has `KHR_parallel_shader_compile`). three's own
+`renderer.compileAsync` cannot: the lighting gives its materials their light-count defines and
+draws the shadow views with its own materials into its own targets only inside `render`, so the
+first frame would still compile and link synchronously. `prepare` runs the passes of `render` with
+a compile in place of each draw, so it compiles exactly what they set up. Configure the lights,
+sky and scene as for the frame first (a new light count or material is a new program), then call
+it while nothing needs to draw, such as during a loading screen (#147).
+
 The HDR pass renders upside down, as wgpu stores a frame, so its MSAA samples match Bevy's; the
 output pass flips it back and the canvas or target comes out upright. Other three.js materials
 in the scene still render correctly, since the projection and the winding flip together. The

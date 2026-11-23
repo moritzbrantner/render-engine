@@ -376,5 +376,22 @@ export class Lighting {
     width?: number,
     height?: number,
   ): void;
+  /**
+   * Compiles and links every program `render` with the same arguments would draw with now,
+   * drawing nothing: each pass's materials (sky, sun cascades, spot and point-light views, HDR
+   * pass, tone mapping, output) with the defines and render target that pass gives them, through
+   * the same code as `render`. Links in parallel where the browser has
+   * `KHR_parallel_shader_compile` and resolves once every program has linked, so that frame
+   * compiles and links nothing. Set the lights, sky and scene as they will be for that frame
+   * first. Resolves to how many programs it created.
+   */
+  prepare(
+    renderer: WebGLRenderer,
+    scene: Scene,
+    camera: PerspectiveCamera,
+    target?: WebGLRenderTarget | null,
+    width?: number,
+    height?: number,
+  ): Promise<number>;
   dispose(): void;
 }

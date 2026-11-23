@@ -460,6 +460,21 @@ export class SkyPasses {
     }
   }
 
+  /**
+   * Compiles every program `render` and `composite` draw with, drawing nothing
+   * (`Lighting.prepare`): `compile(object, camera)` on each pass's mesh. They all draw into
+   * render targets, so one bound target stands for theirs.
+   */
+  compile(renderer, compile) {
+    renderer.setRenderTarget(this.transmittance);
+    for (const material of Object.values(this.materials)) {
+      this.quad.material = material;
+      // FullScreenQuad.render draws this mesh.
+      compile(this.quad._mesh, this.compositeCamera);
+    }
+    compile(this.compositeMesh, this.compositeCamera);
+  }
+
   #fullscreenTriangle() {
     const geometry = new BufferGeometry();
     geometry.setAttribute('position', new Float32BufferAttribute([-1, 3, 0, -1, -1, 0, 3, -1, 0], 3));

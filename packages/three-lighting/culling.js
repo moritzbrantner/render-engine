@@ -302,6 +302,35 @@ export class ShadowCulling {
     }
   }
 
+  /**
+   * For `Lighting.prepare`, in place of `view`: one stand-in for each mesh a view may draw
+   * through stand-ins whose program differs from the mesh's own (stand-ins carry no instance
+   * colours or morphs), so compiling the view compiles that program too. `reset` drops them.
+   */
+  standInVariants() {
+    this.reset();
+    const standIns = this.#standIns.children;
+    for (let i = 0; i < this.#instanced.length; i++) {
+      const mesh = this.#instanced[i];
+      if (this.#states[i].count < PER_INSTANCE_MIN) continue;
+      if (mesh.instanceColor === null && mesh.morphTexture === null) continue;
+      let standIn = this.#variants.get(mesh);
+      if (!standIn) {
+        standIn = new InstancedMesh(mesh.geometry, mesh.material, 1);
+        standIn.frustumCulled = false;
+        standIn.matrixAutoUpdate = false;
+        standIn.matrixWorldAutoUpdate = false;
+        this.#variants.set(mesh, standIn);
+      }
+      standIn.geometry = mesh.geometry;
+      standIn.material = mesh.material;
+      standIns.push(standIn);
+    }
+  }
+
+  // Per mesh, the stand-in standInVariants compiles.
+  #variants = new WeakMap();
+
   /** Gives every mesh back its visibility and material, and drops this view's stand-ins. */
   reset() {
     for (const [mesh, material] of this.#hidden) {

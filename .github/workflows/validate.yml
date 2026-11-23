@@ -97,7 +97,8 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
-  # Oracle clippy and unit tests and the three-lighting unit tests: no rendering.
+  # Oracle clippy and unit tests and the three-lighting unit tests: no rendering, but for
+  # Lighting.prepare's test in headless Chromium (SwiftShader).
   oracle-checks:
     needs: docs-scope
     if: needs.docs-scope.outputs.docs-only != 'true'
@@ -130,8 +131,10 @@ jobs:
         run: cargo test --release --locked
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-      - name: Install npm dependencies
-        run: bun install --frozen-lockfile
+      - name: Install npm dependencies and headless Chromium
+        run: |
+          bun install --frozen-lockfile
+          bunx --no-install playwright install --with-deps chromium-headless-shell
 
       - name: three-lighting tests
         run: bun test packages
