@@ -58,12 +58,13 @@ Recordings (1.5 s at 30 fps, every second 1/60 s step):
   (sphere and box positions, velocity ranges, constant acceleration, size and colour over life,
   velocity-aligned streaks, round masks).
 - CPU cost does not grow with particle count. The simulation is one compute pass and each
-  emitter is one indirect draw, so a frame's engine calls cost 1.0 to 1.8 ms (median) from 1k
-  to 1M particles.
+  emitter is one indirect draw, so a frame's engine calls cost 0.31 to 0.36 ms (median, RTX
+  3060 Ti) from 1k to 1M particles.
 
-## What the kit scenes show is missing
+## What the first kit scenes showed was missing
 
-These are visible in the images above. Each is a follow-up slice.
+These were visible in the first renders of the showcase. Each became a follow-up slice, and the
+images above now show 1–3 fixed (soft, lit and fogged particles).
 
 1. **Hard edges against geometry.** The fire's base, the smoke and the mist cut a straight
    line where their quads cross the ground and the rocks, as in bevy_hanabi (D9). Most visible
@@ -74,9 +75,10 @@ These are visible in the images above. Each is a follow-up slice.
    the rock's shadow. The particle colour is written as-is, with no lights, shadows or exposure.
 3. **No fog on particles.** In `rain` and `snow` the far streaks and flakes stay crisp through
    fog that hides the crag faces behind them.
-4. **Many small emitters are expensive on the CPU** (scaling below): about 25 µs per emitter
-   per frame, so 1000 burst emitters cost 25 ms. Each emitter is a draw, a 768-byte step
-   upload and a texture bind group created every frame (`ParticleFrame::prepare`).
+4. **Many small emitters are expensive on the CPU**: about 25 µs per emitter per frame on
+   lavapipe under WSL2, before #85, so 1000 burst emitters cost 25 ms. Each emitter is a draw
+   and a 768-byte step upload. On the RTX 3060 Ti with the current engine, it is about 0.8 µs
+   (1000 emitters: 1.09 ms, scaling below).
 5. **No velocity cone.** asset-tooling's presets emit in a cone (`direction`, `spread`), and
    hanabi's init modifiers have none, so the showcase approximated it with a box of
    velocities. Since #87 the presets use `InitModifier::VelocityCone` (oracle
@@ -97,11 +99,12 @@ in those PRs.
 frames without it. Left hard, right soft, same seeds and steps:
 
 ![Campfire, hard and soft](particle-kit-showcase/soft_campfire.jpg)
-![Waterfall spray, hard and soft](particle-kit-showcase/soft_waterfall.jpg)
-![Rain mist, hard and soft](particle-kit-showcase/soft_rain.jpg)
+![Waterfall sheet and spray, hard and soft](particle-kit-showcase/soft_waterfall.jpg)
 
-The fire's base no longer cuts a flat line across the stones, and the spray and mist meet the
-rocks and ground without an edge. The other oracle particle scenarios still pass on lavapipe
+The fire's base no longer cuts a flat line across the stones, and the falling sheet and spray
+meet the crag face and the ground without an edge. Since the mist is lit and fogged (#84), the
+rain's ground mist shows no visible edge either way: hard and soft differ by at most 10 steps,
+in 19 pixels. Its comparison image was dropped. The other oracle particle scenarios still pass
 (default path, no fade).
 
 ## Lit and fogged particles (#84)
@@ -110,8 +113,9 @@ rocks and ground without an edge. The other oracle particle scenarios still pass
 waterfall spray and precipitation are lit (`ParticleLighting::diffuse()`) and fogged; the fire,
 embers and magic cloud stay unlit and are fogged; the burst presets keep hanabi's default. The
 oracle scenario `particles_lit_fog` gates the shading against Bevy `StandardMaterial` quads
-(D9). These kit images have not been re-rendered with it yet (the kit bundles were not
-available when it landed).
+(D9). The images above are rendered with it (2026-11-23, RTX 3060 Ti). At night the smoke
+now takes the moonlight and exposure instead of glowing grey against the sky, and the rain and
+snow fade into the fog with the crag faces behind them.
 
 ## The kits on WebGL 2 (#126)
 
@@ -182,70 +186,73 @@ the GPU's alive-list order, which comes from atomics, as hanabi does (D9). The w
 replay draws in slot order. Lavapipe happens to keep slot order, so it matched there: native
 lavapipe against this NVIDIA web frame differs by at most 6 steps. NVIDIA does not keep it.
 This is the draw-order difference D9 already judges statistically, not a difference in the port.
-The scenery kits were the current releases rather than `fetch-kits.sh`'s pins, which no longer
-match the replaced rolling releases. `--plain` draws none of them. The effect kits match their
-pins.
 
 ## Measurements
 
-**Adapter:** llvmpipe (lavapipe, LLVM 21, software Vulkan) under WSL2. This machine has no
-hardware adapter wgpu can use: the GL backend rejects the lit shader, and there is no
-Vulkan-on-D3D12 driver. GPU times below are therefore **advisory**, as D4 rules for lavapipe:
-they measure a CPU rasteriser. CPU times are real, but lavapipe shares the same 8 cores. The
-GPU numbers need a rerun on the RTX 3060 Ti.
+**Adapter:** NVIDIA GeForce RTX 3060 Ti (Vulkan, driver 595.99.02) on the owner's desktop (Linux
+7.0, Ryzen 7 5700X), 2026-11-23, with the kits `fetch-kits.sh` pins since #156. 240 frames are
+timed per scene. Each run is one process, and the timings are evidence, not a gate. The earlier
+figures were measured on lavapipe under WSL2, before #85's per-emitter work. They are in this
+file's history.
 
 CPU is one frame's engine calls (`step_particles`, `prepare`, `encode`, submit), without the
-wait for the GPU. Particle GPU memory is 140 bytes per slot (particle 64, quad 64, dead slot and
-two alive-list entries 12). The step upload is 16 bytes plus 768 per emitter, every step.
-Draws are particle / main-pass mesh / shadow.
+wait for the GPU. GPU time is from timestamp queries: the particle simulation and the whole
+frame. Particle GPU memory is 140 bytes per slot (particle 64, quad 64, dead slot and two
+alive-list entries 12). The step upload is 16 bytes plus 768 per emitter, every step. Draws are
+particle / main-pass mesh / shadow.
 
 ### Scenes (1280×720, 4× MSAA, after warm-up)
 
-| Scene | Alive | Emitters | Draws | Particle memory | Step upload | CPU ms median / max | GPU ms sim / frame (advisory) |
+| Scene | Alive | Emitters | Draws | Particle memory | Step upload | CPU ms median / p95 | GPU ms sim / frame median / frame p95 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `campfire_day` | 227 | 3 | 3 / 17 / 132 | 0.07 MB | 2,320 B | 1.09 / 10.12 | 1.1 / 1002 |
-| `campfire_night` | 234 | 3 | 3 / 17 / 52 | 0.07 MB | 2,320 B | 0.54 / 7.65 | 1.0 / 581 |
-| `combat_bursts` | 34 | 4 | 4 / 14 / 76 | 0.01 MB | 3,088 B | 1.05 / 2.65 | 2.7 / 1001 |
-| `zoo_bursts` | 37 | 3 | 3 / 14 / 76 | 0.01 MB | 2,320 B | 1.60 / 1.85 | 2.4 / 1003 |
-| `rain` | 57,633 | 2 | 2 / 19 / 75 | 8.43 MB | 1,552 B | 1.19 / 7.92 | 4.7 / 974 |
-| `snow` | 57,751 | 2 | 2 / 19 / 75 | 8.43 MB | 1,552 B | 1.19 / 1.82 | 13.7 / 1781 |
-| `waterfall` | 4,164 | 5 | 5 / 6 / 24 | 0.90 MB | 3,856 B | 1.53 / 2.08 | 2.1 / 938 |
-| `magic_cloud` | 154,293 | 1 | 1 / 16 / 0 | 28.00 MB | 784 B | 0.50 / 2.62 | 14.6 / 727 |
+| `campfire_day` | 221 | 3 | 3 / 17 / 132 | 0.07 MB | 2,320 B | 0.46 / 0.48 | 0.016 / 2.39 / 2.51 |
+| `campfire_night` | 226 | 3 | 3 / 17 / 52 | 0.07 MB | 2,320 B | 0.36 / 0.42 | 0.016 / 1.74 / 1.86 |
+| `combat_bursts` | 0–35 | 4 | 4 / 14 / 76 | 0.01 MB | 3,088 B | 0.27 / 0.34 | 0.012 / 1.34 / 1.47 |
+| `zoo_bursts` | 36 | 3 | 3 / 14 / 76 | 0.01 MB | 2,320 B | 0.28 / 0.34 | 0.012 / 1.36 / 1.49 |
+| `rain` | 57,632 | 2 | 2 / 19 / 75 | 8.43 MB | 1,552 B | 0.34 / 0.38 | 0.096 / 2.58 / 2.61 |
+| `snow` | 57,751 | 2 | 2 / 19 / 75 | 8.43 MB | 1,552 B | 0.34 / 0.39 | 0.095 / 2.37 / 2.42 |
+| `waterfall` | 4,190 | 5 | 5 / 6 / 24 | 0.90 MB | 3,856 B | 0.26 / 0.30 | 0.022 / 1.73 / 1.78 |
+| `magic_cloud` | 154,193 | 1 | 1 / 16 / 0 | 28.00 MB | 784 B | 0.17 / 0.22 | 0.229 / 1.30 / 1.30 |
 
-On lavapipe only 6 frames are timed per scene (it renders about one frame a second), so the
-maxima are single frames, mostly first-frame and scheduling outliers.
+Alive is read after the timed frames. The burst scenes repeat every 0.6 s with shorter
+lifetimes, so their count depends on that moment: `combat_bursts` had 35 alive at the screenshot
+and none after the timing. The simulation is at most 0.23 ms, even with 154k particles. The rest
+of each frame is drawing: scenery, shadows and the particle quads, which were not timed
+separately.
 
 ### Particle count (one rain emitter in the glade)
 
-| Particles (alive) | CPU ms median / max | Particle memory | GPU ms sim / frame (advisory) |
+| Particles (alive) | CPU ms median / p95 | Particle memory | GPU ms sim / frame |
 | --- | --- | --- | --- |
-| 1k (958) | 1.09 / 18.39 | 0.14 MB | 0.9 / 687 |
-| 10k (9.6k) | 1.01 / 2.37 | 1.4 MB | 2.6 / 1080 |
-| 100k (96k) | 1.74 / 2.64 | 14 MB | 9.4 / 954 |
-| 300k (287k) | 1.51 / 4.89 | 42 MB | 54.3 / 3297 |
-| 1M (958k) | 1.82 / 6.39 | 140 MB | 86.0 / 4246 |
+| 1k (958) | 0.31 / 0.34 | 0.14 MB | 0.015 / 1.57 |
+| 10k (9.6k) | 0.31 / 0.33 | 1.4 MB | 0.025 / 1.60 |
+| 100k (96k) | 0.31 / 0.34 | 14 MB | 0.149 / 2.02 |
+| 300k (287k) | 0.35 / 0.40 | 42 MB | 0.417 / 2.92 |
+| 1M (958k) | 0.36 / 0.64 | 140 MB | 1.351 / 6.10 |
 
-The CPU side is flat. Memory is linear at 140 B per slot: a 1M-slot pool is 140 MB, which
-matters on 8 GB cards and in the browser. The GPU columns only show that the work grows with
-count; their size says nothing about a real GPU.
+The CPU side is flat. The simulation grows about linearly from 100k particles (1.35 ms for
+958k), and the frame grows with it (6.10 ms at 1M slots). Memory is linear at 140 B per
+slot: a 1M-slot pool is 140 MB, which matters on 8 GB cards and in the browser.
 
 ### Emitter count (the combat `spark` burst at n places)
 
-| Emitters | CPU ms median / max | Step upload | GPU ms sim (advisory) |
+| Emitters | CPU ms median / p95 | Step upload | GPU ms sim / frame |
 | --- | --- | --- | --- |
-| 1 | 0.74 / 5.98 | 784 B | 0.66 |
-| 10 | 1.24 / 2.88 | 7.7 KB | 0.51 |
-| 100 | 3.40 / 9.04 | 77 KB | 0.98 |
-| 500 | 11.57 / 15.58 | 384 KB | 1.47 |
-| 1000 | 25.29 / 36.83 | 768 KB | 0.88 |
+| 1 | 0.31 / 0.45 | 784 B | 0.009 / 1.55 |
+| 10 | 0.33 / 0.46 | 7.7 KB | 0.014 / 1.56 |
+| 100 | 0.39 / 0.57 | 77 KB | 0.044 / 1.59 |
+| 500 | 0.76 / 1.04 | 384 KB | 0.191 / 1.75 |
+| 1000 | 1.09 / 1.26 | 768 KB | 0.382 / 1.95 |
 
-Per emitter: about 24 µs of CPU and 768 B of upload per frame, whether or not the emitter has
-live particles. This is the first CPU limit a game reaches: hit effects in a crowd fight are
-many small emitters, not one big one.
+Per emitter: about 0.8 µs of CPU, 0.38 µs of GPU simulation and 768 B of upload per frame,
+whether or not the emitter has live particles. On lavapipe before #85 it was about 24 µs of
+CPU. Many small emitters are still where cost grows first. A crowd fight's hit effects are
+many small emitters, but 1000 of them now fit in about 1 ms of CPU.
 
 ## Not verified
 
-- GPU time on a hardware adapter, and the D3 GPU-time gate (no hardware adapter here).
+- GPU time on other hardware: the numbers above are one RTX 3060 Ti. Integrated and mobile
+  GPUs were not measured.
 - The full kit scenes in the browser: only the combat and zoo bursts ran on WebGL 2, over a plain
   background ([above](#the-kits-on-webgl-2-126)); the terrain, props, rain, snow, fire and
   waterfall scenes were not rendered there, nor any kit scene through the WebGPU build.
