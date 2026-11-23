@@ -30,6 +30,5 @@
   "devDependencies": {
     "playwright": "1.65.1",
     "three": "0.187.0"
-  },
-  "packageManager": "bun@1.4.5"
+  }
 }
