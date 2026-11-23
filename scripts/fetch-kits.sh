@@ -13,9 +13,9 @@ mkdir -p "$dir"
 
 # release  tar  sha256
 pins=(
-  "greyhaven-terrain greyhaven.terrain.tar df369bc593186669d58a4bdf9251edbfa0efb00b45d1b5c8d4211ee57d7be0e0"
-  "greyhaven-nature greyhaven.nature.tar 5861c0c9e86f9b6219b53d5a571ad46979b3669a673b794f92b842c3060bb8b0"
-  "crag-kit crag.kit.tar 63bb39f43d14a71c1711b309febfa913c3f7b56d75e982010c6aa81f73b3b221"
+  "greyhaven-terrain greyhaven.terrain.tar 024f3eede7a346664075bbb7de36fcb4b8fafaee5c1b1720f8d5be6eefe26a92"
+  "greyhaven-nature greyhaven.nature.tar 2bfb85b383a366fc07742358da2efd8b77e03ef10263fff185c06b6f795ddde5"
+  "crag-kit crag.kit.tar 6c35ac100bde54a02134e528dd74c64011c10fe630c45299b04d35218d217e9a"
   "combat-effects combat-effects.tar e02110b26d2a01a13b2bad3500537511408aa4278492cc226b292cf5babc68f4"
   "zoo-effects zoo-effects.tar c80955de8bde3ccdf4f83e04664310cfa8f9095e87f4f440e08d1d8ec5f86bcf"
 )

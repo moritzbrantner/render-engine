@@ -443,7 +443,7 @@ GALLIUM_DRIVER=d3d12 VG_ANGLE=gl node oracle/virtual-geometry/run.mjs http://127
 - **Greyhaven buttress: the same scene and camera path, but not the same asset.** The scene is
   the recorded one (placements, transforms and the 240 frames, written from
   `greyhaven-browser-buttress.json.gz`). The asset comes from the repository-pinned crag kit
-  (`scripts/fetch-kits.sh`, `63bb39f4…`), because the evaluated `f3419e27…` is no longer in
+  (then pinned by `scripts/fetch-kits.sh`, `63bb39f4…`), because the evaluated `f3419e27…` is no longer in
   the rolling release. It has the same 8,999 source triangles and kit LOD1/LOD2, but a different
   source file hash and 175 rather than 176 clusters. The current `crag-kit` release
   (`6c35ac10…`) is closer: `bench-virtual-geometry.mjs` builds the evaluated buttress hierarchy
