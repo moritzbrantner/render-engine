@@ -450,8 +450,11 @@ GALLIUM_DRIVER=d3d12 VG_ANGLE=gl node oracle/virtual-geometry/run.mjs http://127
   from it byte for byte (176 clusters, 534,652 bytes, `b7e933cd…`, 449,644 geometry bytes). Only
   the glTF JSON differs (`inputSha256` `a5bdef2b…` against `2c3fa7be…`), so a rerun of this case
   should use that release.
-- **Buttress grid: new.** The same asset as a dense grid (1, 64 and 256 instances). There is no
-  RTX browser run of it.
+- **Buttress grid: new.** The same asset as a dense grid (1, 64 and 256 instances). Its RTX
+  3060 Ti baseline (`browser-rtx-buttress-grid.json.gz`; ANGLE on Vulkan, the same Chromium 159
+  and `bench.js`) was run afterwards on the current `crag-kit` release (`6c35ac10…`, 176
+  clusters). Source and LOD triangle counts are identical, and the RMSE matches the Arc's to
+  within 0.0015.
 
 **Results.**
 - **Arch.** With 64 and 256 instances the cluster cuts take the least GPU time on the integrated
@@ -470,7 +473,11 @@ GALLIUM_DRIVER=d3d12 VG_ANGLE=gl node oracle/virtual-geometry/run.mjs http://127
   (20.2 ms against 14.0 ms) and 4 ms of CPU. The 4 px cut is level with source on the GPU (15.2
   ms) at RMSE 0.015. The kit's discrete LODs are cheaper (LOD2 6.0 ms), but they are fixed levels
   with no distance selection, at RMSE 0.044–0.056: visibly coarser on the nearby instances, so not
-  an equal-quality candidate.
+  an equal-quality candidate. On the RTX 3060 Ti, clusters do not win on this asset either: at
+  256 the cuts take 3.8–5.0 ms against 4.8 ms for source, which is within the RTX's ±1 ms
+  round-to-round variation, plus 1.9–2.7 ms of CPU. At 64 they are slower than source (4.1–4.8
+  against 3.0 ms). Its implausibly low medians (64× LOD2 at 0.20 ms against 1.59 ms in round 1) are
+  timer-query artefacts, as in the arch table.
 
 **Loading and payload.** Each latest page load (local HTTP, warm cache) took 463 ms for the arch
 (481 ms on the RTX) and about 1.5 s for the buttress pages. The arch's payload bytes are the
@@ -526,25 +533,26 @@ Greyhaven buttress, three real placements, 240 frames (recorded scene; pinned ki
 | 3 | cluster-2 | 37,087 | 0.30 / 0.60 | 1.18 / 1.30 | 0.0006 | 0.39 / 0.42 |
 | 3 | cluster-4 | 30,136 | 0.30 / 0.50 | 1.15 / 1.26 | 0.0029 | 0.38 / 0.41 |
 
-Buttress grid (pinned kit):
+Buttress grid (pinned kit; the RTX column ran the current `crag-kit` release, whose cluster cuts
+submit 0–3 % different triangle counts):
 
-| Instances | Mode | Triangles submitted (all views) | CPU ms median / p95 | GPU ms median / p95 | RMSE vs source |
-| --- | --- | --- | --- | --- | --- |
-| 1 | source | 17,998 | 0.20 / 0.40 | 0.89 / 1.02 | 0 |
-| 1 | lod1 | 5,454 | 0.20 / 0.40 | 0.72 / 0.93 | 0.0218 |
-| 1 | lod2 | 1,510 | 0.20 / 0.50 | 0.70 / 0.85 | 0.0289 |
-| 1 | cluster-1 | 16,318 | 0.30 / 0.70 | 0.89 / 1.00 | 0.0006 |
-| 1 | cluster-2 | 16,318 | 0.30 / 0.80 | 0.90 / 1.01 | 0.0006 |
-| 1 | cluster-4 | 16,318 | 0.30 / 0.80 | 0.60 / 0.70 | 0.0006 |
-| 64 | source | 1,151,872 | 0.30 / 0.90 | 7.81 / 9.58 | 0 |
-| 64 | lod1 | 349,056 | 0.40 / 1.30 | 5.02 / 6.32 | 0.0476 |
-| 64 | lod2 | 96,640 | 0.30 / 1.00 | 2.86 / 3.45 | 0.0609 |
-| 64 | cluster-1 | 985,955 | 2.00 / 4.00 | 6.19 / 12.95 | 0.0011 |
-| 64 | cluster-2 | 924,880 | 2.00 / 4.20 | 5.81 / 12.43 | 0.0034 |
-| 64 | cluster-4 | 767,115 | 2.30 / 4.80 | 5.25 / 14.25 | 0.0108 |
-| 256 | source | 4,607,488 | 0.20 / 0.30 | 14.02 / 21.19 | 0 |
-| 256 | lod1 | 1,396,224 | 0.20 / 0.40 | 8.25 / 17.15 | 0.0435 |
-| 256 | lod2 | 386,560 | 0.30 / 0.40 | 5.99 / 7.76 | 0.0556 |
-| 256 | cluster-1 | 3,482,522 | 4.00 / 4.50 | 20.22 / 24.12 | 0.0024 |
-| 256 | cluster-2 | 2,893,591 | 4.10 / 6.60 | 20.44 / 33.84 | 0.0059 |
-| 256 | cluster-4 | 1,911,049 | 4.00 / 9.40 | 15.15 / 29.29 | 0.0152 |
+| Instances | Mode | Triangles submitted (all views) | CPU ms median / p95 | GPU ms median / p95 | RMSE vs source | RTX 3060 Ti GPU ms median / p95 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | source | 17,998 | 0.20 / 0.40 | 0.89 / 1.02 | 0 | 0.50 / 0.52 |
+| 1 | lod1 | 5,454 | 0.20 / 0.40 | 0.72 / 0.93 | 0.0218 | 0.40 / 0.41 |
+| 1 | lod2 | 1,510 | 0.20 / 0.50 | 0.70 / 0.85 | 0.0289 | 0.32 / 0.33 |
+| 1 | cluster-1 | 16,318 | 0.30 / 0.70 | 0.89 / 1.00 | 0.0006 | 0.33 / 0.39 |
+| 1 | cluster-2 | 16,318 | 0.30 / 0.80 | 0.90 / 1.01 | 0.0006 | 0.35 / 0.39 |
+| 1 | cluster-4 | 16,318 | 0.30 / 0.80 | 0.60 / 0.70 | 0.0006 | 0.37 / 0.91 |
+| 64 | source | 1,151,872 | 0.30 / 0.90 | 7.81 / 9.58 | 0 | 3.03 / 3.91 |
+| 64 | lod1 | 349,056 | 0.40 / 1.30 | 5.02 / 6.32 | 0.0476 | 1.82 / 2.58 |
+| 64 | lod2 | 96,640 | 0.30 / 1.00 | 2.86 / 3.45 | 0.0609 | 0.20 / 1.92 |
+| 64 | cluster-1 | 985,955 | 2.00 / 4.00 | 6.19 / 12.95 | 0.0011 | 4.78 / 5.60 |
+| 64 | cluster-2 | 924,880 | 2.00 / 4.20 | 5.81 / 12.43 | 0.0034 | 4.64 / 5.31 |
+| 64 | cluster-4 | 767,115 | 2.30 / 4.80 | 5.25 / 14.25 | 0.0108 | 4.12 / 4.89 |
+| 256 | source | 4,607,488 | 0.20 / 0.30 | 14.02 / 21.19 | 0 | 4.78 / 6.19 |
+| 256 | lod1 | 1,396,224 | 0.20 / 0.40 | 8.25 / 17.15 | 0.0435 | 3.25 / 5.11 |
+| 256 | lod2 | 386,560 | 0.30 / 0.40 | 5.99 / 7.76 | 0.0556 | 2.13 / 3.12 |
+| 256 | cluster-1 | 3,482,522 | 4.00 / 4.50 | 20.22 / 24.12 | 0.0024 | 4.14 / 5.87 |
+| 256 | cluster-2 | 2,893,591 | 4.10 / 6.60 | 20.44 / 33.84 | 0.0059 | 5.04 / 7.17 |
+| 256 | cluster-4 | 1,911,049 | 4.00 / 9.40 | 15.15 / 29.29 | 0.0152 | 3.82 / 5.56 |
