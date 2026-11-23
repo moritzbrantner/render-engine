@@ -55,7 +55,7 @@ import {
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import { read as readKtx2 } from 'three/addons/libs/ktx-parse.module.js';
 import { ZSTDDecoder } from 'three/addons/libs/zstddec.module.js';
-import { cascadeRanges, fitCascade } from './cascades.js';
+import { cascadeRanges, fitCascade, StaggeredCascades } from './cascades.js';
 import { ShadowCulling } from './culling.js';
 import { ENVIRONMENT_MIPS, INNER_RADIUS, OUTER_RADIUS, SkyPasses, worldToAtmosphere } from './sky.js';
 import {
@@ -74,7 +74,16 @@ import {
   tonemapFragment,
 } from './shaders.js';
 
-export { DEFAULT_SUN_SHADOWS, singleCascade, farBounds, cascadeRanges, fitCascade } from './cascades.js';
+export {
+  DEFAULT_SUN_SHADOWS,
+  singleCascade,
+  farBounds,
+  cascadeRanges,
+  fitCascade,
+  sliceInside,
+  StaggeredCascades,
+  STAGGER_MARGIN,
+} from './cascades.js';
 export * from './backend.js';
 export * from './particles.js';
 
@@ -672,6 +681,36 @@ export function shadowCascades(object) {
   return Number.isInteger(n) && n >= 0 ? n : Infinity;
 }
 
+/**
+ * The geometry `object` casts with into sun cascade `cascade` (nearest 0): its own
+ * `userData.shadowGeometry`, one geometry for every shadow view or an array per cascade (the last
+ * entry for later ones), not inherited by its children; otherwise its own geometry. Spot and
+ * point views take cascade 0's. A proxy keeps the attributes the shadow pass reads: positions,
+ * skin joints and weights on a skinned mesh, and UVs where the material cuts out by alpha.
+ */
+export function shadowGeometry(object, cascade = 0) {
+  const proxy = object.userData.shadowGeometry;
+  const g = Array.isArray(proxy) ? proxy[Math.min(cascade, proxy.length - 1)] : proxy;
+  return g?.isBufferGeometry ? g : object.geometry;
+}
+
+/**
+ * The world radius `minCasterTexels` compares for `object`: its geometry's bounding sphere
+ * scaled by its largest world axis (a skinned mesh's in its bind pose); Infinity for what is
+ * never culled by size (batched or instanced meshes, which are culled per instance, and objects
+ * without geometry).
+ */
+export function casterRadius(object) {
+  const geometry = object.geometry;
+  if (!object.isMesh || object.isBatchedMesh || object.isInstancedMesh || !geometry?.isBufferGeometry) return Infinity;
+  if (geometry.boundingSphere === null) geometry.computeBoundingSphere();
+  const m = object.matrixWorld.elements;
+  const scale = Math.sqrt(
+    Math.max(m[0] * m[0] + m[1] * m[1] + m[2] * m[2], m[4] * m[4] + m[5] * m[5] + m[6] * m[6], m[8] * m[8] + m[9] * m[9] + m[10] * m[10]),
+  );
+  return geometry.boundingSphere.radius * scale;
+}
+
 /** Opaque, then alpha-masked draws (Bevy's Opaque3d and AlphaMask3d), each three's way. */
 function opaqueSort(a, b) {
   const phase = (item) => (item.material.alphaMode === 'mask' ? 1 : 0);
@@ -800,6 +839,19 @@ export class Lighting {
      * `EXT_color_buffer_float` and `OES_texture_float_linear`.
      */
     this.sky = null;
+    /**
+     * Per sun cascade, nearest first, every how many frames it is redrawn (default 1, every
+     * frame). A cascade with an interval above 1 keeps its map and matrices in between, is fitted
+     * with a margin, and is redrawn early when the view leaves it (`StaggeredCascades`).
+     */
+    this.cascadeUpdateIntervals = [];
+    /**
+     * Projected-size caster culling: in each sun cascade, a mesh or `InstancedMesh` instance whose
+     * bounding sphere's radius is below this many of the cascade's texels casts nothing there
+     * (0, the default, keeps every caster). Batched meshes always cast.
+     */
+    this.minCasterTexels = 0;
+    this.#staggered = new StaggeredCascades();
 
     this.uniforms = frameUniforms();
     this.shadowMapSize = shadowMapSize;
@@ -1050,17 +1102,28 @@ export class Lighting {
       }
     };
     assign(false);
-    // Casters kept out of the far cascades (`userData.shadowCascades`): [object, its shadow material].
-    const nearOnly = [];
+    // Casters kept out of some cascades, by `userData.shadowCascades` or by their size against
+    // `minCasterTexels` (the radius they need there): [object, its shadow material, radius].
+    const minTexels = compile ? 0 : this.minCasterTexels;
+    const limited = [];
+    // Casters with a shadow proxy (`userData.shadowGeometry`): [object, its own geometry].
+    const proxied = [];
     for (const [o] of casters) {
-      if (!notShadowCaster(o) && shadowCascades(o) < cascades.length) nearOnly.push([o, o.material]);
+      if (notShadowCaster(o)) continue;
+      const radius = minTexels > 0 ? casterRadius(o) : Infinity;
+      if (shadowCascades(o) < cascades.length || radius < Infinity) limited.push([o, o.material, radius]);
+      if (o.userData.shadowGeometry && o.geometry) proxied.push([o, o.geometry]);
     }
     cascades.forEach((c, i) => {
       if (compile && i > 0) return;
-      // Before culling, so a stand-in takes the material too.
-      for (const [o, m] of nearOnly) {
-        if (shadowCascades(o) <= i) o.material = Array.isArray(m) ? m.map(() => this.noShadow) : this.noShadow;
+      // A kept cascade (`cascadeUpdateIntervals`) still holds its map.
+      if (!c.redraw) return;
+      // Before culling, so a stand-in takes the material and geometry too.
+      const minRadius = minTexels * c.texelSize;
+      for (const [o, m, radius] of limited) {
+        if (shadowCascades(o) <= i || radius < minRadius) o.material = Array.isArray(m) ? m.map(() => this.noShadow) : this.noShadow;
       }
+      for (const [o] of proxied) o.geometry = shadowGeometry(o, i);
       // Culling camera: the cascade's x/y extent, unbounded towards the sun (pancaked casters).
       const half = c.diameter / 2;
       cam.matrixWorldInverse.fromArray(c.cascadeFromWorld);
@@ -1070,7 +1133,7 @@ export class Lighting {
       cam.matrixAutoUpdate = false;
       cam.matrixWorldAutoUpdate = false;
       if (compile) culling.standInVariants();
-      else culling.view(i, cam);
+      else culling.view(i, cam, minRadius);
       this.shadowMaterial.uniforms.cascadeClip.value.fromArray(c.clipFromWorld);
       renderer.setRenderTarget(this.shadowTargets[i]);
       if (compile) {
@@ -1082,13 +1145,15 @@ export class Lighting {
       }
       // Culling gives hidden meshes back the material they had before theirs is restored.
       culling.reset();
-      for (const [o, m] of nearOnly) o.material = m;
+      for (const [o, m] of limited) o.material = m;
     });
     if (native) gl.disable(depthClamp.DEPTH_CLAMP_EXT);
     if (local.spotViews.length || local.pointViews.length) {
+      for (const [o] of proxied) o.geometry = shadowGeometry(o, 0);
       this.#renderLocalShadows(renderer, scene, local, () => assign(true), compile);
     }
     culling.end();
+    for (const [o, g] of proxied) o.geometry = g;
     for (const [o, m] of casters) o.material = m;
     if (clipControl) {
       const reversed = state.buffers.depth.getReversed();
@@ -1194,6 +1259,30 @@ export class Lighting {
   }
 
   #sky = null;
+  #staggered;
+
+  /**
+   * This frame's cascades (`StaggeredCascades`), each with `redraw`; with `compile`, fresh fits
+   * that leave the kept cascades alone.
+   */
+  #frameCascades(camera, aspect, scene, compile) {
+    const shadows = this.sun?.shadows;
+    if (!shadows) {
+      this.#staggered.reset();
+      return [];
+    }
+    return this.#staggered.update({
+      shadows,
+      mapSize: this.shadowMapSize,
+      sunDirection: this.sun.direction,
+      fovY: (camera.fov * Math.PI) / 180,
+      aspect,
+      worldFromView: camera.matrixWorld.elements,
+      intervals: this.cascadeUpdateIntervals,
+      scene,
+      peek: Boolean(compile),
+    });
+  }
 
   /**
    * The sky's directional lights in Bevy's order (`prepare_lights` sorts unshadowed lights
@@ -1279,7 +1368,7 @@ export class Lighting {
    * instead (with its target bound, which three's programs depend on), and nothing is drawn.
    */
   #renderPasses(renderer, scene, camera, target, width, height, compile) {
-    const cascades = this.cascades(camera, width / height);
+    const cascades = this.#frameCascades(camera, width / height, scene, compile);
     const local = packLocalLights(this.pointLights, this.spotLights, this.shadowMapSize, this.pointShadowMapSize);
     while (this.spotShadowTargets.length < local.spotViews.length) {
       this.spotShadowTargets.push(spotShadowTarget(this.shadowMapSize));
