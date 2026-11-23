@@ -7,7 +7,8 @@
 //   node examples/kit_web/run.mjs [scene...]          default: combat_bursts zoo_bursts
 //
 // Writes target/kit-showcase/<scene>.web.png. KIT_VK_ICD points ANGLE's Vulkan at an ICD (the
-// oracle's three.js side passes lavapipe's on a software adapter).
+// oracle's three.js side passes lavapipe's on a software adapter). KIT_ANGLE=gl runs ANGLE on
+// the system's OpenGL instead (on WSL with GALLIUM_DRIVER=d3d12: the Windows GPU through D3D12).
 
 import { createServer } from 'node:http';
 import { readFile, writeFile } from 'node:fs/promises';
@@ -34,7 +35,10 @@ const server = createServer(async (req, res) => {
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const browser = await chromium.launch({
   headless: true,
-  args: ['--enable-gpu', '--ignore-gpu-blocklist', '--use-angle=vulkan', '--enable-features=Vulkan', '--use-vulkan=native'],
+  args:
+    process.env.KIT_ANGLE === 'gl'
+      ? ['--enable-gpu', '--ignore-gpu-blocklist', '--use-angle=gl']
+      : ['--enable-gpu', '--ignore-gpu-blocklist', '--use-angle=vulkan', '--enable-features=Vulkan', '--use-vulkan=native'],
   env: { ...process.env, ...(process.env.KIT_VK_ICD ? { VK_ICD_FILENAMES: process.env.KIT_VK_ICD } : {}) },
 });
 
