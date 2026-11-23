@@ -483,10 +483,7 @@ GALLIUM_DRIVER=d3d12 VG_ANGLE=gl node oracle/virtual-geometry/run.mjs http://127
 (481 ms on the RTX) and about 1.5 s for the buttress pages. The arch's payload bytes are the
 recorded ones (`arch-transfer.json`), because its files are byte-identical.
 
-**Unavailable.** Native runs on this GPU: WSL2 has no Vulkan driver for it, so native wgpu sees
-only lavapipe. Browser WebGPU on it: Chromium gives only SwiftShader. Process and GPU memory:
-WSL2's D3D12 path reports no per-process GPU allocation. Mobile GPUs. The captures were inspected
-(`OUTPUT/<count>-<mode>-<frame>.png`); none is checked in.
+**Not covered here.** Native runs on this GPU and process memory are in the [native comparison](#integrated-gpu-native-comparison-121) below (from Windows; WSL2 has no Vulkan driver for the Arc and its D3D12 path reports no per-process GPU allocation). Browser WebGPU on it: Chromium under WSL gives only SwiftShader. Mobile GPUs. The captures were inspected (`OUTPUT/<count>-<mode>-<frame>.png`); none is checked in.
 
 These results do not change the decision. On the integrated GPU, clusters win on the GPU only
 for the arch, and there with 2.5× the discrete LODs' image error and seven to ten times their CPU
@@ -556,3 +553,84 @@ submit 0–3 % different triangle counts):
 | 256 | cluster-1 | 3,482,522 | 4.00 / 4.50 | 20.22 / 24.12 | 0.0024 | 4.14 / 5.87 |
 | 256 | cluster-2 | 2,893,591 | 4.10 / 6.60 | 20.44 / 33.84 | 0.0059 | 5.04 / 7.17 |
 | 256 | cluster-4 | 1,911,049 | 4.00 / 9.40 | 15.15 / 29.29 | 0.0152 | 3.82 / 5.56 |
+
+## Integrated GPU native comparison (#121)
+
+The native comparison was run on the same integrated GPU on 2026-11-23: the Intel Arc 140V in a Core
+Ultra 7 258V laptop, Windows 11 driver 32.0.101.8991, Vulkan, on AC power with the balanced power
+plan. `kit_showcase` was cross-built for Windows (`x86_64-pc-windows-gnullvm`, linked with
+[llvm-mingw](https://github.com/mstorsjo/llvm-mingw)) and started from WSL2 through interop, so wgpu
+talks to Intel's Windows driver directly; its inputs were copied to a Windows directory. The D3D12
+backend also runs, but only Vulkan, which the RTX runs used, was timed.
+
+```sh
+rustup target add x86_64-pc-windows-gnullvm
+# llvm-mingw's bin/ on PATH:
+CARGO_TARGET_X86_64_PC_WINDOWS_GNULLVM_LINKER=x86_64-w64-mingw32-clang \
+CC_x86_64_pc_windows_gnullvm=x86_64-w64-mingw32-clang CXX_x86_64_pc_windows_gnullvm=x86_64-w64-mingw32-clang++ \
+  cargo build --release --locked --example kit_showcase --target x86_64-pc-windows-gnullvm
+# From a directory on the Windows drive holding the .exe, inputs and hierarchies:
+export WGPU_BACKEND=vulkan WGPU_ADAPTER_NAME=Arc WSLENV=WGPU_BACKEND:WGPU_ADAPTER_NAME:VG_SCENE
+./kit_showcase.exe --virtual-geometry 'inputs\arch-discrete' 'h\shrine.kit.arch' shrine.kit.arch 'out\arch'
+./kit_showcase.exe --virtual-geometry 'inputs\crag-current' 'h\crag.kit.outcrop-buttress-1' crag.kit.outcrop-buttress-1 'out\grid'
+VG_SCENE=greyhaven-buttress-scene.json ./kit_showcase.exe --virtual-geometry 'inputs\crag-current' 'h\crag.kit.outcrop-buttress-1' crag.kit.outcrop-buttress-1 'out\greyhaven'
+WGPU_BACKEND=vulkan VG_ADAPTER=Arc python3 scripts/bench-geometry-loading.py /mnt/c/…/kit_showcase.exe /mnt/c/…/inputs/arch-discrete /mnt/c/…/h/shrine.kit.arch shrine.kit.arch /mnt/c/…/loading/arch-loading.json
+```
+
+**Inputs.** The arch uses the same processed inputs as the RTX and browser runs. The buttress uses the
+current `crag-kit` release (`6c35ac10…`, now pinned in `scripts/fetch-kits.sh`): it rebuilds the
+evaluated hierarchy byte for byte (176 clusters, `b7e933cd…`), so its RTX baseline is
+`native-buttress-final.json.gz` and, for the real placements, `greyhaven-outcrop-buttress-1.json.gz`.
+The Greyhaven scene is the recorded one.
+
+**Timing is noisy on this laptop.** Each workload ran in two processes a few minutes apart, each with
+two reverse-order rounds. The same mode's GPU median moved by up to 3× between the processes (the
+single arch took 0.37 ms in the first and about 1.1 ms in the second), presumably as the GPU clock and
+power state changed. The tables show the median of the four round medians with their range; read only
+differences larger than the ranges. Raw reports: `benchmarks/virtual-geometry/native-arc-*.json.gz`
+(rounds 0–1 the first process, 2–3 the second; both sessions' RMSE included). RMSE is the four-capture
+mean sRGB RMSE against source, as above; it matches the RTX captures to four decimals.
+
+**Results.**
+- **Arch.** At 256 instances the cluster cuts take the least GPU time (1.8–2.4 ms against 3.35 for
+  source), but the discrete LODs are close (LOD2 2.44 ms), and the cuts cost 1.4–1.8 ms of CPU against
+  0.17 ms, at three to twelve times LOD2's RMSE. At 64, 1 px clusters (0.98 ms) and LOD1/LOD2 (1.17–1.28
+  ms) overlap within their ranges.
+- **Buttress grid.** Clusters do not beat source reliably: at 64 instances 4.5–5.4 ms against source's
+  6.25 ms, with overlapping ranges, and at 256 they are slower (8.0–9.6 against 8.36 ms), at about 3 ms
+  of CPU. The kit LODs are the cheapest (LOD2 4.07 ms at 256) but visibly coarser (RMSE 0.10).
+- **Greyhaven buttress, real placements.** Every mode is 0.6–0.9 ms with ranges of about 0.45–1.4 ms:
+  no measurable difference, as in the browser.
+
+**Memory and loading.** `bench-geometry-loading.py` now also runs a Windows binary and samples Windows:
+working set, peak and private bytes from `Get-Process`, and the GPU process memory counters
+(`Win32_PerfFormattedData_GPUPerformanceCounters_GPUProcessMemory`; an integrated GPU allocates from
+shared memory). Raw rows: `arc-arch-loading.json`, `arc-buttress-loading.json`, three rounds each.
+
+| Asset | Mode | Load ms (3 rounds) | Working set MiB | Shared GPU memory MiB | World upload bytes |
+| --- | --- | --- | --- | --- | --- |
+| arch | source | 70.7–73.0 | 574 | 517 | 18,074,764 |
+| arch | discrete | 122.3–127.6 | 574–575 | 517 | 22,865,960 |
+| arch | cluster | 118.5–144.1 | 588 | 518 | 21,088,508 |
+| buttress | source | 106.5–124.4 | 574–575 | 517 | 51,230,992 |
+| buttress | discrete | 115.3–118.3 | 574–575 | 517 | 51,601,736 |
+| buttress | cluster | 162.0–169.1 | 584 | 517 | 53,156,728 |
+
+The cluster path holds 10–14 MiB more working set and, for the buttress, loads about 50 ms slower. The
+process's GPU allocation is 517–518 MiB in every mode, as NVIDIA's was 461 MiB on the RTX: the process
+counter does not resolve a 2–5 MB difference in mesh buffers. The renderer's upload counters remain the
+measure of those.
+
+**Browser, current kit.** The Greyhaven buttress browser run (WebGL 2, as in the browser section) was
+repeated with the current kit's 176-cluster hierarchy: `browser-arc-greyhaven-buttress-current.json.gz`.
+The RMSE values are those of the pinned-kit run to four decimals (0.0004/0.0006/0.0029 for the cuts,
+0.0068/0.0084 for LOD1/LOD2), and every mode took 0.57–1.09 ms of GPU time, again with no measurable
+difference.
+
+**Not covered.** D3D12 timing; Windows browsers (Chrome's WebGPU and ANGLE on D3D11 reach this GPU,
+but the three.js bench uses WebGL 2 and no WebGPU candidate exists); mobile GPUs.
+
+The decision is unchanged. Natively on the integrated GPU, clusters save GPU time only on the dense arch
+grid, where conventional LODs come close at a fraction of the CPU time and image error. On the buttress
+they do not beat full source geometry, and on the real placements nothing differs. They also cost more
+working set and load time.

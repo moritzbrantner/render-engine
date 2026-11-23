@@ -53,4 +53,8 @@ On an integrated GPU (Intel Arc 140V, browser WebGL 2, 2026-11-23), clusters red
 the arch, with 2.5× the discrete LODs' image error and seven to ten times their CPU time. On the dense
 buttress they cost more GPU time than full source geometry, and on the real placements they made no
 difference ([evaluation](../virtual-geometry-evaluation.md#integrated-gpu-browser-comparison-121)).
-Native and WebGPU runs on integrated hardware, and mobile hardware, remain unverified.
+Natively on the same GPU (Vulkan, 2026-11-23), clusters saved GPU time only on the dense arch grid, where
+discrete LODs came close at a fraction of the CPU time and image error. On the buttress they did not beat source,
+on the real placements nothing differed, and they held more working set
+([native](../virtual-geometry-evaluation.md#integrated-gpu-native-comparison-121)). Browser WebGPU on integrated
+hardware and mobile hardware remain unverified.
