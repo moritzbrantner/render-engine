@@ -14,10 +14,16 @@ if (previous && previous.asset !== asset) throw new Error('Output belongs to ano
 // VG_ANGLE=gl runs ANGLE on the system's OpenGL instead of Vulkan (on WSL with
 // GALLIUM_DRIVER=d3d12: the Windows GPU through D3D12, which no Vulkan driver reaches).
 const angle = process.env.VG_ANGLE === 'gl' ? ['--use-angle=gl'] : ['--use-angle=vulkan', '--enable-features=Vulkan', '--use-vulkan=native'];
-const browser = await chromium.launch({ headless: true, args: ['--enable-gpu', '--ignore-gpu-blocklist', ...angle] });
+// VG_CDP=http://127.0.0.1:9222 drives an already running Chrome instead, e.g. Chrome on an
+// Android phone after `adb forward tcp:9222 localabstract:chrome_devtools_remote` and
+// `adb reverse tcp:PORT tcp:PORT`. The canvas is 1280x720 either way.
+const browser = process.env.VG_CDP ? await chromium.connectOverCDP(process.env.VG_CDP)
+  : await chromium.launch({ headless: true, args: ['--enable-gpu', '--ignore-gpu-blocklist', ...angle] });
 try {
-  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  const page = process.env.VG_CDP ? await browser.contexts()[0].newPage() : await browser.newPage({ viewport: { width: 1280, height: 800 } });
   page.on('pageerror', e => console.error(e));
+  // A long-lived browser would otherwise serve a stale bench.js from its HTTP cache.
+  if (process.env.VG_CDP) await (await page.context().newCDPSession(page)).send('Network.setCacheDisabled', { cacheDisabled: true });
   await page.goto(`${origin}/oracle/virtual-geometry/?kit=${encodeURIComponent(kit)}&asset=${encodeURIComponent(asset)}&hierarchy=${encodeURIComponent(hierarchy)}${process.env.VG_SCENE_URL ? `&scene=${encodeURIComponent(process.env.VG_SCENE_URL)}` : ''}`);
   await page.waitForFunction(() => window.vgReady, null, { timeout: 120000 });
   const environment = await page.evaluate(() => window.vg.environment);
@@ -53,5 +59,7 @@ try {
     }
   }
 } finally {
+  // Over CDP, close the benchmark tab, then disconnect.
+  if (process.env.VG_CDP) await Promise.all(browser.contexts().flatMap(c => c.pages()).filter(p => p.url().includes('/oracle/virtual-geometry/')).map(p => p.close()));
   await browser.close();
 }

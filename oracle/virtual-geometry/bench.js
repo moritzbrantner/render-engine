@@ -145,7 +145,9 @@ function select(state, frame) {
 async function bench({ mode = 'cluster-2', count = 64, round = 0 } = {}) {
   const state = setup(mode, count);
   for (let i = 0; i < 60; i++) { select(state, i); renderer.render(scene, camera); await tick(); }
-  const cpu = [], selection = [], queries = [], triangles = [], draws = [];
+  // Without timer queries (Chrome on Android), sync_ms is the time from selection until a
+  // 1-pixel readPixels returns: CPU plus the GPU work it waits for. Not GPU time.
+  const cpu = [], selection = [], queries = [], triangles = [], draws = [], sync = [], pixel = new Uint8Array(4);
   renderer.info.autoReset = false;
   for (let frame = 0; frame < 240; frame++) {
     await tick(); renderer.info.reset();
@@ -154,6 +156,7 @@ async function bench({ mode = 'cluster-2', count = 64, round = 0 } = {}) {
     const start = performance.now(); select(state, frame); selection.push(performance.now() - start);
     renderer.render(scene, camera); cpu.push(performance.now() - start);
     if (query) { gl.endQuery(timer.TIME_ELAPSED_EXT); queries.push(query); }
+    else { gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel); sync.push(performance.now() - start); }
     triangles.push(renderer.info.render.triangles); draws.push(renderer.info.render.calls);
   }
   const gpu = [];
@@ -165,8 +168,8 @@ async function bench({ mode = 'cluster-2', count = 64, round = 0 } = {}) {
     if (gl.getParameter(timer.GPU_DISJOINT_EXT)) throw new Error('Disjoint GPU timing; discard run');
     gpu.push(gl.getQueryParameter(query, gl.QUERY_RESULT) / 1e6); gl.deleteQuery(query);
   }
-  const row = { mode, count, round, cpu_ms: stats(cpu), selection_ms: stats(selection), gpu_ms: gpu.length ? stats(gpu) : null,
-    raw: { cpu_ms: cpu, selection_ms: selection, gpu_ms: gpu, submitted_triangles_all_views: triangles, renderer_calls_all_views: draws } };
+  const row = { mode, count, round, cpu_ms: stats(cpu), selection_ms: stats(selection), gpu_ms: gpu.length ? stats(gpu) : null, sync_ms: sync.length ? stats(sync) : null,
+    raw: { cpu_ms: cpu, selection_ms: selection, gpu_ms: gpu, sync_ms: sync, submitted_triangles_all_views: triangles, renderer_calls_all_views: draws } };
   rows.push(row); document.querySelector('#status').textContent = JSON.stringify({ environment, asset: name, mode, count, cpu: row.cpu_ms, gpu: row.gpu_ms }, null, 2);
   return { ...row, raw: undefined };
 }
