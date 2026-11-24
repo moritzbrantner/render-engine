@@ -2,8 +2,12 @@
 // Hillaire's LUT method) and the runtime environment-map filter its
 // `AtmosphereEnvironmentMapLight` drives (`GeneratedEnvironmentMapLight`), on WebGL 2.
 //
-// Each frame, before the shadow and main passes: the transmittance, multiscattering, sky-view and
-// aerial-view LUTs, then, with sky ambient light and only when the sky changed, the sky rendered
+// Each frame, before the shadow and main passes, the LUTs whose inputs changed (mmorpg#1115: each
+// is redrawn when any input changed at all, so the image is the one redrawing every frame gives):
+// the transmittance LUT once (it depends only on the medium), the multiscattering LUT with the
+// ground albedo, the sky-view LUT with the camera position or a light, and the aerial-view LUT,
+// several slices per pass into as many of its layers (multiple render targets), also with the
+// camera's rotation. Then, with sky ambient light and only when the sky changed, the sky rendered
 // into a 128² cube, its mip chain, the GGX-prefiltered specular cube (one pass per mip) and the
 // 32² irradiance cube. After the opaque draws `composite` blends the sky and the aerial perspective into the
 // HDR frame; the main pass samples the transmittance LUT to filter the sun and moon light.
@@ -45,7 +49,6 @@ import {
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import {
   aerialMarchFragment,
-  aerialStoreFragment,
   copyFaceFragment,
   copyLevelFragment,
   downsampleFragment,
@@ -66,6 +69,12 @@ const TRANSMITTANCE_SIZE = [256, 128];
 const MULTISCATTERING_SIZE = [32, 32];
 const SKY_VIEW_SIZE = [400, 200];
 const AERIAL_VIEW_SIZE = 32;
+/**
+ * The most aerial-view slices one pass marches: one colour attachment each beside the two of the
+ * running sums. WebGL 2 guarantees four draw buffers (two slices a pass, 16 passes); desktop GPUs
+ * have eight (six slices a pass, 6 passes).
+ */
+const AERIAL_SLICES_PER_PASS = 6;
 /** Bevy `AtmosphereEnvironmentMapLight::default().size` and the diffuse cube's size. */
 const ENVIRONMENT_SIZE = 128;
 export const ENVIRONMENT_MIPS = Math.log2(ENVIRONMENT_SIZE) + 1;
@@ -178,6 +187,11 @@ function mipmapped(target, levels) {
   return target;
 }
 
+/** Whether a LUT drawn for the inputs `was` (null: not drawn) holds what `now` would draw. */
+function sameKey(was, now) {
+  return was !== null && was.length === now.length && was.every((x, i) => x === now[i]);
+}
+
 /** Bevy `extract_atmosphere`: world to atmosphere space, the planet centre at the origin. */
 export function worldToAtmosphere() {
   return new Matrix4().makeTranslation(0, INNER_RADIUS, 0);
@@ -253,12 +267,8 @@ export class SkyPasses {
       transmittance: material(transmittanceFragment),
       multiscattering: material(multiscatteringFragment),
       skyView: material(skyViewFragment),
-      aerialMarch: material(aerialMarchFragment, {
-        slice: { value: 0 },
-        totalIn: { value: null },
-        throughputIn: { value: null },
-      }),
-      aerialStore: material(aerialStoreFragment, { totalIn: { value: null } }),
+      // Its slices per pass follow the context's draw buffers (`#aerialPasses`).
+      aerialMarch: null,
       environment: material(environmentFragment, { face: { value: 0 }, size: { value: ENVIRONMENT_SIZE } }),
       downsample: filter(downsampleFragment, { mipLevel: { value: 0 } }),
       copyLevel: filter(copyLevelFragment, { mipLevel: { value: 0 } }),
@@ -300,9 +310,28 @@ export class SkyPasses {
     this.compositeMesh.onAfterRender = (renderer) => renderer.getContext().colorMask(true, true, true, true);
     this.compositeCamera = new OrthographicCamera(-1, 1, 1, -1, 0, 1);
     this.quad = new FullScreenQuad(this.materials.transmittance);
+    this.#material = material;
     /** How many times `render` has filtered the environment cubes. */
     this.environmentFilters = 0;
+    /** How many fullscreen passes `render` has drawn into the four atmosphere LUTs. */
+    this.lutPasses = 0;
   }
+
+  #material;
+
+  /**
+   * The inputs each LUT was last drawn for: the GL texture of the transmittance LUT (a new one, as
+   * after a lost context, holds none of them), the multiscattering LUT's ground albedo, the sky
+   * view's and the aerial view's inputs (null: not drawn).
+   */
+  #drawn = { texture: undefined, multiscattering: null, skyView: null, aerialView: null };
+
+  /**
+   * The aerial march's passes: each pass's first slice, slice count and framebuffer (the running
+   * sums' target it writes and its slices' layers of the 3D LUT), built for the GL textures in
+   * `textures`; `target` is the render target that binds them (`setRenderTargetFramebuffer`).
+   */
+  #aerial = null;
 
   /** The inputs the environment cubes were last filtered for (null: not filtered). */
   #filtered = null;
@@ -332,6 +361,85 @@ export class SkyPasses {
     renderer.setRenderTarget(target, layer, mip);
     this.quad.material = material;
     this.quad.render(renderer);
+  }
+
+  /** One fullscreen pass into an atmosphere LUT. */
+  #lutPass(renderer, material, target, layer = 0) {
+    this.lutPasses++;
+    this.#draw(renderer, material, target, layer);
+  }
+
+  /** The aerial-view LUT: its march over every slice, `#aerialPasses`' passes in order. */
+  #marchAerialView(renderer) {
+    const { passes, target } = this.#aerialPasses(renderer);
+    const material = this.materials.aerialMarch;
+    const u = material.uniforms;
+    this.quad.material = material;
+    for (const pass of passes) {
+      u.firstSlice.value = pass.first;
+      u.sliceCount.value = pass.count;
+      u.totalIn.value = pass.from.textures[0];
+      u.throughputIn.value = pass.from.textures[1];
+      renderer.setRenderTargetFramebuffer(target, pass.framebuffer);
+      renderer.setRenderTarget(target);
+      this.lutPasses++;
+      this.quad.render(renderer);
+    }
+  }
+
+  /**
+   * The aerial march's passes for `renderer`'s context, built on first use and again for new GL
+   * textures (a restored context). Each pass marches as many slices as the context has draw
+   * buffers beside the running sums' two (at most `AERIAL_SLICES_PER_PASS`): its framebuffer has
+   * the sums' next target at attachments 0 and 1 and its slices' layers of the 3D LUT after them.
+   * three binds one layer of a 3D target at a time, so the framebuffers are the GL context's own,
+   * bound through `setRenderTargetFramebuffer`.
+   */
+  #aerialPasses(renderer) {
+    const gl = renderer.getContext();
+    const glTexture = (t) => renderer.properties.get(t).__webglTexture;
+    for (const t of [this.aerialView, ...this.aerialState]) renderer.initRenderTarget(t);
+    const textures = [this.aerialView.texture, ...this.aerialState.flatMap((s) => s.textures)].map(glTexture);
+    const was = this.#aerial;
+    if (was?.gl === gl && was.textures.every((t, i) => t === textures[i])) return was;
+    this.#deleteAerialFramebuffers();
+
+    const buffers = Math.min(gl.getParameter(gl.MAX_DRAW_BUFFERS), gl.getParameter(gl.MAX_COLOR_ATTACHMENTS));
+    const perPass = Math.min(AERIAL_SLICES_PER_PASS, buffers - 2);
+    if (was?.perPass !== perPass) {
+      this.materials.aerialMarch?.dispose();
+      this.materials.aerialMarch = this.#material(aerialMarchFragment(perPass), {
+        firstSlice: { value: 0 },
+        sliceCount: { value: 0 },
+        totalIn: { value: null },
+        throughputIn: { value: null },
+      });
+    }
+    const passes = [];
+    for (let first = 0, i = 0; first < AERIAL_VIEW_SIZE; first += perPass, i++) {
+      const count = Math.min(perPass, AERIAL_VIEW_SIZE - first);
+      const to = this.aerialState[(i + 1) % 2];
+      const framebuffer = gl.createFramebuffer();
+      renderer.state.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+      to.textures.forEach((t, k) => gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + k, gl.TEXTURE_2D, glTexture(t), 0));
+      for (let k = 0; k < count; k++) {
+        gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT2 + k, textures[0], 0, first + k);
+      }
+      gl.drawBuffers(Array.from({ length: 2 + count }, (_, k) => gl.COLOR_ATTACHMENT0 + k));
+      passes.push({ first, count, from: this.aerialState[i % 2], framebuffer });
+    }
+    // three binds the next target itself.
+    renderer.state.bindFramebuffer(gl.FRAMEBUFFER, null);
+    const target = was?.target ?? new WebGLRenderTarget(AERIAL_VIEW_SIZE, AERIAL_VIEW_SIZE, { depthBuffer: false });
+    this.#aerial = { gl, textures, perPass, passes, target };
+    return this.#aerial;
+  }
+
+  #deleteAerialFramebuffers() {
+    const was = this.#aerial;
+    if (!was) return;
+    for (const { framebuffer } of was.passes) if (was.gl.isFramebuffer(framebuffer)) was.gl.deleteFramebuffer(framebuffer);
+    was.passes = [];
   }
 
   /**
@@ -365,17 +473,33 @@ export class SkyPasses {
     });
 
     const m = this.materials;
-    this.#draw(renderer, m.transmittance, this.transmittance);
-    this.#draw(renderer, m.multiscattering, this.multiscattering);
-    this.#draw(renderer, m.skyView, this.skyView);
-    for (let slice = 0; slice < AERIAL_VIEW_SIZE; slice++) {
-      const [from, to] = slice % 2 ? this.aerialState : [...this.aerialState].reverse();
-      m.aerialMarch.uniforms.slice.value = slice;
-      m.aerialMarch.uniforms.totalIn.value = from.textures[0];
-      m.aerialMarch.uniforms.throughputIn.value = from.textures[1];
-      this.#draw(renderer, m.aerialMarch, to);
-      m.aerialStore.uniforms.totalIn.value = to.textures[0];
-      this.#draw(renderer, m.aerialStore, this.aerialView, slice);
+    // A new GL texture (the first frame, or a restored context) holds no LUT nor cube yet.
+    renderer.initRenderTarget(this.transmittance);
+    const texture = renderer.properties.get(this.transmittance.texture).__webglTexture;
+    if (texture !== this.#drawn.texture) {
+      this.#drawn = { texture, multiscattering: null, skyView: null, aerialView: null };
+      this.#filtered = null;
+      this.#lutPass(renderer, m.transmittance, this.transmittance);
+    }
+    // Each LUT is redrawn when any of its inputs changed at all (exact comparison), so a kept LUT
+    // holds what this frame would draw.
+    const multiscatteringKey = [...groundAlbedo];
+    const lightKey = lights
+      .slice(0, 2)
+      .flatMap((l) => [l.directionToLight.x, l.directionToLight.y, l.directionToLight.z, ...l.color, l.diskSize, l.diskIntensity]);
+    const skyViewKey = [...multiscatteringKey, ...camWorld.toArray(), ...lightKey];
+    const aerialViewKey = [...skyViewKey, ...worldFromView.elements, ...clipFromView.elements];
+    if (!sameKey(this.#drawn.multiscattering, multiscatteringKey)) {
+      this.#drawn.multiscattering = multiscatteringKey;
+      this.#lutPass(renderer, m.multiscattering, this.multiscattering);
+    }
+    if (!sameKey(this.#drawn.skyView, skyViewKey)) {
+      this.#drawn.skyView = skyViewKey;
+      this.#lutPass(renderer, m.skyView, this.skyView);
+    }
+    if (!sameKey(this.#drawn.aerialView, aerialViewKey)) {
+      this.#drawn.aerialView = aerialViewKey;
+      this.#marchAerialView(renderer);
     }
     if (!environment) {
       this.#filtered = null;
@@ -466,6 +590,8 @@ export class SkyPasses {
    * render targets, so one bound target stands for theirs.
    */
   compile(renderer, compile) {
+    // The aerial march's program depends on the context's draw buffers.
+    this.#aerialPasses(renderer);
     renderer.setRenderTarget(this.transmittance);
     for (const material of Object.values(this.materials)) {
       this.quad.material = material;
@@ -498,7 +624,9 @@ export class SkyPasses {
     }
     this.medium.density.dispose();
     this.medium.scattering.dispose();
-    for (const material of [...Object.values(this.materials), this.compositeMaterial]) material.dispose();
+    for (const material of [...Object.values(this.materials), this.compositeMaterial]) material?.dispose();
+    this.#deleteAerialFramebuffers();
+    this.#aerial = null;
     this.compositeMesh.geometry.dispose();
     this.quad.dispose();
   }

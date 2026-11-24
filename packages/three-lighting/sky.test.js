@@ -1,11 +1,44 @@
-// The sky's environment cubes are filtered once for a static sky and again when it changes
-// (render-engine#54). Runs without a GPU: a stand-in renderer counts the passes.
+// The sky's LUTs are drawn only when their inputs change (mmorpg#1115), the aerial-view LUT
+// several slices per pass, and its environment cubes are filtered once for a static sky and again
+// when it changes (render-engine#54). Runs without a GPU: a stand-in renderer counts the passes.
 import { expect, test } from 'bun:test';
 import { Matrix4, Vector3 } from 'three';
 import { ENVIRONMENT_ALTITUDE_TOLERANCE, ENVIRONMENT_TURN_TOLERANCE, SkyPasses } from './sky.js';
 
-function countingRenderer() {
-  const r = { draws: 0, targets: [] };
+/** A stand-in WebGL 2 context with `drawBuffers` draw buffers: it records the aerial LUT layers attached. */
+function fakeGl(drawBuffers) {
+  const gl = {
+    MAX_DRAW_BUFFERS: 0x8824,
+    MAX_COLOR_ATTACHMENTS: 0x8cdf,
+    FRAMEBUFFER: 0x8d40,
+    TEXTURE_2D: 0x0de1,
+    COLOR_ATTACHMENT0: 0x8ce0,
+    COLOR_ATTACHMENT2: 0x8ce2,
+    layers: [],
+    framebuffers: 0,
+  };
+  gl.getParameter = () => drawBuffers;
+  gl.createFramebuffer = () => (gl.framebuffers++, {});
+  gl.isFramebuffer = () => true;
+  gl.deleteFramebuffer = () => gl.framebuffers--;
+  gl.framebufferTexture2D = () => {};
+  gl.framebufferTextureLayer = (_target, _attachment, _texture, _level, layer) => gl.layers.push(layer);
+  gl.drawBuffers = () => {};
+  return gl;
+}
+
+function countingRenderer(drawBuffers = 8) {
+  const r = { draws: 0, targets: [], gl: fakeGl(drawBuffers) };
+  // A new map stands for a restored context: every GL texture is new.
+  r.loseContext = () => (r.props = new WeakMap());
+  r.loseContext();
+  r.properties = { get: (o) => (r.props.has(o) || r.props.set(o, {}), r.props.get(o)) };
+  r.initRenderTarget = (target) => {
+    for (const t of target.textures) r.properties.get(t).__webglTexture ??= {};
+  };
+  r.getContext = () => r.gl;
+  r.state = { bindFramebuffer: () => true };
+  r.setRenderTargetFramebuffer = () => {};
   r.setRenderTarget = (target) => r.targets.push(target);
   r.render = () => r.draws++;
   return r;
@@ -18,14 +51,21 @@ const sunAt = (elevation) => ({
   diskIntensity: 1,
 });
 
-const frame = (sun, cameraY = 2) => ({
+const frame = (sun, cameraY = 2, yaw = 0) => ({
   groundAlbedo: [0.3, 0.3, 0.3],
   lights: [sun],
-  worldFromView: new Matrix4().makeTranslation(0, cameraY, 0),
+  worldFromView: new Matrix4().makeRotationY(yaw).setPosition(0, cameraY, 0),
   clipFromView: new Matrix4().makePerspective(-0.1, 0.1, 0.1, -0.1, 0.1, 1000),
   exposure: 1,
   environment: true,
 });
+
+/** The LUT passes one `render` draws. */
+const lutPasses = (sky, renderer, f) => {
+  const before = sky.lutPasses;
+  sky.render(renderer, f);
+  return sky.lutPasses - before;
+};
 
 test('a static sky filters its environment cubes once', () => {
   const sky = new SkyPasses();
@@ -39,6 +79,41 @@ test('a static sky filters its environment cubes once', () => {
   console.log(`sky render calls: first frame ${first}, static frames ${perFrame}`);
   expect(perFrame).toBeLessThan(first - 100);
   sky.dispose();
+});
+
+test('each LUT is drawn only when its inputs change, the aerial view in six passes', () => {
+  const sky = new SkyPasses();
+  const renderer = countingRenderer();
+  // Transmittance, multiscattering, sky view and the aerial view's 6 passes.
+  expect(lutPasses(sky, renderer, frame(sunAt(0.5)))).toBe(9);
+  for (let i = 0; i < 5; i++) expect(lutPasses(sky, renderer, frame(sunAt(0.5)))).toBe(0);
+  // The camera turns: only the aerial view (camera space).
+  expect(lutPasses(sky, renderer, frame(sunAt(0.5), 2, 0.1))).toBe(6);
+  // The camera moves or the sun turns: the sky view too.
+  expect(lutPasses(sky, renderer, frame(sunAt(0.5), 3, 0.1))).toBe(7);
+  expect(lutPasses(sky, renderer, frame(sunAt(0.6), 3, 0.1))).toBe(7);
+  // A new ground albedo: the multiscattering LUT too; the transmittance LUT never again.
+  expect(lutPasses(sky, renderer, { ...frame(sunAt(0.6), 3, 0.1), groundAlbedo: [0.2, 0.3, 0.3] })).toBe(8);
+  // A restored context holds no LUT: all of them again, and the environment cubes.
+  const filters = sky.environmentFilters;
+  renderer.loseContext();
+  expect(lutPasses(sky, renderer, frame(sunAt(0.6), 3, 0.1))).toBe(9);
+  expect(sky.environmentFilters).toBe(filters + 1);
+  sky.dispose();
+  expect(renderer.gl.framebuffers).toBe(0);
+});
+
+test('the aerial march stores every slice once, as many a pass as the draw buffers allow', () => {
+  for (const [drawBuffers, passes] of [
+    [8, 6],
+    [4, 16],
+  ]) {
+    const sky = new SkyPasses();
+    const renderer = countingRenderer(drawBuffers);
+    expect(lutPasses(sky, renderer, frame(sunAt(0.5)))).toBe(3 + passes);
+    expect(renderer.gl.layers).toEqual(Array.from({ length: 32 }, (_, i) => i));
+    sky.dispose();
+  }
 });
 
 test('a moving sun, a new ground albedo or a climbing camera re-filters', () => {
