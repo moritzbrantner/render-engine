@@ -1,0 +1,70 @@
+{
+ "units": "KiB from adb dumpsys meminfo after vg.capture(mode, 256) on a fresh page load; Chrome GPU process (privileged_process0)",
+ "webgpu": {
+  "info": {
+   "vendor": "qualcomm",
+   "architecture": "adreno-6xx",
+   "device": "",
+   "description": ""
+  },
+  "features": [
+   "core-features-and-limits",
+   "depth-clip-control",
+   "depth32float-stencil8",
+   "dual-source-blending",
+   "float32-blendable",
+   "indirect-first-instance",
+   "primitive-index",
+   "rg11b10ufloat-renderable",
+   "texture-component-swizzle",
+   "texture-compression-astc",
+   "texture-compression-astc-sliced-3d",
+   "texture-compression-etc2",
+   "texture-compression-unaligned",
+   "texture-formats-tier1",
+   "texture-formats-tier2",
+   "timestamp-query"
+  ],
+  "maxBufferSize": 1073741824,
+  "maxStorageBufferBindingSize": 536870912,
+  "maxComputeInvocationsPerWorkgroup": 1024
+ },
+ "gpu_process": {
+  "arch-256-source": {
+   "pss": 280748,
+   "gl": 139991,
+   "egl": 12948,
+   "gfx": 83008
+  },
+  "arch-256-lod2": {
+   "pss": 264918,
+   "gl": 132791,
+   "egl": 12948,
+   "gfx": 72864
+  },
+  "arch-256-cluster-1": {
+   "pss": 291548,
+   "gl": 144555,
+   "egl": 12948,
+   "gfx": 82924
+  },
+  "buttress-256-source": {
+   "pss": 416547,
+   "gl": 215667,
+   "egl": 12948,
+   "gfx": 138740
+  },
+  "buttress-256-lod2": {
+   "pss": 412758,
+   "gl": 215891,
+   "egl": 12948,
+   "gfx": 134704
+  },
+  "buttress-256-cluster-1": {
+   "pss": 443584,
+   "gl": 230071,
+   "egl": 12948,
+   "gfx": 149080
+  }
+ }
+}

@@ -56,5 +56,8 @@ difference ([evaluation](../virtual-geometry-evaluation.md#integrated-gpu-browse
 Natively on the same GPU (Vulkan, 2026-11-23), clusters saved GPU time only on the dense arch grid, where
 discrete LODs came close at a fraction of the CPU time and image error. On the buttress they did not beat source,
 on the real placements nothing differed, and they held more working set
-([native](../virtual-geometry-evaluation.md#integrated-gpu-native-comparison-121)). Browser WebGPU on integrated
-hardware and mobile hardware remain unverified.
+([native](../virtual-geometry-evaluation.md#integrated-gpu-native-comparison-121)). On a mobile GPU (Pixel 3a,
+Adreno 615, Chrome WebGL 2, 2026-11-24), the 1 px and 2 px cuts took more frame time than full source geometry in
+both dense grids. Only a 4 px arch cut was faster, at eleven times the discrete LODs' image error
+([mobile](../virtual-geometry-evaluation.md#mobile-gpu-browser-comparison-121)). D3D12 timing and browser WebGPU
+on integrated hardware were not measured; no WebGPU candidate exists.

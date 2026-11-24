@@ -634,3 +634,139 @@ The decision is unchanged. Natively on the integrated GPU, clusters save GPU tim
 grid, where conventional LODs come close at a fraction of the CPU time and image error. On the buttress
 they do not beat full source geometry, and on the real placements nothing differs. They also cost more
 working set and load time.
+
+## Mobile GPU browser comparison (#121)
+
+The browser comparisons were rerun on a mobile GPU on 2026-11-24: a Google Pixel 3a (Snapdragon 670,
+Adreno 615), Android 12, Chrome 157.0.8103.78. The page reported
+`ANGLE (Qualcomm, Adreno (TM) 615, OpenGL ES 3.2)` with multi-draw, three.js 187 and the same
+1280×720 canvas, `bench.js`, camera paths and two reverse-order rounds as the RTX and Arc runs. The
+phone was on USB power (battery 46–51 %, 31–35 °C) with its screen kept on. `run.mjs` drove its Chrome
+over the DevTools protocol (`VG_CDP`) and reached the repository server through `adb reverse`:
+
+```sh
+adb forward tcp:9222 localabstract:chrome_devtools_remote   # Chrome's socket; another Chromium browser may hold this name
+adb reverse tcp:8000 tcp:8000
+python3 -m http.server 8000 --bind 127.0.0.1
+export VG_CDP=http://127.0.0.1:9222
+node oracle/virtual-geometry/run.mjs http://127.0.0.1:8000 arch-discrete shrine.kit.arch OUTPUT shrine
+VG_SCENE_URL=/target/virtual-geometry/greyhaven-buttress-scene.json \
+  node oracle/virtual-geometry/run.mjs http://127.0.0.1:8000 crag-current crag.kit.outcrop-buttress-1 OUTPUT
+node oracle/virtual-geometry/run.mjs http://127.0.0.1:8000 crag-current crag.kit.outcrop-buttress-1 OUTPUT
+```
+
+**No GPU timer.** Chrome on Android exposes no `EXT_disjoint_timer_query_webgl2` on this phone, so GPU
+time is unavailable. Instead `bench.js` records `sync_ms` when timer queries are missing: the time from
+cut selection until a 1-pixel `readPixels` returns. That covers the CPU work, the wait for the GPU to
+finish the frame, and the readback. It is a frame time, not GPU time, and it is not comparable with the
+other sections' GPU columns, which are shown only for orientation. Raw reports:
+`benchmarks/virtual-geometry/browser-pixel3a-*.json.gz`. The tables show round 2 (the reverse order).
+Round 1's medians differ by at most 2 ms on the arch, 2.5 ms on the real placements and 5.8 ms on the
+buttress grid (the 256 1 px cut: 319 against 325 ms). RMSE is the four-capture mean sRGB RMSE against
+source, as above. It matches the Arc's to within 0.0013; the buttress uses the current kit here.
+
+**Inputs.** The arch inputs were rebuilt from the `shrine-kit` release (`02ad24aa…`), 3d-lab
+`lod_chain` at `1d185c6` (meshopt 0.7.0) and three-nanite at `b730aac`. `arch-discrete-request.json`,
+`arch-discrete-observations.json` and `arch-footprint.json` come out byte-identical. The buttress uses
+the current `crag-kit` release (`6c35ac10…`, 176 clusters, `b7e933cd…`). The Greyhaven scene is the
+recorded one.
+
+**Results.** On this phone, the 1 px and 2 px cuts are the slowest or nearly slowest option in
+every dense case:
+- **Arch.** At 256 instances, the 1 px and 2 px cuts take 101 and 78 ms a frame, against 83 ms for
+  source and 51 ms for LOD2–LOD4. Only the 4 px cut is faster (38 ms), at RMSE 0.031: eleven times
+  LOD2's error. The cuts' selection costs 12–16 ms of CPU against 0.5 ms. At 64 instances, LOD2 takes
+  19.4 ms, source 27.8 ms and the cuts 25.9–43.6 ms.
+- **Buttress grid.** At 256 instances, the cuts take 197–325 ms, against 160 ms for source. LOD2 takes
+  35.5 ms but is coarser (RMSE 0.055). At 64 instances the cuts take 92–110 ms, against 65 ms for source.
+  This mid-range GPU is far more sensitive to triangle count than the Arc. The kit LODs scale with it,
+  but the cuts' 18–25 ms of CPU selection and their BatchedMesh draws cost more than the triangles they
+  save.
+- **Greyhaven buttress, real placements.** Every mode takes 10.5–14.1 ms. The cuts take 13–14 ms,
+  against source's 12.1 ms (10.6 ms in round 1) and LOD2's 10.5 ms. At three placements, geometry is not
+  the cost.
+
+**Memory.** Measured with `adb shell dumpsys meminfo` on Chrome's GPU process, after loading each page
+fresh and drawing one frame of 256 instances (`browser-pixel3a-memory.json`). With the 1 px cut, the
+process holds 10.5 MiB more PSS than with source for the arch (285 against 274 MiB) and 26.4 MiB more
+for the buttress (433 against 407 MiB). Its `GL mtrack` is 4.5 and 14.1 MiB higher. These are
+single-sample figures. The renderer process's PSS grew with each page load, so it is not reported.
+
+**Loading.** The latest page load (local HTTP over `adb reverse`, with the browser cache disabled)
+took 2.65 s for the arch and 1.3 s for each buttress page.
+
+**WebGPU.** Chrome on the phone offers a WebGPU adapter (`qualcomm`, `adreno-6xx`, with
+`timestamp-query`). No WebGPU candidate exists, so it was not benchmarked. A future WebGPU candidate
+would get GPU timing on this phone, which WebGL 2 does not.
+
+**Not covered.** D3D12 timing on the Arc and browser WebGPU on an integrated GPU. Neither has a
+candidate that would change the result: the native Arc runs used Vulkan, as the RTX runs did, and no
+WebGPU cluster candidate exists. Other mobile GPUs (Mali, Apple) were not available.
+
+The decision is unchanged. On a mobile GPU, cluster cuts cost more frame time than full source geometry
+in both dense grids, except a 4 px arch cut at eleven times the discrete LODs' image error. They also
+take 12–25 ms of CPU selection at 256 instances and more GPU-process memory. On the arch, the discrete
+LODs beat the 1 px and 2 px cuts on both frame time and image error.
+
+Arch, 1, 64 and 256 instances:
+
+| Instances | Mode | Triangles submitted (all views) | CPU ms median / p95 | Sync frame ms median / p95 | RMSE vs source | Arc 140V GPU ms median |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | source | 29,144 | 0.80 / 0.90 | 11.9 / 13.3 | 0 | 0.93 |
+| 1 | lod1 | 14,570 | 1.30 / 1.50 | 9.6 / 10.9 | 0.0001 | 0.94 |
+| 1 | lod2 | 11,824 | 1.30 / 1.60 | 9.7 / 11.3 | 0.0004 | 0.87 |
+| 1 | lod3 | 11,840 | 0.80 / 1.00 | 11.0 / 12.5 | 0.0004 | 0.86 |
+| 1 | lod4 | 11,840 | 1.40 / 1.70 | 10.1 / 11.6 | 0.0004 | 0.84 |
+| 1 | cluster-1 | 7,706 | 1.20 / 1.40 | 11.9 / 13.5 | 0.0008 | 0.93 |
+| 1 | cluster-2 | 7,706 | 1.10 / 1.50 | 10.7 / 12.9 | 0.0008 | 0.92 |
+| 1 | cluster-4 | 5,220 | 1.10 / 1.50 | 10.5 / 12.6 | 0.0010 | 0.92 |
+| 64 | source | 1,865,216 | 0.50 / 0.90 | 27.8 / 32.2 | 0 | 5.35 |
+| 64 | lod1 | 932,480 | 0.50 / 0.70 | 21.5 / 24.6 | 0.0011 | 3.39 |
+| 64 | lod2 | 756,736 | 0.50 / 0.90 | 19.4 / 22.2 | 0.0023 | 3.12 |
+| 64 | lod3 | 757,760 | 0.50 / 0.90 | 19.5 / 22.2 | 0.0023 | 3.15 |
+| 64 | lod4 | 757,760 | 0.50 / 1.00 | 19.6 / 22.5 | 0.0023 | 3.11 |
+| 64 | cluster-1 | 313,782 | 5.50 / 12.40 | 43.6 / 58.3 | 0.0045 | 2.14 |
+| 64 | cluster-2 | 240,305 | 5.00 / 10.20 | 37.9 / 49.7 | 0.0069 | 1.88 |
+| 64 | cluster-4 | 129,411 | 4.10 / 10.60 | 25.9 / 34.1 | 0.0187 | 1.57 |
+| 256 | source | 7,460,864 | 0.50 / 1.10 | 83.0 / 88.2 | 0 | 8.07 |
+| 256 | lod1 | 3,729,920 | 0.50 / 1.20 | 57.7 / 61.8 | 0.0016 | 8.88 |
+| 256 | lod2 | 3,026,944 | 0.50 / 1.10 | 50.9 / 54.7 | 0.0029 | 7.97 |
+| 256 | lod3 | 3,031,040 | 0.60 / 1.20 | 51.1 / 54.7 | 0.0029 | 7.63 |
+| 256 | lod4 | 3,031,040 | 0.60 / 1.00 | 51.2 / 54.8 | 0.0029 | 7.94 |
+| 256 | cluster-1 | 926,231 | 16.20 / 38.80 | 101.3 / 129.2 | 0.0070 | 3.72 |
+| 256 | cluster-2 | 534,203 | 15.00 / 22.80 | 78.4 / 98.2 | 0.0161 | 2.65 |
+| 256 | cluster-4 | 177,667 | 12.00 / 13.60 | 37.7 / 49.4 | 0.0313 | 1.83 |
+
+Greyhaven buttress, three real placements, 240 frames (recorded scene; current kit):
+
+| Instances | Mode | Triangles submitted (all views) | CPU ms median / p95 | Sync frame ms median / p95 | RMSE vs source | Arc 140V GPU ms median |
+| --- | --- | --- | --- | --- | --- | --- |
+| 3 | source | 53,994 | 0.70 / 1.20 | 12.1 / 15.9 | 0 | 1.20 |
+| 3 | lod1 | 16,362 | 0.80 / 1.30 | 12.5 / 14.4 | 0.0068 | 1.11 |
+| 3 | lod2 | 4,530 | 0.80 / 1.40 | 10.5 / 12.4 | 0.0084 | 1.05 |
+| 3 | cluster-1 | 37,714 | 1.40 / 2.40 | 13.1 / 19.3 | 0.0004 | 1.13 |
+| 3 | cluster-2 | 37,087 | 1.40 / 2.90 | 13.1 / 19.0 | 0.0006 | 1.18 |
+| 3 | cluster-4 | 30,136 | 1.50 / 2.90 | 14.1 / 17.6 | 0.0029 | 1.15 |
+
+Buttress grid (current kit; the Arc column ran the pinned kit):
+
+| Instances | Mode | Triangles submitted (all views) | CPU ms median / p95 | Sync frame ms median / p95 | RMSE vs source | Arc 140V GPU ms median |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | source | 17,998 | 0.70 / 1.00 | 10.8 / 16.3 | 0 | 0.89 |
+| 1 | lod1 | 5,454 | 0.70 / 1.00 | 9.9 / 14.7 | 0.0213 | 0.72 |
+| 1 | lod2 | 1,510 | 0.90 / 1.50 | 13.8 / 14.9 | 0.0279 | 0.70 |
+| 1 | cluster-1 | 16,318 | 1.30 / 2.30 | 12.6 / 18.7 | 0.0006 | 0.89 |
+| 1 | cluster-2 | 16,318 | 1.20 / 2.30 | 12.6 / 17.6 | 0.0006 | 0.90 |
+| 1 | cluster-4 | 16,318 | 1.00 / 1.60 | 11.2 / 16.6 | 0.0006 | 0.60 |
+| 64 | source | 1,151,872 | 0.60 / 0.90 | 64.7 / 73.8 | 0 | 7.81 |
+| 64 | lod1 | 349,056 | 0.60 / 1.10 | 39.5 / 45.5 | 0.0473 | 5.02 |
+| 64 | lod2 | 96,640 | 0.60 / 1.10 | 23.1 / 25.2 | 0.0599 | 2.86 |
+| 64 | cluster-1 | 985,955 | 7.70 / 15.60 | 109.6 / 125.6 | 0.0012 | 6.19 |
+| 64 | cluster-2 | 922,946 | 8.00 / 22.70 | 105.3 / 122.7 | 0.0035 | 5.81 |
+| 64 | cluster-4 | 766,406 | 6.90 / 22.30 | 92.4 / 110.8 | 0.0108 | 5.25 |
+| 256 | source | 4,607,488 | 0.50 / 1.10 | 159.9 / 184.1 | 0 | 14.02 |
+| 256 | lod1 | 1,396,224 | 0.60 / 1.10 | 79.2 / 95.5 | 0.0434 | 8.25 |
+| 256 | lod2 | 386,560 | 0.60 / 1.10 | 35.5 / 41.3 | 0.0552 | 5.99 |
+| 256 | cluster-1 | 3,476,604 | 25.20 / 28.60 | 325.2 / 367.2 | 0.0037 | 20.22 |
+| 256 | cluster-2 | 2,892,263 | 24.70 / 32.70 | 278.3 / 357.2 | 0.0064 | 20.44 |
+| 256 | cluster-4 | 1,855,608 | 18.40 / 39.30 | 197.3 / 275.1 | 0.0158 | 15.15 |
