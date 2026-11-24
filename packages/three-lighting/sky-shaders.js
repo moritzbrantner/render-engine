@@ -7,8 +7,8 @@
 // writes it at gl_FragCoord (row 0 at t = 0, as in the wgpu storage textures). Where a compute
 // pass shares work across invocations it is split into passes that give the same sums: the
 // multiscattering LUT reduces its 64 directions per texel in the workgroup's tree order inside
-// one fragment, and the aerial-view LUT marches slice by slice, carrying its running sums
-// between passes in Rgba32Float targets.
+// one fragment, and the aerial-view LUT marches several slices per pass (one render target per
+// slice's layer), carrying its running sums between passes in Rgba32Float targets.
 
 // ---------------------------------------------------------------- common.wgsl
 
@@ -679,35 +679,37 @@ void main() {
 
 // ---------------------------------------------------------------- aerial_view.wgsl
 
-// One depth slice of the aerial-view march: continues the running sums of the previous slice
-// (prev_t in totalIn.a) and writes them for the next one.
-export const aerialMarchFragment = /* glsl */ `
+/**
+ * The aerial-view march over `slices` depth slices in one draw (multiple render targets): continues
+ * the running sums of the previous draw (prev_t in totalIn.a), stores each of its slices (in log
+ * space, so slices interpolate exponential values linearly) into its own layer of the 3D LUT
+ * (outputs 2 and up) and writes the sums for the next draw (outputs 0 and 1). Each slice marches
+ * exactly as the compute pass's loop does; the sums stay in f32 registers within a draw and in
+ * Rgba32Float targets between draws. The last draw may hold fewer slices (`sliceCount`); its
+ * remaining outputs have no attachment.
+ */
+export function aerialMarchFragment(slices) {
+  const outputs = Array.from({ length: slices }, (_, k) => `layout(location = ${k + 2}) out highp vec4 slice${k}Out;`);
+  const steps = Array.from(
+    { length: slices },
+    (_, k) => `    if (${k} < sliceCount) {
+        march_slice(firstSlice + ${k}, world_pos, ray_dir, total_inscattering, throughput, prev_t);
+        slice${k}Out = vec4(log(max(total_inscattering, vec3(1e-6))), 0.0);
+    }`,
+  );
+  return /* glsl */ `
 ${common}
 const int AERIAL_VIEW_LUT_SAMPLES = 10;
-uniform int slice;
+uniform int firstSlice;
+uniform int sliceCount;
 uniform sampler2D totalIn;
 uniform sampler2D throughputIn;
 layout(location = 0) out highp vec4 totalOut;
 layout(location = 1) out highp vec4 throughputOut;
+${outputs.join('\n')}
 
-void main() {
-    ivec2 idx = ivec2(gl_FragCoord.xy);
-    vec2 uv = (vec2(idx) + 0.5) / AERIAL_VIEW_LUT_SIZE.xy;
-    vec3 ray_dir = uv_to_ray_direction(uv);
-    vec3 world_pos = get_view_position();
-
+void march_slice(int slice, vec3 world_pos, vec3 ray_dir, inout vec3 total_inscattering, inout vec3 throughput, inout float prev_t) {
     float t_max = AERIAL_VIEW_LUT_MAX_DISTANCE;
-
-    float prev_t = 0.0;
-    vec3 total_inscattering = vec3(0.0);
-    vec3 throughput = vec3(1.0);
-    if (slice > 0) {
-        vec4 total = texelFetch(totalIn, idx, 0);
-        total_inscattering = total.rgb;
-        prev_t = total.a;
-        throughput = texelFetch(throughputIn, idx, 0).rgb;
-    }
-
     for (int step_i = 0; step_i < AERIAL_VIEW_LUT_SAMPLES; step_i++) {
         float t_i = t_max * (float(slice) + ((float(step_i) + MIDPOINT_RATIO) / float(AERIAL_VIEW_LUT_SAMPLES))) / AERIAL_VIEW_LUT_SIZE.z;
         float dt = (t_i - prev_t);
@@ -733,20 +735,29 @@ void main() {
             break;
         }
     }
+}
+
+void main() {
+    ivec2 idx = ivec2(gl_FragCoord.xy);
+    vec2 uv = (vec2(idx) + 0.5) / AERIAL_VIEW_LUT_SIZE.xy;
+    vec3 ray_dir = uv_to_ray_direction(uv);
+    vec3 world_pos = get_view_position();
+
+    float prev_t = 0.0;
+    vec3 total_inscattering = vec3(0.0);
+    vec3 throughput = vec3(1.0);
+    if (firstSlice > 0) {
+        vec4 total = texelFetch(totalIn, idx, 0);
+        total_inscattering = total.rgb;
+        prev_t = total.a;
+        throughput = texelFetch(throughputIn, idx, 0).rgb;
+    }
+${steps.join('\n')}
     totalOut = vec4(total_inscattering, prev_t);
     throughputOut = vec4(throughput, 0.0);
 }
 `;
-
-// Stores one slice of the march in log space, so slices interpolate exponential values linearly.
-export const aerialStoreFragment = /* glsl */ `
-uniform sampler2D totalIn;
-${out}
-void main() {
-    vec3 total_inscattering = texelFetch(totalIn, ivec2(gl_FragCoord.xy), 0).rgb;
-    fragColor = vec4(log(max(total_inscattering, vec3(1e-6))), 0.0);
 }
-`;
 
 // ---------------------------------------------------------------- environment.wgsl
 

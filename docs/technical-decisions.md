@@ -164,7 +164,7 @@ upgrade that changes a default shows up as a deliberate scenario change:
   moon in the night view). render-engine ports the atmosphere passes term by term
   (`src/shaders/sky/`): the CPU-built medium LUTs (`Rgba32Float`, so a sky needs
   `FLOAT32_FILTERABLE`), the transmittance, multiscattering, sky-view and aerial-view LUTs every
-  frame, the fullscreen `render_sky` pass between the opaque and the blended draws (reading the
+  frame (the three.js port only when their inputs change, below), the fullscreen `render_sky` pass between the opaque and the blended draws (reading the
   MSAA depth's first sample, dual-source blending where the device has it, as Bevy chooses),
   and the sun and moon transmittance and visible-disc share in the main pass. Ambient light
   follows the sky through Bevy's own runtime filter: the sky-view LUT rendered into a 128² cube,
@@ -336,9 +336,14 @@ As built (#11):
   `OES_texture_float_linear` (Bevy: `FLOAT32_FILTERABLE`) and `EXT_color_buffer_float` for the
   float targets. Where a compute pass shares work, the port keeps its arithmetic: the
   multiscattering LUT evaluates the 64 directions of a texel in one fragment and sums them in the
-  workgroup's tree order; the aerial-view LUT marches slice by slice (32 passes), carrying the
-  running inscattering, throughput and last sample distance in `Rgba32Float` targets, and each
-  slice is stored in log space into a layer of the 3D LUT. Bevy's downsampler writes each mip of
+  workgroup's tree order; the aerial-view LUT marches its 32 slices in order, several per pass
+  (one colour attachment per slice's layer of the 3D LUT, each stored in log space, beside the
+  two that carry the running inscattering, throughput and last sample distance to the next pass
+  in `Rgba32Float` targets; six slices and 6 passes with eight draw buffers, mmorpg#1115).
+  Unlike Bevy, the port draws a LUT only when its inputs changed at all (exact comparison, so the
+  image is unchanged): the transmittance LUT once, the multiscattering LUT with the ground albedo,
+  the sky-view LUT with the camera position or a light, the aerial view also with the camera's
+  rotation or projection. Bevy's downsampler writes each mip of
   the source cube while reading the previous one, which WebGL forbids within one texture
   (feedback loop), so each level goes through a scratch array and is copied back; the first
   level keeps Bevy's point sample (D5). The radiance and irradiance filters write a level's six
