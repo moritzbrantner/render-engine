@@ -11,6 +11,7 @@ pub fn find(name: &str) -> Option<Scenario> {
         "textured_props" => return Some(scenarios::textured_props()),
         "skinned_figure" => return Some(scenarios::skinned_figure()),
         "hud_overlay" => return Some(scenarios::hud_overlay()),
+        "hud_overlay_shapes" => return Some(scenarios::hud_overlay_shapes()),
         _ => {}
     }
     let mut all = Vec::new();
