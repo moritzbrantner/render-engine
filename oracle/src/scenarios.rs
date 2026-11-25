@@ -1,9 +1,9 @@
 //! Parity scenarios. Each one is a `render_engine::scene::Scene` plus its objects; the Bevy side
 //! translates both field by field (see `bevy_side.rs`).
 
-use crate::content::{Assets, Geometry, Material, MeshInstance};
+use crate::content::{Assets, Geometry, Material, MeshInstance, OverlayImageRef};
 use render_engine::glam::{Quat, Vec2, Vec3, Vec4};
-use render_engine::material::AlphaMode;
+use render_engine::material::{AlphaMode, Sampler, TextureData};
 use render_engine::mesh::Shape;
 use render_engine::scene::{
     Ambient, Camera, Cubemap, DayCycle, EnvironmentMap, Fog, FogFalloff, LightShadows, Moon,
@@ -120,6 +120,7 @@ pub fn all() -> Vec<Scenario> {
     all.push(skinned_figure());
     all.extend(sky_day_cycle());
     all.push(hud_overlay());
+    all.push(hud_overlay_shapes());
     all
 }
 
@@ -900,10 +901,8 @@ pub fn hud_overlay() -> Scenario {
     let mut s = sun_shadows();
     let (w, h) = (s.width as f32, s.height as f32);
     let centre = Vec2::new(w, h) / 2.0;
-    let quad = |x: f32, y: f32, width: f32, height: f32, color: Vec4| OverlayQuad {
-        position: Vec2::new(x, y),
-        size: Vec2::new(width, height),
-        color,
+    let quad = |x: f32, y: f32, width: f32, height: f32, color: Vec4| {
+        OverlayQuad::new(Vec2::new(x, y), Vec2::new(width, height), color)
     };
     let white = Vec4::new(1.0, 1.0, 1.0, 0.9);
     s.scene.overlay = vec![
@@ -936,6 +935,99 @@ pub fn hud_overlay() -> Scenario {
     Scenario {
         name: "hud_overlay",
         capability: "screen-space overlay quads (HUD)",
+        feature: Feature::Overlay,
+        ..s
+    }
+}
+
+/// A 32 × 16 atlas for `hud_overlay_shapes`, white with the shape in its alpha as a text or
+/// icon atlas holds it: a disc in the left 16 × 16 cell (its edge anti-aliased) and a plus in the
+/// right one. Bilinear and clamped.
+fn overlay_atlas() -> TextureData {
+    let (w, h) = (32u32, 16u32);
+    let mut pixels = Vec::with_capacity((w * h * 4) as usize);
+    for y in 0..h {
+        for x in 0..w {
+            let (cx, cy) = ((x % 16) as f32 + 0.5 - 8.0, y as f32 + 0.5 - 8.0);
+            let alpha = if x < 16 {
+                (6.5 - (cx * cx + cy * cy).sqrt()).clamp(0.0, 1.0)
+            } else if cx.abs() < 2.0 && cy.abs() < 6.0 || cy.abs() < 2.0 && cx.abs() < 6.0 {
+                1.0
+            } else {
+                0.0
+            };
+            pixels.extend([255, 255, 255, (alpha * 255.0).round() as u8]);
+        }
+    }
+    TextureData {
+        width: w,
+        height: h,
+        format: render_engine::wgpu::TextureFormat::Rgba8Unorm,
+        levels: vec![pixels],
+        sampler: Sampler {
+            address_mode_u: render_engine::wgpu::AddressMode::ClampToEdge,
+            address_mode_v: render_engine::wgpu::AddressMode::ClampToEdge,
+            mag_filter: render_engine::wgpu::FilterMode::Linear,
+            min_filter: render_engine::wgpu::FilterMode::Linear,
+            mipmap_filter: render_engine::wgpu::MipmapFilterMode::Nearest,
+        },
+    }
+}
+
+/// `hud_overlay_shapes` (#163): `sun_shadows` with a HUD of rounded nodes and image nodes (Bevy
+/// UI `Node`s with a `BorderRadius`, `ImageNode`s with a `rect` and a tint): a translucent
+/// rounded panel across the boxes and the sky, a pill-shaped bar with its fill, a rounded opaque
+/// chip, a rounded corner wider than half the node (clamped), the atlas's disc drawn texel for
+/// texel and its plus stretched four times, both tinted, the whole atlas on a rounded node. Bevy
+/// anti-aliases the rounded edges as render-engine does.
+pub fn hud_overlay_shapes() -> Scenario {
+    let mut s = sun_shadows();
+    let (w, h) = (s.width as f32, s.height as f32);
+    let at = |x: f32, y: f32, width: f32, height: f32, color: Vec4| {
+        OverlayQuad::new(Vec2::new(x, y), Vec2::new(width, height), color)
+    };
+    let orange = Vec4::new(1.0, 0.25, 0.01, 1.0);
+    s.scene.overlay = vec![
+        at(
+            w - 420.0,
+            60.0,
+            380.0,
+            220.0,
+            Vec4::new(0.01, 0.02, 0.05, 0.6),
+        )
+        .rounded(18.0),
+        at(40.0, h - 64.0, 320.0, 14.0, Vec4::new(0.0, 0.0, 0.0, 0.5)).rounded(7.0),
+        at(40.0, h - 64.0, 210.0, 14.0, Vec4::new(0.8, 0.8, 0.8, 1.0)).rounded(7.0),
+        at(
+            40.0,
+            h - 110.0,
+            120.0,
+            36.0,
+            Vec4::new(0.02, 0.03, 0.04, 0.9),
+        )
+        .rounded(9.0),
+        at(180.0, h - 110.0, 60.0, 36.0, orange).rounded(40.0),
+        // Images: the disc at 1:1, the plus stretched, the whole atlas on a rounded chip.
+        at(w - 400.0, 80.0, 16.0, 16.0, Vec4::ONE),
+        at(w - 370.0, 80.0, 64.0, 64.0, orange),
+        at(w - 290.0, 80.0, 128.0, 64.0, Vec4::new(0.3, 0.8, 1.0, 1.0)).rounded(12.0),
+    ];
+    s.assets.textures.push(overlay_atlas());
+    let atlas = s.assets.textures.len() - 1;
+    let image = |quad: usize, uv_min: Vec2, uv_max: Vec2| OverlayImageRef {
+        quad,
+        texture: atlas,
+        uv_min,
+        uv_max,
+    };
+    s.assets.overlay_images = vec![
+        image(5, Vec2::ZERO, Vec2::new(0.5, 1.0)),
+        image(6, Vec2::new(0.5, 0.0), Vec2::ONE),
+        image(7, Vec2::ZERO, Vec2::ONE),
+    ];
+    Scenario {
+        name: "hud_overlay_shapes",
+        capability: "overlay: rounded corners and images (HUD text, icons)",
         feature: Feature::Overlay,
         ..s
     }

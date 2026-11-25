@@ -12,17 +12,30 @@ use crate::{
     particle_pass::ParticleFrame,
     scene::{Cubemap, Tonemapping},
     sky::SkyTargets,
-    world::{MaterialId, MeshId},
+    world::{MaterialId, MeshId, TextureId},
 };
 use glam::Vec3;
 use std::{ops::Range, sync::Arc};
 
-/// One corner of an overlay quad: clip-space position and linear RGBA (straight alpha).
+/// One corner of an overlay quad: clip-space position, linear RGBA (straight alpha), the corner's
+/// offset from the quad's centre in pixels, the quad's half size and corner radius in pixels
+/// (for its signed distance), and the image coordinate.
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
 pub(super) struct OverlayVertex {
     pub(super) position: [f32; 2],
     pub(super) color: [f32; 4],
+    pub(super) local: [f32; 2],
+    /// Half width, half height, corner radius, unused.
+    pub(super) shape: [f32; 4],
+    pub(super) uv: [f32; 2],
+}
+
+/// A run of overlay vertices drawn with one image (white for none), in list order.
+#[derive(Clone, Debug)]
+pub(super) struct OverlayBatch {
+    pub(super) texture: Option<TextureId>,
+    pub(super) vertices: Range<u32>,
 }
 
 /// Stride of the per-view shadow uniforms (dynamic-offset alignment).
@@ -85,6 +98,8 @@ pub struct Viewport {
     /// The scene's overlay quads, six [`OverlayVertex`]es each, and how many vertices to draw.
     pub(super) overlay_buffer: Growable,
     pub(super) overlay_vertices: u32,
+    /// The overlay's draws, one per run of quads with the same image.
+    pub(super) overlay_batches: Vec<OverlayBatch>,
     /// Scratch for the overlay's vertices, kept between frames with its allocation.
     pub(super) overlay_data: Vec<OverlayVertex>,
     /// What the last `prepare` did (see [`PrepareWork`]).
@@ -469,6 +484,7 @@ impl Viewport {
             particles: ParticleFrame::new(device),
             overlay_buffer: Growable::new(device, "overlay", wgpu::BufferUsages::VERTEX),
             overlay_vertices: 0,
+            overlay_batches: Vec::new(),
             overlay_data: Vec::new(),
             work: PrepareWork::default(),
             gpu_culling: None,

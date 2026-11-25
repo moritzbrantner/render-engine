@@ -200,14 +200,15 @@ fn median(mut v: Vec<f64>) -> f64 {
 /// The protocol of `Smoke::time`, natively, with an offscreen target of the same format.
 fn native(name: &str, gpu: &Headless, frames: usize) -> Result<(), String> {
     let s = scenario_list::find(name).ok_or("no scenario")?;
-    let (mut world, instances, _) = content::upload(gpu.renderer(), &s.assets, &s.objects);
+    let (mut world, instances, textures) = content::upload(gpu.renderer(), &s.assets, &s.objects);
+    let scene = content::engine_scene(&s.scene, &s.assets, &textures);
     let mut viewport = Viewport::new(gpu.renderer(), s.width, s.height);
     time_native(
         name,
         gpu,
         &mut viewport,
         &mut world,
-        &s.scene,
+        &scene,
         &instances,
         frames,
     )

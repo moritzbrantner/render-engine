@@ -14,7 +14,7 @@ is how to integrate if a game chooses to, not a required migration (technical de
 | `renderer::Renderer` | one per device and output format | pipelines, samplers, tone-mapping LUTs |
 | `world::World` | one per device, for as long as the content lives | meshes, textures, materials, joint palettes, retained instances and particle emitters behind stable handles (`MeshId`, `TextureId`, `MaterialId`, `SkinId`, `InstanceId`, `EmitterId`) |
 | `renderer::Viewport` | one per output surface | the engine's targets for one size, plus per-frame buffers (instances, lights, shadow maps) that it reuses and grows |
-| `scene::Scene` | rebuilt every frame (plain values) | camera, sun, moon, sky, point and spot lights, ambient light, environment map, fog, HUD overlay quads |
+| `scene::Scene` | rebuilt every frame (plain values) | camera, sun, moon, sky, point and spot lights, ambient light, environment map, fog, HUD overlay quads (rounded, with images) |
 | `world::Instance` | retained in the `World` until edited or removed, or listed for one frame | `{ mesh, material, world_from_local, skin }`, one per drawn copy |
 
 ## What the game provides
@@ -280,16 +280,23 @@ frame.present();
   `AtmosphereEnvironmentMapLight`), so leave `ambient` at 0 and `environment` at `None`. Only
   exposure is left to the client; the oracle's `sky_day_cycle_*` views use EV100 14.5 at noon,
   13.5 with the sun at 15°, 11 at 2° and 3.5 at night (sun 10° below the horizon).
-- **HUD overlay (#101).** `Scene::overlay` lists solid `OverlayQuad { position, size, color }`
-  rectangles that `encode` draws over the tone-mapped frame, in list order (later on top),
-  with no depth test, exposure, fog or tone mapping: a crosshair stays visible against a wall
-  0.1 m away and keeps its colour at any EV100. Positions and sizes are in output pixels from
-  the top-left corner (CSS and Bevy UI `Val::Px`); `OverlayQuad::centered(center, size, color)`
-  places a crosshair bar. `color` is linear RGB with straight alpha, like every scene colour,
-  blended source-over in linear light as Bevy UI does; convert a CSS or sRGB colour with the
-  sRGB transfer function first (Bevy `Color::srgba(..).to_linear()`), so the native HUD
-  matches the browser's CSS one. The quads cost one draw in the tone-mapping pass, no extra pass. Text
-  and textured quads are not covered; draw them into the same view afterwards.
+- **HUD overlay (#101, #163).** `Scene::overlay` lists `OverlayQuad`s that `encode` draws over
+  the tone-mapped frame, in list order (later on top), with no depth test, exposure, fog or tone
+  mapping: a crosshair stays visible against a wall 0.1 m away and keeps its colour at any
+  EV100. Positions and sizes are in output pixels from the top-left corner (CSS and Bevy UI
+  `Val::Px`); `OverlayQuad::new(position, size, color)` makes a rectangle and
+  `OverlayQuad::centered(center, size, color)` places a crosshair bar. `color` is linear RGB with
+  straight alpha, like every scene colour, blended source-over in linear light as Bevy UI does;
+  convert a CSS or sRGB colour with the sRGB transfer function first (Bevy
+  `Color::srgba(..).to_linear()`), so the native HUD matches the browser's CSS one.
+  `.rounded(radius)` rounds the corners (Bevy `BorderRadius`, clamped to half the shorter side,
+  anti-aliased over a pixel as Bevy UI does). `.with_image(OverlayImage { texture, uv_min, uv_max })`
+  shows part of a `World` texture tinted by `color` (Bevy `ImageNode` with a `rect`), sampled
+  with the texture's own sampler: HUD icons, or text from a glyph atlas the client rasterizes
+  (white texels, the glyph's coverage in alpha, at the size it is drawn) and grows with
+  `World::write_texture(texture, origin, size, pixels)`, which rewrites a region of level 0 in
+  place. The quads cost one draw per run of quads sharing an image in the tone-mapping pass, no
+  extra pass.
 
   ```rust
   let centre = Vec2::new(width as f32, height as f32) / 2.0;
@@ -297,7 +304,14 @@ frame.present();
   scene.overlay = vec![
       OverlayQuad::centered(centre, Vec2::new(24.0, 2.0), white),
       OverlayQuad::centered(centre, Vec2::new(2.0, 24.0), white),
-      OverlayQuad { position: Vec2::new(40.0, height as f32 - 68.0), size: Vec2::new(220.0 * health, 24.0), color: Vec4::new(0.8, 0.04, 0.03, 1.0) },
+      // A health bar as a pill, and a glyph from the client's text atlas.
+      OverlayQuad::new(Vec2::new(40.0, height as f32 - 68.0), Vec2::new(220.0 * health, 14.0), red)
+          .rounded(7.0),
+      OverlayQuad::new(pen, glyph.size, white).with_image(OverlayImage {
+          texture: atlas,
+          uv_min: glyph.uv_min,
+          uv_max: glyph.uv_max,
+      }),
   ];
   ```
 - **Depth.** The engine's depth buffer is reverse-Z and 4× MSAA, and stays internal. Picking
@@ -993,8 +1007,6 @@ the native build pays GPU time.
 - glTF, skinned and particle content, the blocking diagnostics and the opt-in GPU paths in the
   browser build ([#129](https://github.com/moritzbrantner/render-engine/issues/129); see
   [Browser (WebGPU)](#browser-webgpu)).
-- Text and textured quads in the HUD overlay: `Scene::overlay` draws solid rectangles only. The
-  web client draws its HUD in CSS and needs no port.
 - glTF features outside the core metallic-roughness model: texture transforms, a second UV set,
   clearcoat, transmission.
 

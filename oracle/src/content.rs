@@ -7,6 +7,7 @@ use render_engine::{
     material::{AlphaMode, Sampler, StandardMaterial, TextureData},
     mesh::{MeshData, Shape},
     renderer::Renderer,
+    scene::{OverlayImage, Scene},
     wgpu,
     world::{Instance, TextureId, World},
 };
@@ -143,6 +144,8 @@ pub struct Assets {
     pub meshes: Vec<MeshData>,
     pub textures: Vec<TextureData>,
     pub skins: Vec<Skin>,
+    /// Images on the scene's overlay quads, by quad and texture index ([`engine_scene`]).
+    pub overlay_images: Vec<OverlayImageRef>,
     /// Texture index per (image file, sRGB), so props sharing a texture share the upload.
     loaded: HashMap<(String, bool), usize>,
 }
@@ -518,4 +521,36 @@ pub fn upload(
         })
         .collect();
     (world, instances, textures)
+}
+
+/// An image on one of a scenario's overlay quads (Bevy `ImageNode` with a `rect`): the quad by
+/// its index in `Scene::overlay`, the texture by its index in [`Assets::textures`], and the part
+/// shown in normalised texture coordinates.
+#[derive(Clone, Copy, Debug)]
+pub struct OverlayImageRef {
+    pub quad: usize,
+    pub texture: usize,
+    pub uv_min: Vec2,
+    pub uv_max: Vec2,
+}
+
+/// `scene` as render-engine draws it: the overlay images resolved to the uploaded `textures`
+/// ([`upload`]). Borrowed as it is when the scenario has none.
+pub fn engine_scene<'a>(
+    scene: &'a Scene,
+    assets: &Assets,
+    textures: &[TextureId],
+) -> std::borrow::Cow<'a, Scene> {
+    if assets.overlay_images.is_empty() {
+        return std::borrow::Cow::Borrowed(scene);
+    }
+    let mut scene = scene.clone();
+    for image in &assets.overlay_images {
+        scene.overlay[image.quad].image = Some(OverlayImage {
+            texture: textures[image.texture],
+            uv_min: image.uv_min,
+            uv_max: image.uv_max,
+        });
+    }
+    std::borrow::Cow::Owned(scene)
 }

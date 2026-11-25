@@ -212,6 +212,13 @@ upgrade that changes a default shows up as a deliberate scenario change:
   `Rgba8UnormSrgb` output instead (after the blit) rounds the frame to 8 bits under the
   translucent quads first and scored FLIP mean 0.0039 against 0.0000 now. The three.js side
   does not port it: the web client draws its HUD in CSS.
+- Overlay shapes and images (#163): `hud_overlay_shapes` adds rounded nodes (`Node::border_radius`
+  as `BorderRadius::px`) and image nodes (`ImageNode` with the quad's colour as its tint, a
+  `rect` in texels and `NodeImageMode::Stretch`, the image from the scenario's texture with its
+  sampler). Bevy anti-aliases UI edges by default (`saturate(0.5 - distance)` on the signed
+  distance, its `ui.wesl`), which render-engine's overlay shader does for every quad; whole-pixel
+  square edges come out hard either way, so `hud_overlay` keeps `UiAntiAlias::Off` and a scenario
+  with rounded quads leaves it on.
 
 Later scenarios lift these one at a time (temporal filtering).
 

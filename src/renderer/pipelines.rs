@@ -549,6 +549,9 @@ impl Renderer {
             multiview_mask: None,
             cache: None,
         });
+        // The particle pass's texture layout doubles as the overlay image's: the world builds one
+        // bind group per texture for both.
+        let particles = ParticlePipelines::new(device, &frame_layout, &lighting_layout);
         let overlay_shader =
             device.create_shader_module(wgpu::include_wgsl!("../shaders/overlay.wgsl"));
         let overlay_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -556,7 +559,7 @@ impl Renderer {
             layout: Some(
                 &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some("overlay"),
-                    bind_group_layouts: &[],
+                    bind_group_layouts: &[Some(&particles.texture_layout)],
                     immediate_size: 0,
                 }),
             ),
@@ -567,7 +570,9 @@ impl Renderer {
                 buffers: &[Some(wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<OverlayVertex>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x4],
+                    attributes: &wgpu::vertex_attr_array![
+                        0 => Float32x2, 1 => Float32x4, 2 => Float32x2, 3 => Float32x4, 4 => Float32x2
+                    ],
                 })],
             },
             primitive: wgpu::PrimitiveState::default(),
@@ -634,7 +639,6 @@ impl Renderer {
             },
         );
 
-        let particles = ParticlePipelines::new(device, &frame_layout, &lighting_layout);
         Self {
             device: device.clone(),
             queue: queue.clone(),

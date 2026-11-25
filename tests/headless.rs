@@ -800,22 +800,22 @@ fn overlay_quads_cover_their_pixels_after_tone_mapping() {
     let mut s = scene(false, Tonemapping::TonyMcMapface);
     s.overlay = vec![
         // Opaque red, 16 × 16 pixels from (8, 8).
-        OverlayQuad {
-            position: Vec2::new(8.0, 8.0),
-            size: Vec2::splat(16.0),
-            color: Vec4::new(1.0, 0.0, 0.0, 1.0),
-        },
+        OverlayQuad::new(
+            Vec2::new(8.0, 8.0),
+            Vec2::splat(16.0),
+            Vec4::new(1.0, 0.0, 0.0, 1.0),
+        ),
         // Half-transparent white over opaque black: linear 0.5, sRGB 188.
-        OverlayQuad {
-            position: Vec2::new(40.0, 8.0),
-            size: Vec2::splat(16.0),
-            color: Vec4::new(0.0, 0.0, 0.0, 1.0),
-        },
-        OverlayQuad {
-            position: Vec2::new(40.0, 8.0),
-            size: Vec2::splat(16.0),
-            color: Vec4::new(1.0, 1.0, 1.0, 0.5),
-        },
+        OverlayQuad::new(
+            Vec2::new(40.0, 8.0),
+            Vec2::splat(16.0),
+            Vec4::new(0.0, 0.0, 0.0, 1.0),
+        ),
+        OverlayQuad::new(
+            Vec2::new(40.0, 8.0),
+            Vec2::splat(16.0),
+            Vec4::new(1.0, 1.0, 1.0, 0.5),
+        ),
         // A crosshair bar on the centre, over the lit ground.
         OverlayQuad::centered(
             Vec2::new(w as f32, h as f32) / 2.0,
@@ -869,6 +869,107 @@ fn overlay_quads_cover_their_pixels_after_tone_mapping() {
     s.overlay.clear();
     let plain = gpu.render(&mut viewport, &world, &s, &instances).unwrap();
     assert_ne!(pixel(&plain, 16, 16), red, "an empty overlay draws nothing");
+}
+
+/// #163: overlay quads with rounded corners (cut by their signed distance, anti-aliased) and
+/// images (a part of a world texture tinted by the quad's colour, Bevy `ImageNode`), and a
+/// texture region rewritten in place as a text atlas would be.
+#[test]
+fn overlay_quads_round_their_corners_and_show_images() {
+    let gpu = Headless::new().expect("a wgpu adapter");
+    let mut world = World::new(gpu.renderer());
+    let ground = world.add_mesh(&MeshData::shape(Shape::Plane(Vec2::splat(20.0))));
+    let white = world.add_material(&StandardMaterial::default());
+    let instances = [at(ground, white, Vec3::ZERO)];
+    let (w, h) = (64, 48);
+    let mut viewport = Viewport::new(gpu.renderer(), w, h);
+    // A 2 × 1 atlas: left texel opaque white, right texel transparent; nearest, so each texel
+    // covers its half of a quad exactly.
+    let atlas = world.add_texture(&TextureData {
+        width: 2,
+        height: 1,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        levels: vec![vec![255, 255, 255, 255, 255, 255, 255, 0]],
+        sampler: Sampler {
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            ..Sampler::default()
+        },
+    });
+    let mut s = scene(false, Tonemapping::TonyMcMapface);
+    let black = Vec4::new(0.0, 0.0, 0.0, 1.0);
+    s.overlay = vec![
+        // A black backdrop for the images, then a red 20 × 20 rounded square on the ground.
+        OverlayQuad::new(Vec2::new(32.0, 0.0), Vec2::new(32.0, 48.0), black),
+        OverlayQuad::new(
+            Vec2::new(4.0, 4.0),
+            Vec2::splat(20.0),
+            Vec4::new(1.0, 0.0, 0.0, 1.0),
+        )
+        .rounded(8.0),
+        // The whole atlas, tinted green: green on its left half, the backdrop on its right.
+        OverlayQuad::new(
+            Vec2::new(36.0, 4.0),
+            Vec2::new(16.0, 8.0),
+            Vec4::new(0.0, 1.0, 0.0, 1.0),
+        )
+        .with_image(OverlayImage::whole(atlas)),
+        // Only the atlas's right texel: nothing over the backdrop.
+        OverlayQuad::new(Vec2::new(36.0, 20.0), Vec2::new(8.0, 8.0), Vec4::ONE).with_image(
+            OverlayImage {
+                texture: atlas,
+                uv_min: Vec2::new(0.5, 0.0),
+                uv_max: Vec2::new(1.0, 1.0),
+            },
+        ),
+        // A plain quad after the images: drawn with the white fallback again, on top.
+        OverlayQuad::new(
+            Vec2::new(36.0, 36.0),
+            Vec2::splat(4.0),
+            Vec4::new(0.0, 0.0, 1.0, 1.0),
+        ),
+    ];
+    let frame = gpu.render(&mut viewport, &world, &s, &instances).unwrap();
+    let red = [255, 0, 0, 255];
+    assert_eq!(pixel(&frame, 14, 14), red, "the rounded square's middle");
+    assert_eq!(pixel(&frame, 4, 14), red, "its straight left edge");
+    assert_ne!(pixel(&frame, 4, 4)[0], 255, "its top-left corner is cut");
+    let edge = pixel(&frame, 6, 6);
+    assert!(
+        edge[0] > 0 && edge[0] < 255 || pixel(&frame, 5, 5)[0] < 255,
+        "the cut corner is anti-aliased: {edge:?}"
+    );
+    let green = [0, 255, 0, 255];
+    assert_eq!(
+        pixel(&frame, 38, 6),
+        green,
+        "the atlas's white texel, tinted"
+    );
+    assert_eq!(
+        pixel(&frame, 48, 6),
+        [0, 0, 0, 255],
+        "its transparent texel"
+    );
+    assert_eq!(
+        pixel(&frame, 40, 24),
+        [0, 0, 0, 255],
+        "only the transparent texel"
+    );
+    assert_eq!(
+        pixel(&frame, 37, 37),
+        [0, 0, 255, 255],
+        "a plain quad after the images"
+    );
+
+    // A text atlas gains a glyph: the right texel turns opaque white in place.
+    world.write_texture(atlas, (1, 0), (1, 1), &[255, 255, 255, 255]);
+    let written = gpu.render(&mut viewport, &world, &s, &instances).unwrap();
+    assert_eq!(pixel(&written, 48, 6), green, "the rewritten texel, tinted");
+    assert_eq!(
+        pixel(&written, 40, 24),
+        [255, 255, 255, 255],
+        "the rewritten texel, untinted"
+    );
 }
 
 /// #116: after a few rendered frames, many small meshes and materials of different sizes upload

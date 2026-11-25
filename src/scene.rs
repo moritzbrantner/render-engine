@@ -44,13 +44,15 @@ pub struct Scene {
     pub overlay: Vec<OverlayQuad>,
 }
 
-/// A solid rectangle of the [`Scene::overlay`] (Bevy UI: an absolutely positioned `Node` with a
-/// `BackgroundColor`).
+/// A rectangle of the [`Scene::overlay`] (Bevy UI: an absolutely positioned `Node` with a
+/// `BackgroundColor`, or with an `ImageNode` when it has an [`OverlayImage`]), its corners
+/// optionally rounded (Bevy `BorderRadius`).
 ///
 /// Positions are in pixels of the viewport from its top-left corner, x right and y down, like
 /// CSS and Bevy UI's `Val::Px`. A pixel is covered when its centre lies inside the rectangle, so
-/// a whole-pixel rectangle covers exactly its pixels.
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// a whole-pixel rectangle with square corners covers exactly its pixels; rounded corners are
+/// anti-aliased over a pixel, as Bevy UI does.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct OverlayQuad {
     /// Top-left corner in pixels.
     pub position: Vec2,
@@ -60,18 +62,77 @@ pub struct OverlayQuad {
     /// written as is, without exposure or tone mapping, so an opaque quad shows exactly this
     /// colour (an sRGB target encodes it). A CSS or sRGB colour converts with the sRGB transfer
     /// function first (Bevy `Color::srgba(..).to_linear()`). Alpha blends over the frame in linear
-    /// light (source-over), as Bevy UI does.
+    /// light (source-over), as Bevy UI does. With an image it tints the image (Bevy
+    /// `ImageNode::color`): the drawn colour is this times the image's.
     pub color: Vec4,
+    /// Corner radius in pixels, the same for all four corners (Bevy `BorderRadius::all(Val::Px)`);
+    /// 0 for square corners. It is clamped to half the shorter side, as in Bevy.
+    pub corner_radius: f32,
+    /// An image stretched over the rectangle, tinted by [`Self::color`]; `None` fills it with the
+    /// colour alone.
+    pub image: Option<OverlayImage>,
+}
+
+/// A part of a [`World`](crate::world::World) texture drawn in an [`OverlayQuad`] (Bevy
+/// `ImageNode` with a `rect`): a HUD icon, or a glyph of a text atlas the consumer rasterizes
+/// and keeps up to date with [`World::write_texture`](crate::world::World::write_texture).
+///
+/// It is sampled with the texture's own sampler, at mip level 0 when the texture has no mips.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OverlayImage {
+    pub texture: crate::world::TextureId,
+    /// The part of the texture shown, in normalised texture coordinates (0 to 1, from the
+    /// top-left corner): the whole texture is `(0, 0)` to `(1, 1)`.
+    pub uv_min: Vec2,
+    pub uv_max: Vec2,
+}
+
+impl OverlayImage {
+    /// The whole of `texture`.
+    #[must_use]
+    pub fn whole(texture: crate::world::TextureId) -> Self {
+        Self {
+            texture,
+            uv_min: Vec2::ZERO,
+            uv_max: Vec2::ONE,
+        }
+    }
 }
 
 impl OverlayQuad {
-    /// A `size` rectangle centred on `center` (pixels), e.g. a crosshair bar on the viewport's
-    /// centre.
-    pub fn centered(center: Vec2, size: Vec2, color: Vec4) -> Self {
+    /// A `size` rectangle at `position` (its top-left corner, pixels) filled with `color`.
+    #[must_use]
+    pub fn new(position: Vec2, size: Vec2, color: Vec4) -> Self {
         Self {
-            position: center - size / 2.0,
+            position,
             size,
             color,
+            ..Self::default()
+        }
+    }
+
+    /// A `size` rectangle centred on `center` (pixels), e.g. a crosshair bar on the viewport's
+    /// centre.
+    #[must_use]
+    pub fn centered(center: Vec2, size: Vec2, color: Vec4) -> Self {
+        Self::new(center - size / 2.0, size, color)
+    }
+
+    /// The same rectangle with its corners rounded to `radius` pixels.
+    #[must_use]
+    pub fn rounded(self, radius: f32) -> Self {
+        Self {
+            corner_radius: radius,
+            ..self
+        }
+    }
+
+    /// The same rectangle showing `image`, tinted by its colour.
+    #[must_use]
+    pub fn with_image(self, image: OverlayImage) -> Self {
+        Self {
+            image: Some(image),
+            ..self
         }
     }
 }

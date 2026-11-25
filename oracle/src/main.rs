@@ -1235,9 +1235,11 @@ fn main() -> ExitCode {
                 continue;
             }
         };
-        let (mut world, instances, _) = content::upload(gpu.renderer(), &s.assets, &s.objects);
+        let (mut world, instances, textures) =
+            content::upload(gpu.renderer(), &s.assets, &s.objects);
         let mut viewport = Viewport::new(gpu.renderer(), s.width, s.height);
-        let ours = match gpu.render(&mut viewport, &world, &s.scene, &instances) {
+        let scene = content::engine_scene(&s.scene, &s.assets, &textures);
+        let ours = match gpu.render(&mut viewport, &world, &scene, &instances) {
             Ok(f) => f,
             Err(e) => {
                 println!(
@@ -1276,7 +1278,7 @@ fn main() -> ExitCode {
                 gpu.gpu_frame_times(
                     &mut viewport,
                     &mut world,
-                    &s.scene,
+                    &scene,
                     &instances,
                     o.frames as usize,
                     None,

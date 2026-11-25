@@ -9,8 +9,8 @@ use super::{
     projection::{Cascade, look_at, looking_to, perspective_infinite_reverse},
     textures::upload_cube,
     viewport::{
-        Draw, DrawKey, OverlayVertex, Phase, PrepareWork, SHADOW_VIEW_STRIDE, ShadowArray,
-        ShadowPass, UploadedEnvironment, Viewport,
+        Draw, DrawKey, OverlayBatch, OverlayVertex, Phase, PrepareWork, SHADOW_VIEW_STRIDE,
+        ShadowArray, ShadowPass, UploadedEnvironment, Viewport,
     },
 };
 use crate::{
@@ -785,7 +785,7 @@ fn write_shadow_views(
 }
 
 /// Turns the scene's overlay quads (pixels from the top-left corner) into two clip-space
-/// triangles each and uploads them.
+/// triangles each, in runs that share an image, and uploads them.
 fn prepare_overlay(
     viewport: &mut Viewport,
     device: &wgpu::Device,
@@ -799,21 +799,51 @@ fn prepare_overlay(
     };
     let mut data = std::mem::take(&mut viewport.overlay_data);
     data.clear();
+    viewport.overlay_batches.clear();
     for q in quads {
+        let texture = q.image.map(|image| image.texture);
+        let start = data.len() as u32;
+        match viewport.overlay_batches.last_mut() {
+            Some(batch) if batch.texture == texture => {}
+            _ => viewport.overlay_batches.push(OverlayBatch {
+                texture,
+                vertices: start..start,
+            }),
+        }
         let (min, max) = (clip(q.position), clip(q.position + q.size));
+        let half = q.size / 2.0;
         let color = q.color.to_array();
-        let v = |x: f32, y: f32| OverlayVertex {
-            position: [x, y],
+        // Bevy clamps the radius to half the shorter side.
+        let radius = q.corner_radius.clamp(0.0, half.x.min(half.y));
+        let shape = [half.x, half.y, radius, 0.0];
+        let (uv_min, uv_max) = q
+            .image
+            .map_or((Vec2::ZERO, Vec2::ZERO), |i| (i.uv_min, i.uv_max));
+        // Corner (0 or 1 on each axis, y down) to vertex.
+        let v = |cx: f32, cy: f32| OverlayVertex {
+            position: [
+                min[0] + (max[0] - min[0]) * cx,
+                min[1] + (max[1] - min[1]) * cy,
+            ],
             color,
+            local: [(cx - 0.5) * q.size.x, (cy - 0.5) * q.size.y],
+            shape,
+            uv: [
+                uv_min.x + (uv_max.x - uv_min.x) * cx,
+                uv_min.y + (uv_max.y - uv_min.y) * cy,
+            ],
         };
         data.extend([
-            v(min[0], min[1]),
-            v(min[0], max[1]),
-            v(max[0], min[1]),
-            v(max[0], min[1]),
-            v(min[0], max[1]),
-            v(max[0], max[1]),
+            v(0.0, 0.0),
+            v(0.0, 1.0),
+            v(1.0, 0.0),
+            v(1.0, 0.0),
+            v(0.0, 1.0),
+            v(1.0, 1.0),
         ]);
+        if let Some(batch) = viewport.overlay_batches.last_mut() {
+            batch.vertices.end = data.len() as u32;
+        }
     }
     viewport.overlay_vertices = data.len() as u32;
     if !data.is_empty() {
