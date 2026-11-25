@@ -182,9 +182,10 @@ pub async fn probe_webgl2(canvas: web_sys::HtmlCanvasElement) -> Result<js_sys::
     }));
     let renderer = Renderer::new(&device, &queue, COLOR_FORMAT);
     let s = scenario_list::find("sun_shadows").expect("sun_shadows");
-    let (world, instances, _) = content::upload(&renderer, &s.assets, &s.objects);
+    let (world, instances, textures) = content::upload(&renderer, &s.assets, &s.objects);
+    let scene = content::engine_scene(&s.scene, &s.assets, &textures);
     let mut viewport = Viewport::new(&renderer, s.width, s.height);
-    renderer.prepare(&mut viewport, &world, &s.scene, &instances);
+    renderer.prepare(&mut viewport, &world, &scene, &instances);
     let target = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("probe target"),
         size: wgpu::Extent3d {
@@ -304,12 +305,12 @@ impl Smoke {
         }
         let s = scenario_list::find(name).ok_or_else(|| err(format!("no scenario {name}")))?;
         let start = now();
-        let (world, instances, _) = content::upload(&self.renderer, &s.assets, &s.objects);
+        let (world, instances, textures) = content::upload(&self.renderer, &s.assets, &s.objects);
         let viewport = Viewport::new(&self.renderer, s.width, s.height);
         Ok(Loaded {
             world,
             instances,
-            scene: s.scene,
+            scene: content::engine_scene(&s.scene, &s.assets, &textures).into_owned(),
             viewport,
             width: s.width,
             height: s.height,

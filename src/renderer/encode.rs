@@ -329,7 +329,11 @@ impl Renderer {
         if viewport.overlay_vertices > 0 {
             pass.set_pipeline(&self.overlay_pipeline);
             pass.set_vertex_buffer(0, viewport.overlay_buffer.buffer.slice(..));
-            pass.draw(0..viewport.overlay_vertices, 0..1);
+            // One draw per run of quads with the same image, in list order.
+            for batch in &viewport.overlay_batches {
+                pass.set_bind_group(0, world.particle_texture(batch.texture), &[]);
+                pass.draw(batch.vertices.clone(), 0..1);
+            }
         }
         drop(pass);
 

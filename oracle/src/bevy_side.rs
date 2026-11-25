@@ -542,8 +542,9 @@ impl SceneSet<'_, '_> {
             _ => {}
         }
         let camera_id = camera.id();
-        if !scene.overlay.is_empty() {
-            // Hard-edged quads, as render-engine draws them.
+        if !scene.overlay.is_empty() && scene.overlay.iter().all(|q| q.corner_radius <= 0.0) {
+            // Square quads hard-edged (render-engine's anti-aliasing leaves whole-pixel edges
+            // hard too); rounded ones anti-aliased as render-engine does.
             camera.insert(UiAntiAlias::Off);
         }
         if let Some(env) = &scene.environment {
@@ -780,22 +781,43 @@ impl SceneSet<'_, '_> {
         }
         // The overlay as absolutely positioned UI nodes on the camera, in list order (later
         // ones on top), drawn after tone mapping into the main texture.
+        // Rounded nodes get Bevy's `BorderRadius`, images an `ImageNode` with a `rect` in texels,
+        // tinted by the quad's colour.
         for (i, q) in scene.overlay.iter().enumerate() {
-            commands.spawn((
+            let r = q.corner_radius;
+            let color = Color::linear_rgba(q.color.x, q.color.y, q.color.z, q.color.w);
+            let mut node = commands.spawn((
                 Node {
                     position_type: PositionType::Absolute,
                     left: Val::Px(q.position.x),
                     top: Val::Px(q.position.y),
                     width: Val::Px(q.size.x),
                     height: Val::Px(q.size.y),
+                    border_radius: BorderRadius::px(r, r, r, r),
                     ..default()
                 },
-                BackgroundColor(Color::linear_rgba(
-                    q.color.x, q.color.y, q.color.z, q.color.w,
-                )),
                 UiTargetCamera(camera_id),
                 GlobalZIndex(i as i32),
             ));
+            match assets.overlay_images.iter().find(|image| image.quad == i) {
+                Some(image) => {
+                    let t = &assets.textures[image.texture];
+                    let texels = Vec2::new(t.width as f32, t.height as f32);
+                    node.insert(ImageNode {
+                        color,
+                        image: image_handles[image.texture].clone(),
+                        rect: Some(Rect::from_corners(
+                            Vec2::new(image.uv_min.x, image.uv_min.y) * texels,
+                            Vec2::new(image.uv_max.x, image.uv_max.y) * texels,
+                        )),
+                        image_mode: NodeImageMode::Stretch,
+                        ..default()
+                    });
+                }
+                None => {
+                    node.insert(BackgroundColor(color));
+                }
+            }
         }
         image_handles
     }

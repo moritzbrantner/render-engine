@@ -136,6 +136,7 @@ struct GpuTexture {
     /// Unique per upload (a [`World`] tick; 0 for the white fallback), so a material can tell
     /// whether a reused [`TextureId`] still names the texture its bind group holds.
     serial: u64,
+    texture: wgpu::Texture,
     view: wgpu::TextureView,
     sampler: wgpu::Sampler,
     /// The texture and its sampler for the particle pass, built once with the texture rather
@@ -556,6 +557,71 @@ impl World {
         self.textures.remove(texture.0);
     }
 
+    /// Overwrites a `size` (width, height) region of `texture`'s level 0 at `origin` (texels from
+    /// its top-left corner) with `pixels`, tightly packed rows in the texture's format: a glyph
+    /// added to a text atlas or an icon swapped in place, with no new GPU objects. Lower mip
+    /// levels are left as they were.
+    ///
+    /// # Panics
+    ///
+    /// If `texture` was removed, the region does not fit the texture, or `pixels` is not exactly
+    /// the region's size.
+    pub fn write_texture(
+        &mut self,
+        texture: TextureId,
+        origin: (u32, u32),
+        size: (u32, u32),
+        pixels: &[u8],
+    ) {
+        let gpu = self
+            .textures
+            .get(texture.0)
+            .expect("write to a removed texture");
+        let format = gpu.texture.format();
+        let block = format
+            .block_copy_size(None)
+            .expect("a texture format with a copy size");
+        let extent = gpu.texture.size();
+        assert!(
+            origin.0 + size.0 <= extent.width && origin.1 + size.1 <= extent.height,
+            "texture region {origin:?}+{size:?} outside {}×{}",
+            extent.width,
+            extent.height
+        );
+        assert_eq!(
+            pixels.len() as u64,
+            u64::from(size.0) * u64::from(size.1) * u64::from(block),
+            "pixels for a {size:?} region of {format:?}"
+        );
+        if size.0 == 0 || size.1 == 0 {
+            return;
+        }
+        self.work.upload_bytes += pixels.len() as u64;
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &gpu.texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d {
+                    x: origin.0,
+                    y: origin.1,
+                    z: 0,
+                },
+                aspect: wgpu::TextureAspect::All,
+            },
+            pixels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(size.0 * block),
+                rows_per_image: Some(size.1),
+            },
+            wgpu::Extent3d {
+                width: size.0,
+                height: size.1,
+                depth_or_array_layers: 1,
+            },
+        );
+    }
+
     /// Adds a material; its textures must be in this world.
     pub fn add_material(&mut self, material: &StandardMaterial) -> MaterialId {
         let gpu = self.gpu_material(material);
@@ -724,13 +790,14 @@ impl World {
         &self.particles
     }
 
-    /// A particle texture's bind group (texture and sampler); white for none.
+    /// A texture's bind group (texture and sampler) for the particle pass and the overlay; white
+    /// for none.
     pub(crate) fn particle_texture(&self, id: Option<TextureId>) -> &wgpu::BindGroup {
         let t = match id {
             Some(id) => self
                 .textures
                 .get(id.0)
-                .expect("emitter uses a removed texture"),
+                .expect("an emitter or overlay image uses a removed texture"),
             None => &self.white,
         };
         &t.particle
@@ -892,6 +959,7 @@ fn upload_texture(
     });
     GpuTexture {
         serial: 0,
+        texture,
         view,
         sampler,
         particle,
