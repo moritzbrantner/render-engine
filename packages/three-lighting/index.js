@@ -1045,7 +1045,7 @@ export class Lighting {
    * clearing and drawing; all views of a kind draw the same programs (later cascades a subset of
    * the first's), so it compiles one of each.
    */
-  #renderShadows(renderer, scene, cascades, local, compile) {
+  #renderShadows(renderer, scene, casters, cascades, local, compile) {
     const cam = this.shadowCamera;
     const state = renderer.state;
     if (!compile && !this.shadowTargetsReady) {
@@ -1083,10 +1083,7 @@ export class Lighting {
     // when that cuts out by alpha or draws both faces. three culls a plain mesh per view by its
     // sphere; culling.js culls the instances of each visible InstancedMesh. An object marked
     // `userData.notShadowCaster` (Bevy's `NotShadowCaster`) draws with no material in these views.
-    const casters = [];
-    scene.traverse((o) => {
-      if (o.material) casters.push([o, o.material]);
-    });
+    // `casters` holds every object with a material, and that material (#renderPasses).
     // Only drawn casting meshes: a stand-in would draw a mesh whose parent is hidden.
     const instanced = [];
     scene.traverseVisible((o) => {
@@ -1141,7 +1138,7 @@ export class Lighting {
       } else {
         state.buffers.depth.setClear(0);
         renderer.clear(false, true, false);
-        renderer.render(scene, cam);
+        this.#renderScene(renderer, scene, cam);
       }
       // Culling gives hidden meshes back the material they had before theirs is restored.
       culling.reset();
@@ -1238,7 +1235,7 @@ export class Lighting {
       }
       state.buffers.depth.setClear(0);
       renderer.clear(true, true, false);
-      renderer.render(scene, cam);
+      this.#renderScene(renderer, scene, cam);
     };
     const views = (all) => (compile ? all.slice(0, 1) : all);
     material.uniforms.flipY.value = 1;
@@ -1260,6 +1257,21 @@ export class Lighting {
 
   #sky = null;
   #staggered;
+  // three's render count when this frame began (#renderScene).
+  #renderFrame = 0;
+
+  /**
+   * `renderer.render(scene, camera)` as one pass of this frame. three counts a frame per render
+   * call, and once per such frame re-checks every drawn geometry's buffers, the matrices of each
+   * InstancedMesh and each skeleton's bone matrices. None of them change between the passes of
+   * one frame (the world matrices are held, culling's stand-ins are per view), so every scene
+   * pass counts as the frame's first: that work runs once a frame, not once per sun cascade,
+   * light view and main draw.
+   */
+  #renderScene(renderer, scene, camera) {
+    renderer.info.render.frame = this.#renderFrame;
+    renderer.render(scene, camera);
+  }
 
   /**
    * This frame's cascades (`StaggeredCascades`), each with `redraw`; with `compile`, fresh fits
@@ -1354,6 +1366,7 @@ export class Lighting {
     // The world matrices hold for every pass of this frame: three need not update them per pass.
     const matrixWorldAutoUpdate = scene.matrixWorldAutoUpdate;
     scene.matrixWorldAutoUpdate = false;
+    this.#renderFrame = renderer.info.render.frame;
     try {
       this.#renderPasses(renderer, scene, camera, target, width, height, compile);
     } finally {
@@ -1383,26 +1396,33 @@ export class Lighting {
     const sceneMaterials = new Set();
     // Soft particles read the opaque draws' depth (particles.js).
     let readsSceneDepth = false;
-    scene.traverse((o) => {
-      const materials = Array.isArray(o.material) ? o.material : [o.material];
-      for (const m of materials) {
-        if (m) sceneMaterials.add(m);
-        if (!m?.isLitMaterial && !m?.usesLighting) continue;
-        readsSceneDepth ||= Boolean(m.readsSceneDepth && o.visible);
-        // The frame uniforms are shared objects whose values #updateUniforms sets: a material
-        // takes them once.
-        if (m.uniforms.exposure !== this.uniforms.exposure) Object.assign(m.uniforms, this.uniforms);
-        // Light counts size the shader's loops and samplers: a change recompiles, as in three.
-        if (m.userData.localLights !== definesKey) {
-          delete m.defines.LIT_SOFT_SHADOWS;
-          Object.assign(m.defines, local.defines);
-          m.userData.localLights = definesKey;
-          m.needsUpdate = true;
-        }
+    const take = (m, o) => {
+      sceneMaterials.add(m);
+      if (!m.isLitMaterial && !m.usesLighting) return;
+      readsSceneDepth ||= Boolean(m.readsSceneDepth && o.visible);
+      // The frame uniforms are shared objects whose values #updateUniforms sets: a material
+      // takes them once.
+      if (m.uniforms.exposure !== this.uniforms.exposure) Object.assign(m.uniforms, this.uniforms);
+      // Light counts size the shader's loops and samplers: a change recompiles, as in three.
+      if (m.userData.localLights !== definesKey) {
+        delete m.defines.LIT_SOFT_SHADOWS;
+        Object.assign(m.defines, local.defines);
+        m.userData.localLights = definesKey;
+        m.needsUpdate = true;
       }
+    };
+    // One walk for the frame: every object with a material, and the material it draws with
+    // outside the shadow views.
+    const casters = [];
+    scene.traverse((o) => {
+      const material = o.material;
+      if (!material) return;
+      casters.push([o, material]);
+      if (!Array.isArray(material)) take(material, o);
+      else for (const m of material) if (m) take(m, o);
     });
 
-    this.#renderShadows(renderer, scene, cascades, local, compile);
+    this.#renderShadows(renderer, scene, casters, cascades, local, compile);
 
     renderer.setRenderTarget(this.hdrTarget);
     this.uniforms.sceneDepth.value = readsSceneDepth ? this.hdrTarget.depthTexture : null;
@@ -1449,7 +1469,7 @@ export class Lighting {
       try {
         projection.premultiply(FLIP_Y);
         state.setMaterial = (material, frontFaceCW) => setMaterial(material, !frontFaceCW);
-        renderer.render(scene, camera);
+        this.#renderScene(renderer, scene, camera);
       } finally {
         state.setMaterial = setMaterial;
         projection.copy(upright);
