@@ -57,6 +57,7 @@ import { read as readKtx2 } from 'three/addons/libs/ktx-parse.module.js';
 import { ZSTDDecoder } from 'three/addons/libs/zstddec.module.js';
 import { cascadeRanges, fitCascade, StaggeredCascades } from './cascades.js';
 import { ShadowCulling } from './culling.js';
+import { FrameBlock, frameBlockBytes } from './frame-block.js';
 import { PassLists } from './pass-lists.js';
 import { ENVIRONMENT_MIPS, INNER_RADIUS, NO_SKY_REUSE, OUTER_RADIUS, SkyPasses, worldToAtmosphere } from './sky.js';
 import {
@@ -338,8 +339,11 @@ export async function loadToneMappingLuts({
   return { tonyMcMapface: tony, agx: agxLut };
 }
 
-/** Uniforms every LitMaterial shares with its Lighting (filled per frame). */
-function frameUniforms() {
+/**
+ * The frame's values, by their names in the shader: `Lighting` fills them per frame and writes
+ * them into the `LitFrame` uniform block every LitMaterial reads (frame-block.js).
+ */
+function frameValues() {
   return {
     exposure: { value: 1 },
     hasSun: { value: 0 },
@@ -349,32 +353,39 @@ function frameUniforms() {
     sunShadows: { value: 0 },
     gaussianFilter: { value: 1 },
     shadowParams: { value: new Vector4() },
-    // Array uniforms are kept flat: three uploads every uniform of a material each time a draw
-    // switches to it, and flattens an array of matrices or vectors on each of those uploads.
     cascadeClipFromWorld: { value: new Float32Array(16 * MAX_CASCADES) },
     cascadeParams: { value: new Float32Array(4 * MAX_CASCADES) },
     shadowMapSize: { value: 2048 },
-    shadowMap0: { value: null },
-    shadowMap1: { value: null },
-    shadowMap2: { value: null },
-    shadowMap3: { value: null },
     environment: { value: new Vector3() },
-    diffuseEnvironmentMap: { value: null },
-    specularEnvironmentMap: { value: null },
     fogColor: { value: new Vector4() },
     fogDirectionalLightColor: { value: new Vector4() },
     fogBe: { value: new Vector4() },
     fogBi: { value: new Vector4() },
-    localLights: { value: [] },
     // The moon: direction to it (w 1 when there is one), colour × illuminance.
     moonDirectionToLight: { value: new Vector4() },
     moonColor: { value: new Vector3() },
     // The sky's atmosphere: x planet radius, y atmosphere radius, z 1 with a sky, w 1 when the
     // moon is shaded before the sun (Bevy's directional-light order); the sun and moon disc
-    // sizes; its transmittance LUT.
+    // sizes.
     worldToAtmosphere: { value: worldToAtmosphere() },
     atmosphere: { value: new Vector4(INNER_RADIUS, OUTER_RADIUS, 0, 0) },
     disks: { value: new Vector2() },
+  };
+}
+
+/**
+ * The frame's textures: the plain uniforms every LitMaterial shares with its Lighting (a sampler
+ * cannot be a member of the uniform block the frame's values are in).
+ */
+function frameUniforms() {
+  return {
+    shadowMap0: { value: null },
+    shadowMap1: { value: null },
+    shadowMap2: { value: null },
+    shadowMap3: { value: null },
+    diffuseEnvironmentMap: { value: null },
+    specularEnvironmentMap: { value: null },
+    // The sky's transmittance LUT.
     atmosphereTransmittance: { value: null },
     // The opaque draws' resolved depth, for soft particles (set when one is in the scene).
     sceneDepth: { value: null },
@@ -874,6 +885,7 @@ export class Lighting {
     this.#staggered = new StaggeredCascades();
 
     this.uniforms = frameUniforms();
+    this.#values = frameValues();
     this.shadowMapSize = shadowMapSize;
     this.pointShadowMapSize = pointShadowMapSize;
     this.spotShadowTargets = [];
@@ -969,16 +981,11 @@ export class Lighting {
   }
 
   #updateUniforms(camera, cascades, local) {
-    const u = this.uniforms;
-    // Flat, like the cascades' (an empty list stays one: there is no such uniform then).
+    // The frame's textures (plain uniforms) and values (the uniform block), by name.
+    const u = { ...this.uniforms, ...this.#values };
     const lights = local.data;
-    if (lights.length === 0) {
-      u.localLights.value = lights;
-    } else {
-      if (this.#localLights.length !== lights.length * 4) this.#localLights = new Float32Array(lights.length * 4);
-      for (let i = 0; i < lights.length; i++) lights[i].toArray(this.#localLights, i * 4);
-      u.localLights.value = this.#localLights;
-    }
+    if (this.#localLights.length !== lights.length * 4) this.#localLights = new Float32Array(lights.length * 4);
+    for (let i = 0; i < lights.length; i++) lights[i].toArray(this.#localLights, i * 4);
     for (let i = 0; i < MAX_POINT_SHADOWS; i++) {
       const t = this.pointShadowTargets[i];
       u[`pointShadowMap${i}`].value = t?.depthTexture ?? null;
@@ -1065,7 +1072,13 @@ export class Lighting {
     } else {
       u.fogBi.value.set(0, 0, 0, 0);
     }
+    this.#block.write(this.#values, this.#localLights);
   }
+
+  // The frame's values and the uniform block they are written into (frame-block.js).
+  #values;
+  #block = new FrameBlock();
+  #maxBlockBytes = null;
 
   /**
    * The sun's cascades, then the spot and point-light views. With `compile` (Lighting.prepare)
@@ -1479,6 +1492,13 @@ export class Lighting {
     if (this.sky && compile) this.skyPasses.compile(renderer, compile);
     else if (this.sky) this.#renderSky(renderer, camera, width / height);
     this.#updateUniforms(camera, cascades, local);
+    const frameGroup = this.#block.group;
+    // A program's block holds every local light: the context bounds its size.
+    const blockBytes = frameBlockBytes(local.data.length * 4);
+    this.#maxBlockBytes ??= renderer.getContext().getParameter(renderer.getContext().MAX_UNIFORM_BLOCK_SIZE);
+    if (blockBytes > this.#maxBlockBytes) {
+      throw new Error(`${local.data.length / 5} local lights need a uniform block of ${blockBytes} bytes; this context allows ${this.#maxBlockBytes}`);
+    }
     const definesKey = JSON.stringify(local.defines);
     const sceneMaterials = new Set();
     // Soft particles read the opaque draws' depth (particles.js).
@@ -1489,7 +1509,9 @@ export class Lighting {
       readsSceneDepth ||= Boolean(m.readsSceneDepth && o.visible);
       // The frame uniforms are shared objects whose values #updateUniforms sets: a material
       // takes them once.
-      if (m.uniforms.exposure !== this.uniforms.exposure) Object.assign(m.uniforms, this.uniforms);
+      if (m.uniforms.shadowMap0 !== this.uniforms.shadowMap0) Object.assign(m.uniforms, this.uniforms);
+      // And the frame's values, as the uniform block (a new group when the lights outgrew it).
+      if (m.uniformsGroups[0] !== frameGroup) m.uniformsGroups = [frameGroup];
       // Light counts size the shader's loops and samplers: a change recompiles, as in three.
       if (m.userData.localLights !== definesKey) {
         delete m.defines.LIT_SOFT_SHADOWS;
@@ -1606,5 +1628,6 @@ export class Lighting {
     this.tonemapQuad.material.dispose();
     this.outputQuad.material.dispose();
     this.#sky?.dispose();
+    this.#block.dispose();
   }
 }
