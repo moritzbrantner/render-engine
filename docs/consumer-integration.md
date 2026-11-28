@@ -902,6 +902,20 @@ scene (sprites, overlays) is drawn into the HDR pass as three draws it, tone map
 paints its own backdrop behind a transparent canvas (`new WebGLRenderer({ alpha: true })`) sets
 `lighting.clearAlpha = 0`: the output is premultiplied where nothing is drawn.
 
+A frame is many `renderer.render(scene, camera)` calls (one per sun cascade, spot map, cube face
+and main draw), and three walks the whole scene graph in each. `Lighting.render` walks it once
+(#168) and gives each pass, as the scene's children for that call, only the nodes that draw in
+it: those with a material visible there (a shadow view draws only casters, the main pass's opaque
+and blended draws each their own) whose bounding sphere meets the pass's frustum, by the sphere
+three itself tests (`frustumCulled`, `boundingSphere`). three still tests, sorts and draws what
+it is given, so every pass draws what it drew before, and the scene it is called with is the
+consumer's. While the passes run, `scene.children` is the current pass's list and a listed node
+has no children (they are listed themselves); both are back when `render` returns, so code that
+runs inside a pass (`onBeforeRender`) should not walk the graph. An `LOD` and a `Group` with a
+`renderOrder` stay whole and are walked by three per pass. `lighting.frameWork` holds the last
+frame's counts: the `nodes` the walk visited, and per pass the `objects` it handed three and the
+`instances` it tested against the view.
+
 ### Skinned meshes (web)
 
 `LitMaterial` skins three's `SkinnedMesh` on the GPU with the engine's linear blend skinning (four

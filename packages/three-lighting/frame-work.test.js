@@ -3,6 +3,10 @@
 // headless Chromium (SwiftShader). The frame draws four sun cascades, a spot and a point light's
 // six faces and the main pass twice (opaque, then blended under the sky), so per pass it would
 // run a dozen times.
+//
+// Nor does three walk the scene graph once per pass (#168): the frame walks it once
+// (`Lighting.frameWork.nodes`) and each pass hands three only the nodes that draw in it, so the
+// nodes three visits in a frame follow what the passes draw, not the graph times the passes.
 import { afterAll, expect, test } from 'bun:test';
 import { resolve } from 'node:path';
 import { chromium } from 'playwright';
@@ -57,6 +61,23 @@ const page = String.raw`<!doctype html>
     const glass = new THREE.Mesh(new THREE.SphereGeometry(0.5), new LitMaterial({ alpha: 0.5, alphaMode: 'blend' }));
     glass.position.set(-2, 1, 0);
     scene.add(glass);
+    // What a pass does not draw: a rig of 200 empty nodes, and a block far outside every view.
+    const rig = new THREE.Object3D();
+    scene.add(rig);
+    for (let i = 0, parent = rig; i < 200; i++) {
+      const node = new THREE.Object3D();
+      (i % 10 === 0 ? rig : parent).add(node);
+      parent = node;
+    }
+    const away = new THREE.Mesh(new THREE.BoxGeometry(), new LitMaterial());
+    away.position.set(500, 1, 0);
+    scene.add(away);
+    // 128 posts along x, most of them outside any one shadow view.
+    const posts = new THREE.InstancedMesh(new THREE.BoxGeometry(0.2, 1, 0.2), new LitMaterial(), 128);
+    for (let i = 0; i < posts.count; i++) posts.setMatrixAt(i, new THREE.Matrix4().makeTranslation((i - 64) * 3, 0.5, -3));
+    scene.add(posts);
+    let nodes = 0;
+    scene.traverse(() => nodes++);
 
     const l = new Lighting(luts, { shadowMapSize: 256, pointShadowMapSize: 64 });
     l.sun = { direction: [0.4, -1, 0.3], color: [1, 1, 1], illuminance: RAW_SUNLIGHT, shadows: DEFAULT_SUN_SHADOWS };
@@ -73,14 +94,31 @@ const page = String.raw`<!doctype html>
     };
     const render = renderer.render.bind(renderer);
     let renders = 0;
+    let inScene = false;
     renderer.render = (s, c) => {
       if (s === scene) renders++;
+      inScene = s === scene;
       render(s, c);
+      inScene = false;
     };
+    // three tests a node's layers each time a render call's walk reaches it, and again when it
+    // draws it; counted for the scene's passes (the sky's and the output's each draw one quad).
+    const layersTest = THREE.Layers.prototype.test;
+    let visited = 0;
+    THREE.Layers.prototype.test = function (layers) {
+      if (inScene) visited++;
+      return layersTest.call(this, layers);
+    };
+    const tree = () => {
+      const out = [];
+      scene.traverse((o) => out.push(o.id, o.parent?.id ?? 0, o.children.length));
+      return out.join();
+    };
+    const before = tree();
     const frame = () => {
-      [updates, renders] = [0, 0];
+      [updates, renders, visited] = [0, 0, 0];
       l.render(renderer, scene, camera);
-      return { updates, renders };
+      return { updates, renders, visited, work: l.frameWork };
     };
     const first = frame();
     chest.rotation.z = 0.5;
@@ -89,7 +127,7 @@ const page = String.raw`<!doctype html>
     // Outside Lighting, three's own count goes on.
     const plain = renderer.info.render.frame;
     render(scene, camera);
-    return { first, bent, bones, counted: renderer.info.render.frame - plain, error: renderer.getContext().getError() };
+    return { nodes, first, bent, bones, restored: tree() === before, counted: renderer.info.render.frame - plain, error: renderer.getContext().getError() };
   };
   window.ready = true;
 </script>`;
@@ -129,7 +167,7 @@ test.skipIf(!browser)('a frame of many passes updates each skeleton once', async
   await tab.goto(`http://127.0.0.1:${server.port}/`);
   await tab.waitForFunction(() => window.ready || null, null, { timeout: 60_000 });
   const r = await tab.evaluate(() => window.run());
-  console.log(JSON.stringify({ first: r.first, bent: r.bent }));
+  console.log(JSON.stringify({ nodes: r.nodes, first: r.first, bent: r.bent }));
   expect(errors).toEqual([]);
   expect(r.error).toBe(0);
   // Sun cascades, the spot view, six point faces and the main pass's two draws.
@@ -139,4 +177,32 @@ test.skipIf(!browser)('a frame of many passes updates each skeleton once', async
   expect(r.bent.updates).toBe(1);
   expect(r.bones.slice(16).some((v, i) => Math.abs(v - [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1][i]) > 1e-3)).toBe(true);
   expect(r.counted).toBe(1);
+
+  // The frame walks the graph once; three visits, per pass, the scene and what the pass draws.
+  const passes = r.bent.work.passes;
+  expect(r.nodes).toBeGreaterThan(200);
+  expect(r.bent.work.nodes).toBe(r.nodes);
+  expect(passes.map((p) => p.pass)).toEqual([
+    'cascade 0', 'cascade 1', 'cascade 2', 'cascade 3', 'spot 0',
+    ...[0, 1, 2, 3, 4, 5].map((face) => `point 0 face ${face}`),
+    'main opaque', 'main blended',
+  ]);
+  const listed = passes.reduce((sum, p) => sum + p.objects + 1, 0);
+  expect(r.bent.visited).toBeGreaterThanOrEqual(listed);
+  // three tests a listed node's layers again when it draws it; a shadow view's stand-in for the
+  // posts is the one node it reaches below a listed one.
+  expect(r.bent.visited).toBeLessThanOrEqual(2 * (listed + passes.length));
+  expect(r.bent.visited).toBeLessThan(r.nodes);
+  const objects = Object.fromEntries(passes.map((p) => [p.pass, p.objects]));
+  // The ground, the figure and the posts; then the glass alone. The far block is in neither.
+  expect(objects['main opaque']).toBe(3);
+  expect(objects['main blended']).toBe(1);
+  for (const p of passes.slice(0, 11)) expect(p.objects).toBeLessThanOrEqual(5);
+  // Posts straddle the views: tested one by one in the first frame, and not again while neither
+  // they nor the view change.
+  const tested = (frame) => frame.work.passes.reduce((sum, p) => sum + p.instances, 0);
+  expect(tested(r.first)).toBeGreaterThanOrEqual(128);
+  expect(tested(r.bent)).toBe(0);
+  // The scene graph is the consumer's again after a frame.
+  expect(r.restored).toBe(true);
 }, 180_000);

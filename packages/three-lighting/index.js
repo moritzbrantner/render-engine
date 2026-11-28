@@ -57,6 +57,7 @@ import { read as readKtx2 } from 'three/addons/libs/ktx-parse.module.js';
 import { ZSTDDecoder } from 'three/addons/libs/zstddec.module.js';
 import { cascadeRanges, fitCascade, StaggeredCascades } from './cascades.js';
 import { ShadowCulling } from './culling.js';
+import { PassLists } from './pass-lists.js';
 import { ENVIRONMENT_MIPS, INNER_RADIUS, OUTER_RADIUS, SkyPasses, worldToAtmosphere } from './sky.js';
 import {
   fullscreenVertex,
@@ -851,6 +852,13 @@ export class Lighting {
      * (0, the default, keeps every caster). Batched meshes always cast.
      */
     this.minCasterTexels = 0;
+    /**
+     * The scene work of the last `render`: `nodes` the frame's one walk of the scene visited, and
+     * per scene pass in drawing order (`cascade 0`, `spot 0`, `point 0 face 0`, `main opaque`,
+     * `main blended`, or `main` without a sky) how many `objects` it handed three.js to draw and
+     * how many `instances` of InstancedMeshes it tested against its frustum.
+     */
+    this.frameWork = { nodes: 0, passes: [] };
     this.#staggered = new StaggeredCascades();
 
     this.uniforms = frameUniforms();
@@ -1043,9 +1051,10 @@ export class Lighting {
    * The sun's cascades, then the spot and point-light views. With `compile` (Lighting.prepare)
    * the casters take the same materials, and `compile(scene, camera)` takes the place of
    * clearing and drawing; all views of a kind draw the same programs (later cascades a subset of
-   * the first's), so it compiles one of each.
+   * the first's), so it compiles one of each. `instanced` holds the visible InstancedMeshes that
+   * cast (`PassLists`).
    */
-  #renderShadows(renderer, scene, casters, cascades, local, compile) {
+  #renderShadows(renderer, scene, casters, instanced, cascades, local, compile) {
     const cam = this.shadowCamera;
     const state = renderer.state;
     if (!compile && !this.shadowTargetsReady) {
@@ -1084,13 +1093,10 @@ export class Lighting {
     // sphere; culling.js culls the instances of each visible InstancedMesh. An object marked
     // `userData.notShadowCaster` (Bevy's `NotShadowCaster`) draws with no material in these views.
     // `casters` holds every object with a material, and that material (#renderPasses).
-    // Only drawn casting meshes: a stand-in would draw a mesh whose parent is hidden.
-    const instanced = [];
-    scene.traverseVisible((o) => {
-      if (o.isInstancedMesh && o.count > 0 && !notShadowCaster(o)) instanced.push(o);
-    });
+    // A view then draws only what has a visible material there (#renderScene); compiling walks
+    // the scene itself, so the stand-ins join it.
     const culling = this.shadowCulling;
-    culling.begin(scene, instanced);
+    culling.begin(instanced, compile ? scene : null);
     const assign = (local) => {
       const pick = (m) => this.#shadowMaterial(m, local, native, localNative);
       for (const [o, m] of casters) {
@@ -1138,7 +1144,7 @@ export class Lighting {
       } else {
         state.buffers.depth.setClear(0);
         renderer.clear(false, true, false);
-        this.#renderScene(renderer, scene, cam);
+        this.#renderScene(renderer, scene, cam, `cascade ${i}`, true);
       }
       // Culling gives hidden meshes back the material they had before theirs is restored.
       culling.reset();
@@ -1216,7 +1222,7 @@ export class Lighting {
     renderer.setClearColor(new Color(0, 0, 0), 0);
     state.buffers.color.setMask(true);
     let index = MAX_CASCADES;
-    const pass = (view, target, face) => {
+    const pass = (name, view, target, face) => {
       // Culling camera: the light's frustum out to its range (Bevy also culls casters beyond it).
       cam.fov = (view.fovY * 180) / Math.PI;
       cam.aspect = 1;
@@ -1235,18 +1241,20 @@ export class Lighting {
       }
       state.buffers.depth.setClear(0);
       renderer.clear(true, true, false);
-      this.#renderScene(renderer, scene, cam);
+      this.#renderScene(renderer, scene, cam, name, true);
     };
     const views = (all) => (compile ? all.slice(0, 1) : all);
     material.uniforms.flipY.value = 1;
     material.side = FrontSide;
     assign();
-    views(local.spotViews).forEach((view, i) => pass(view, this.spotShadowTargets[i]));
+    views(local.spotViews).forEach((view, i) => pass(`spot ${i}`, view, this.spotShadowTargets[i]));
     // Cube faces render upside down (see localShadowVertex), which flips the winding.
     material.uniforms.flipY.value = -1;
     material.side = BackSide;
     assign();
-    views(local.pointViews).forEach((view, i) => pass(view, this.pointShadowTargets[Math.floor(i / 6)], i % 6));
+    views(local.pointViews).forEach((view, i) =>
+      pass(`point ${Math.floor(i / 6)} face ${i % 6}`, view, this.pointShadowTargets[Math.floor(i / 6)], i % 6),
+    );
   }
 
   /** The sky's LUTs and environment cubes, created with the first sky. */
@@ -1259,16 +1267,27 @@ export class Lighting {
   #staggered;
   // three's render count when this frame began (#renderScene).
   #renderFrame = 0;
+  // The frame's one walk of the scene, and each pass's nodes from it.
+  #lists = new PassLists();
 
   /**
-   * `renderer.render(scene, camera)` as one pass of this frame. three counts a frame per render
-   * call, and once per such frame re-checks every drawn geometry's buffers, the matrices of each
-   * InstancedMesh and each skeleton's bone matrices. None of them change between the passes of
-   * one frame (the world matrices are held, culling's stand-ins are per view), so every scene
-   * pass counts as the frame's first: that work runs once a frame, not once per sun cascade,
-   * light view and main draw.
+   * `renderer.render(scene, camera)` as pass `pass` of this frame, a `shadow` view or a main draw.
+   *
+   * three walks every node of the scene it is given, per render call. The frame walked the scene
+   * once (#renderPasses), so the pass gives the scene only the nodes that draw in it as its
+   * children: those with a material visible now, inside the camera's frustum (`PassLists`), and a
+   * shadow view's stand-ins.
+   *
+   * three also counts a frame per render call, and once per such frame re-checks every drawn
+   * geometry's buffers, the matrices of each InstancedMesh and each skeleton's bone matrices.
+   * None of them change between the passes of one frame (the world matrices are held, culling's
+   * stand-ins are per view), so every scene pass counts as the frame's first: that work runs
+   * once a frame, not once per sun cascade, light view and main draw.
    */
-  #renderScene(renderer, scene, camera) {
+  #renderScene(renderer, scene, camera, pass, shadow) {
+    const culling = this.shadowCulling;
+    scene.children = this.#lists.list(camera, shadow, shadow ? culling.standIns : null);
+    this.frameWork.passes.push({ pass, objects: scene.children.length, instances: shadow ? culling.tests : 0 });
     renderer.info.render.frame = this.#renderFrame;
     renderer.render(scene, camera);
   }
@@ -1412,24 +1431,33 @@ export class Lighting {
       }
     };
     // One walk for the frame: every object with a material, and the material it draws with
-    // outside the shadow views.
-    const casters = [];
-    scene.traverse((o) => {
-      const material = o.material;
-      if (!material) return;
-      casters.push([o, material]);
-      if (!Array.isArray(material)) take(material, o);
-      else for (const m of material) if (m) take(m, o);
-    });
+    // outside the shadow views (`casters`); and what the passes draw of the scene.
+    const lists = this.#lists;
+    lists.walk(
+      scene,
+      (o, material) => {
+        if (!Array.isArray(material)) take(material, o);
+        else for (const m of material) if (m) take(m, o);
+      },
+      notShadowCaster,
+    );
+    const casters = lists.materials;
+    this.frameWork = { nodes: lists.nodes, passes: [] };
 
-    this.#renderShadows(renderer, scene, casters, cascades, local, compile);
+    // Compiling walks the scene as it is (three compiles hidden objects' materials too).
+    if (!compile) lists.enter(scene);
+    try {
+      this.#renderShadows(renderer, scene, casters, lists.instanced, cascades, local, compile);
 
-    renderer.setRenderTarget(this.hdrTarget);
-    this.uniforms.sceneDepth.value = readsSceneDepth ? this.hdrTarget.depthTexture : null;
-    // One compile covers the opaque and the blended draws: the split only toggles visibility.
-    // The sky's composite compiled with its other passes.
-    if (compile) compile(scene, camera);
-    else this.#renderMain(renderer, scene, camera, sceneMaterials, readsSceneDepth);
+      renderer.setRenderTarget(this.hdrTarget);
+      this.uniforms.sceneDepth.value = readsSceneDepth ? this.hdrTarget.depthTexture : null;
+      // One compile covers the opaque and the blended draws: the split only toggles visibility.
+      // The sky's composite compiled with its other passes.
+      if (compile) compile(scene, camera);
+      else this.#renderMain(renderer, scene, camera, sceneMaterials, readsSceneDepth);
+    } finally {
+      lists.leave(scene);
+    }
 
     const tm = this.tonemapQuad.material.uniforms;
     tm.hdrTexture.value = this.hdrTarget.texture;
@@ -1465,11 +1493,11 @@ export class Lighting {
     const upright = projection.clone();
     const state = renderer.state;
     const setMaterial = state.setMaterial;
-    const drawScene = () => {
+    const drawScene = (pass) => {
       try {
         projection.premultiply(FLIP_Y);
         state.setMaterial = (material, frontFaceCW) => setMaterial(material, !frontFaceCW);
-        this.#renderScene(renderer, scene, camera);
+        this.#renderScene(renderer, scene, camera, pass, false);
       } finally {
         state.setMaterial = setMaterial;
         projection.copy(upright);
@@ -1482,17 +1510,17 @@ export class Lighting {
       const visible = new Map([...sceneMaterials].map((m) => [m, m.visible]));
       try {
         for (const [m, v] of visible) m.visible = v && !m.transparent;
-        drawScene();
+        drawScene('main opaque');
         if (this.sky) {
           this.skyPasses.composite(renderer, this.hdrTarget, this.hdrTarget.depthTexture, camera.projectionMatrixInverse);
         }
         for (const [m, v] of visible) m.visible = v && m.transparent;
-        drawScene();
+        drawScene('main blended');
       } finally {
         for (const [m, v] of visible) m.visible = v;
       }
     } else {
-      drawScene();
+      drawScene('main');
     }
     renderer.setOpaqueSort(null);
     renderer.setTransparentSort(null);
