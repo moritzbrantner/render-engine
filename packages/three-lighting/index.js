@@ -58,7 +58,7 @@ import { ZSTDDecoder } from 'three/addons/libs/zstddec.module.js';
 import { cascadeRanges, fitCascade, StaggeredCascades } from './cascades.js';
 import { ShadowCulling } from './culling.js';
 import { PassLists } from './pass-lists.js';
-import { ENVIRONMENT_MIPS, INNER_RADIUS, OUTER_RADIUS, SkyPasses, worldToAtmosphere } from './sky.js';
+import { ENVIRONMENT_MIPS, INNER_RADIUS, NO_SKY_REUSE, OUTER_RADIUS, SkyPasses, worldToAtmosphere } from './sky.js';
 import {
   fullscreenVertex,
   litFragment,
@@ -85,6 +85,7 @@ export {
   StaggeredCascades,
   STAGGER_MARGIN,
 } from './cascades.js';
+export { NO_SKY_REUSE } from './sky.js';
 export * from './backend.js';
 export * from './particles.js';
 
@@ -841,22 +842,31 @@ export class Lighting {
      */
     this.sky = null;
     /**
+     * `{ lightTurn, cameraMove, cameraTurn }` (radians, metres, radians): how far the sun or moon
+     * may turn and the camera move before the sky-view LUT is drawn again, and the camera also
+     * turn before the aerial-view LUT is. The default (`NO_SKY_REUSE`, all 0) draws each whenever
+     * an input changed at all, so under a moving sun or camera every frame; with tolerances a kept
+     * LUT lags by at most that much (the sun's and moon's discs and their light on the scene never
+     * do).
+     */
+    this.skyReuse = NO_SKY_REUSE;
+    /**
      * Per sun cascade, nearest first, every how many frames it is redrawn (default 1, every
      * frame). A cascade with an interval above 1 keeps its map and matrices in between, is fitted
      * with a margin, and is redrawn early when the view leaves it (`StaggeredCascades`).
      */
     this.cascadeUpdateIntervals = [];
     /**
-     * Projected-size caster culling: in each sun cascade, a mesh or `InstancedMesh` instance whose
-     * bounding sphere's radius is below this many of the cascade's texels casts nothing there
-     * (0, the default, keeps every caster). Batched meshes always cast.
+     * Projected-size caster culling: in each sun cascade, a mesh or an `InstancedMesh` or
+     * `BatchedMesh` instance whose bounding sphere's radius is below this many of the cascade's
+     * texels casts nothing there (0, the default, keeps every caster).
      */
     this.minCasterTexels = 0;
     /**
      * The scene work of the last `render`: `nodes` the frame's one walk of the scene visited, and
      * per scene pass in drawing order (`cascade 0`, `spot 0`, `point 0 face 0`, `main opaque`,
      * `main blended`, or `main` without a sky) how many `objects` it handed three.js to draw and
-     * how many `instances` of InstancedMeshes it tested against its frustum.
+     * how many `instances` of InstancedMeshes and BatchedMeshes it tested against its frustum.
      */
     this.frameWork = { nodes: 0, passes: [] };
     this.#staggered = new StaggeredCascades();
@@ -1096,7 +1106,7 @@ export class Lighting {
     // A view then draws only what has a visible material there (#renderScene); compiling walks
     // the scene itself, so the stand-ins join it.
     const culling = this.shadowCulling;
-    culling.begin(instanced, compile ? scene : null);
+    culling.begin(instanced, compile ? scene : null, this.#lists.batched);
     const assign = (local) => {
       const pick = (m) => this.#shadowMaterial(m, local, native, localNative);
       for (const [o, m] of casters) {
@@ -1340,6 +1350,7 @@ export class Lighting {
       clipFromView: perspectiveInfiniteReverse((camera.fov * Math.PI) / 180, aspect, camera.near),
       exposure: exposureFromEv100(this.ev100),
       environment: (this.sky.environmentIntensity ?? null) !== null,
+      reuse: this.skyReuse,
     });
   }
 

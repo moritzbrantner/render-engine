@@ -103,6 +103,32 @@ test('each LUT is drawn only when its inputs change, the aerial view in six pass
   expect(renderer.gl.framebuffers).toBe(0);
 });
 
+test('with reuse tolerances the sky and aerial views are kept while the sun and camera drift within them', () => {
+  const sky = new SkyPasses();
+  const renderer = countingRenderer();
+  const degree = Math.PI / 180;
+  const reuse = { lightTurn: 0.1 * degree, cameraMove: 1, cameraTurn: 0.5 * degree };
+  const at = (elevation, altitude = 2, yaw = 0) => ({ ...frame(sunAt(elevation), altitude, yaw), reuse });
+  expect(lutPasses(sky, renderer, at(0.5))).toBe(9);
+  // The sun creeps and the camera drifts and turns a little: nothing is drawn.
+  expect(lutPasses(sky, renderer, at(0.5 + 0.04 * degree, 2.4, 0.2 * degree))).toBe(0);
+  expect(lutPasses(sky, renderer, at(0.5 + 0.08 * degree, 2.8, 0.4 * degree))).toBe(0);
+  // Past the camera's turn since the aerial view was drawn: the aerial view alone.
+  expect(lutPasses(sky, renderer, at(0.5 + 0.08 * degree, 2.8, 0.6 * degree))).toBe(6);
+  // Past the sun's turn since the sky view was drawn; the aerial view, drawn later, stands.
+  expect(lutPasses(sky, renderer, at(0.5 + 0.12 * degree, 2.8, 0.6 * degree))).toBe(1);
+  // Past the camera's move since either was drawn.
+  expect(lutPasses(sky, renderer, at(0.5 + 0.12 * degree, 4.2, 0.6 * degree))).toBe(7);
+  // A light's colour is never within a tolerance.
+  const dimmer = at(0.5 + 0.12 * degree, 4.2, 0.6 * degree);
+  dimmer.lights = dimmer.lights.map((l) => ({ ...l, color: l.color.map((c) => c * 0.99) }));
+  expect(lutPasses(sky, renderer, dimmer)).toBe(7);
+  // Without tolerances the smallest drift draws both.
+  lutPasses(sky, renderer, frame(sunAt(0.6), 4.2));
+  expect(lutPasses(sky, renderer, frame(sunAt(0.6 + 0.001 * degree), 4.2))).toBe(7);
+  sky.dispose();
+});
+
 test('the aerial march stores every slice once, as many a pass as the draw buffers allow', () => {
   for (const [drawBuffers, passes] of [
     [8, 6],
