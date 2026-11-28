@@ -349,8 +349,10 @@ function frameUniforms() {
     sunShadows: { value: 0 },
     gaussianFilter: { value: 1 },
     shadowParams: { value: new Vector4() },
-    cascadeClipFromWorld: { value: Array.from({ length: MAX_CASCADES }, () => new Matrix4()) },
-    cascadeParams: { value: Array.from({ length: MAX_CASCADES }, () => new Vector4()) },
+    // Array uniforms are kept flat: three uploads every uniform of a material each time a draw
+    // switches to it, and flattens an array of matrices or vectors on each of those uploads.
+    cascadeClipFromWorld: { value: new Float32Array(16 * MAX_CASCADES) },
+    cascadeParams: { value: new Float32Array(4 * MAX_CASCADES) },
     shadowMapSize: { value: 2048 },
     shadowMap0: { value: null },
     shadowMap1: { value: null },
@@ -968,7 +970,15 @@ export class Lighting {
 
   #updateUniforms(camera, cascades, local) {
     const u = this.uniforms;
-    u.localLights.value = local.data;
+    // Flat, like the cascades' (an empty list stays one: there is no such uniform then).
+    const lights = local.data;
+    if (lights.length === 0) {
+      u.localLights.value = lights;
+    } else {
+      if (this.#localLights.length !== lights.length * 4) this.#localLights = new Float32Array(lights.length * 4);
+      for (let i = 0; i < lights.length; i++) lights[i].toArray(this.#localLights, i * 4);
+      u.localLights.value = this.#localLights;
+    }
     for (let i = 0; i < MAX_POINT_SHADOWS; i++) {
       const t = this.pointShadowTargets[i];
       u[`pointShadowMap${i}`].value = t?.depthTexture ?? null;
@@ -996,8 +1006,8 @@ export class Lighting {
       u.shadowParams.value.set(s.depthBias, s.normalBias * Math.SQRT2, s.overlapProportion, cascades.length);
     }
     cascades.forEach((c, i) => {
-      u.cascadeClipFromWorld.value[i].fromArray(c.clipFromWorld);
-      u.cascadeParams.value[i].set(c.far, c.texelSize, 0, 0);
+      u.cascadeClipFromWorld.value.set(c.clipFromWorld, i * 16);
+      u.cascadeParams.value.set([c.far, c.texelSize, 0, 0], i * 4);
     });
     for (let i = 0; i < MAX_CASCADES; i++) {
       u[`shadowMap${i}`].value = this.shadowTargets[i].depthTexture;
@@ -1111,7 +1121,7 @@ export class Lighting {
       const pick = (m) => this.#shadowMaterial(m, local, native, localNative);
       for (const [o, m] of casters) {
         if (notShadowCaster(o)) o.material = Array.isArray(m) ? m.map(() => this.noShadow) : this.noShadow;
-        else o.material = Array.isArray(m) ? m.map(pick) : pick(m);
+        else o.material = Array.isArray(m) ? m.map((x) => this.#kindMaterial(pick(x), o)) : this.#kindMaterial(pick(m), o);
       }
     };
     assign(false);
@@ -1219,6 +1229,48 @@ export class Lighting {
   }
 
   /**
+   * The copy of shadow material `material` that draws objects of `object`'s kind. three keeps one
+   * program per material and looks it up again whenever the next object drawn with it differs in
+   * kind (skinned, instanced, batched, with instance or batch colours or morphs), so a material
+   * shared by all casters would look its program up at nearly every draw of a shadow view (#179).
+   * A copy shares the material's uniforms and follows its defines and side.
+   */
+  #kindMaterial(material, object) {
+    if (material === this.noShadow) return material;
+    const kind =
+      (object.isSkinnedMesh ? 1 : 0) |
+      (object.isInstancedMesh ? 2 | (object.instanceColor ? 4 : 0) | (object.morphTexture ? 8 : 0) : 0) |
+      (object.isBatchedMesh ? 16 | (object._colorsTexture ? 32 : 0) : 0);
+    if (kind === 0) return material;
+    let kinds = this.#kinds.get(material);
+    if (!kinds) {
+      kinds = [];
+      this.#kinds.set(material, kinds);
+      material.addEventListener('dispose', () => {
+        for (const k of kinds) k?.dispose();
+        this.#kinds.delete(material);
+      });
+    }
+    let m = kinds[kind];
+    if (!m) {
+      m = material.clone();
+      m.uniforms = material.uniforms;
+      m.userData = { of: -1 };
+      kinds[kind] = m;
+    }
+    if (m.userData.of !== material.version) {
+      m.defines = { ...material.defines };
+      m.needsUpdate = true;
+      m.userData.of = material.version;
+    }
+    m.side = material.side;
+    return m;
+  }
+
+  // Per shadow material, its copies by object kind (#kindMaterial).
+  #kinds = new Map();
+
+  /**
    * Spot maps, then point-light cube faces (render-engine's pass order). `assign` gives the
    * casters their local shadow materials, whose faces follow the shared material's side. With
    * `compile`, one spot view and one cube face (see #renderShadows).
@@ -1274,6 +1326,8 @@ export class Lighting {
   }
 
   #sky = null;
+  // The local lights' uniform data, flat.
+  #localLights = new Float32Array(0);
   #staggered;
   // three's render count when this frame began (#renderScene).
   #renderFrame = 0;
@@ -1298,6 +1352,9 @@ export class Lighting {
     const culling = this.shadowCulling;
     scene.children = this.#lists.list(camera, shadow, shadow ? culling.standIns : null);
     this.frameWork.passes.push({ pass, objects: scene.children.length, instances: shadow ? culling.tests : 0 });
+    // Nothing to draw: a shadow view's map is cleared already, and the blended half of the main
+    // pass adds nothing to the opaque half's frame (a scene background is three's to draw).
+    if (this.#lists.empty && (shadow || (pass === 'main blended' && !scene.background))) return;
     renderer.info.render.frame = this.#renderFrame;
     renderer.render(scene, camera);
   }
