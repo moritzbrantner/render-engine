@@ -34,7 +34,7 @@ function draws(material) {
 }
 
 export class PassLists {
-  /** How many nodes the last `walk` visited. */
+  /** How many nodes the last `walk` visited (a hidden node counts, what is below it does not). */
   nodes = 0;
   /** Every node with a material and that material, in walk order. */
   materials = [];
@@ -60,14 +60,18 @@ export class PassLists {
   #clip = new Matrix4();
   #planes = new Float64Array(24);
   #notCaster = () => false;
+  #all = false;
   #material = () => {};
 
   /**
-   * Walks `scene` once: every node counts, `material(node, its material)` runs for each that has
-   * one (hidden ones too), and the visible ones that draw are kept for `list`. `notCaster(node)`
-   * says which InstancedMeshes and BatchedMeshes cast nothing.
+   * Walks `scene` once: `material(node, its material)` runs for each visited node that has one,
+   * and the visible ones that draw are kept for `list`. A hidden node's subtree draws nothing and
+   * is not visited (#177), except below an `LOD`, which shows and hides its levels per camera;
+   * with `all` every node is (`Lighting.prepare` compiles hidden objects' materials too).
+   * `notCaster(node)` says which InstancedMeshes and BatchedMeshes cast nothing.
    */
-  walk(scene, material, notCaster) {
+  walk(scene, material, notCaster, all = false) {
+    this.#all = all;
     this.nodes = 0;
     this.materials.length = 0;
     this.instanced.length = 0;
@@ -88,14 +92,17 @@ export class PassLists {
   #visit(node, visible, tree, root) {
     this.nodes++;
     visible &&= node.visible !== false;
+    if (!visible && !tree && !this.#all) return;
     const material = node.material;
     if (material) {
       this.materials.push([node, material]);
       this.#material(node, material);
+      if (visible && node.isInstancedMesh && node.count > 0 && !this.#notCaster(node)) this.instanced.push(node);
+      if (visible && node.isBatchedMesh && !this.#notCaster(node)) this.batched.push(node);
     }
-    if (visible && node.isInstancedMesh && node.count > 0 && !this.#notCaster(node)) this.instanced.push(node);
-    if (visible && node.isBatchedMesh && !this.#notCaster(node)) this.batched.push(node);
-    if (visible && !tree && !root) {
+    // Most nodes are plain ones (transforms, bones): three's own `type` settles them at once.
+    const plain = !material && (node.type === 'Object3D' || node.type === 'Bone');
+    if (visible && !tree && !root && !plain) {
       // A render order on a Group reaches its subtree where the Group's layers meet the camera's.
       const kind =
         node.isLOD || (node.isGroup && node.renderOrder !== 0)

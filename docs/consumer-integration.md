@@ -918,7 +918,7 @@ consumer's. While the passes run, `scene.children` is the current pass's list an
 has no children (they are listed themselves); both are back when `render` returns, so code that
 runs inside a pass (`onBeforeRender`) should not walk the graph. An `LOD` and a `Group` with a
 `renderOrder` stay whole and are walked by three per pass. `lighting.frameWork` holds the last
-frame's counts: the `nodes` the walk visited, and per pass the `objects` it handed three and the
+frame's counts: the `nodes` the walk visited (it does not go below a hidden node, #177), and per pass the `objects` it handed three and the
 `instances` it tested against the view.
 
 ### Skinned meshes (web)
