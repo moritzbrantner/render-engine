@@ -129,10 +129,14 @@ const page = String.raw`<!doctype html>
     chest.rotation.z = 0.5;
     const bent = frame();
     const bones = Array.from(skeleton.boneMatrices);
+    // Without the glass nothing blended is left: the blended half of the main pass is not rendered.
+    glass.visible = false;
+    const unblended = frame();
+    glass.visible = true;
     // Outside Lighting, three's own count goes on.
     const plain = renderer.info.render.frame;
     render(scene, camera);
-    return { nodes, first, bent, bones, restored: tree() === before, counted: renderer.info.render.frame - plain, error: renderer.getContext().getError() };
+    return { nodes, first, bent, unblended, bones, restored: tree() === before, counted: renderer.info.render.frame - plain, error: renderer.getContext().getError() };
   };
   window.ready = true;
 </script>`;
@@ -211,4 +215,7 @@ test.skipIf(!browser)('a frame of many passes updates each skeleton once', async
   expect(tested(r.bent)).toBe(0);
   // The scene graph is the consumer's again after a frame.
   expect(r.restored).toBe(true);
+  // A pass with nothing to draw is listed, not rendered (#179).
+  expect(r.unblended.work.passes.at(-1)).toEqual({ pass: 'main blended', objects: 0, instances: 0 });
+  expect(r.unblended.renders).toBe(r.bent.renders - 1);
 }, 180_000);
