@@ -89,11 +89,25 @@ export class ShadowCulling {
   #hidden;
   #standIns;
 
-  /** Starts this frame's shadow passes over `scene` with its visible InstancedMeshes that draw any instance. */
-  begin(scene, instanced) {
+  /**
+   * How many instance bounding spheres the last `view` tested against its frustum: none where a
+   * mesh's sphere around all its instances settled it, or its last result for that view holds.
+   */
+  tests = 0;
+
+  /** The group of the stand-ins the current view draws, for a caller that lists what it draws. */
+  get standIns() {
+    return this.#standIns;
+  }
+
+  /**
+   * Starts this frame's shadow passes with the visible InstancedMeshes that draw any instance.
+   * With `scene` the stand-ins join it until `end`; otherwise the caller draws `standIns`.
+   */
+  begin(instanced, scene = null) {
     this.#instanced = instanced;
     this.#states = instanced.map((mesh) => this.#spheres(mesh));
-    scene.add(this.#standIns);
+    scene?.add(this.#standIns);
   }
 
   /** Ends the shadow passes: every mesh as it was, the stand-ins out of the scene. */
@@ -213,6 +227,7 @@ export class ShadowCulling {
     const indices = this.#indices;
     let visible = 0;
     for (let i = 0; i < n; i++) if (meets(p, s.spheres, i, min)) indices[visible++] = i;
+    this.tests += n;
     if (visible === n || visible === 0) {
       v.result = visible === n;
       return v.result;
@@ -257,6 +272,7 @@ export class ShadowCulling {
    */
   view(index, camera, min = 0) {
     this.reset();
+    this.tests = 0;
     this.#clip.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     this.#frustum.setFromProjectionMatrix(this.#clip, camera.coordinateSystem, camera.reversedDepth);
     const p = this.#planes;
@@ -298,7 +314,9 @@ export class ShadowCulling {
       if (inside && !outside) continue;
       if (!outside && s.count < PER_INSTANCE_MIN) {
         let any = false;
-        for (let j = 0; j < s.count && !any; j++) any = meets(p, s.spheres, j, min);
+        let j = 0;
+        for (; j < s.count && !any; j++) any = meets(p, s.spheres, j, min);
+        this.tests += j;
         if (any) continue;
         outside = true;
       }

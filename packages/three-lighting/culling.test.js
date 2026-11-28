@@ -31,7 +31,7 @@ test('instances below the radius are left out, all of them drops the mesh, none 
   const mesh = field();
   scene.add(mesh);
   const culling = new ShadowCulling(new ShaderMaterial({ visible: false }));
-  culling.begin(scene, [mesh]);
+  culling.begin([mesh], scene);
 
   culling.view(0, camera(), 0);
   expect(mesh.visible).toBe(true);
@@ -66,7 +66,7 @@ test('a mesh wholly outside the view is dropped, whichever plane it is outside o
     mesh.position.set(...at);
     mesh.updateMatrixWorld();
     scene.add(mesh);
-    culling.begin(scene, [mesh]);
+    culling.begin([mesh], scene);
     culling.view(0, cam, 0);
     expect(mesh.visible).toBe(false);
     culling.end();

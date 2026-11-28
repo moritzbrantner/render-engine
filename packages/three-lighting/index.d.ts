@@ -412,6 +412,13 @@ export class Lighting {
    * the cascade's texels casts nothing there (default 0: every caster).
    */
   minCasterTexels: number;
+  /**
+   * The scene work of the last `render`: `nodes` the frame's one walk of the scene visited, and
+   * per scene pass in drawing order (`cascade 0`, `spot 0`, `point 0 face 0`, `main opaque`,
+   * `main blended`, or `main` without a sky) how many `objects` it handed three.js to draw and how
+   * many `instances` of InstancedMeshes it tested against its frustum.
+   */
+  frameWork: { nodes: number; passes: { pass: string; objects: number; instances: number }[] };
   sun: Sun | null;
   /** Shaded with the sun (unshadowed lights first, Bevy's order); its disc shows under a sky. */
   moon: Moon | null;
