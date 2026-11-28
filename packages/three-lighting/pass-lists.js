@@ -40,6 +40,8 @@ export class PassLists {
   materials = [];
   /** The visible InstancedMeshes that draw an instance and cast (`ShadowCulling`). */
   instanced = [];
+  /** Whether the last `list` holds nothing that draws (three.js lights at most). */
+  empty = false;
   /** The visible BatchedMeshes that cast (`ShadowCulling`). */
   batched = [];
 
@@ -172,6 +174,7 @@ export class PassLists {
    * shadow proxy, whose sphere may differ.
    */
   list(camera, shadow, extra = null) {
+    this.empty = false;
     if (this.#whole) {
       if (!extra) return this.#children;
       return [...this.#children, extra];
@@ -187,6 +190,7 @@ export class PassLists {
     });
     const list = this.#list;
     list.length = 0;
+    let drawn = 0;
     const s = this.#spheres;
     const objects = this.#objects;
     const kinds = this.#kinds;
@@ -212,12 +216,18 @@ export class PassLists {
             continue;
           }
         }
-      } else if (kind === LIGHT && shadow) {
+      } else if (kind === LIGHT) {
+        if (!shadow) list.push(o);
         continue;
       }
       list.push(o);
+      drawn++;
     }
-    if (extra && extra.children.length > 0) list.push(extra);
+    if (extra && extra.children.length > 0) {
+      list.push(extra);
+      drawn++;
+    }
+    this.empty = drawn === 0;
     return list;
   }
 }
