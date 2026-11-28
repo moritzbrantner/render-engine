@@ -1451,6 +1451,8 @@ export class Lighting {
         else for (const m of material) if (m) take(m, o);
       },
       notShadowCaster,
+      // Compiling walks the scene as it is: three compiles hidden objects' materials too.
+      Boolean(compile),
     );
     const casters = lists.materials;
     this.frameWork = { nodes: lists.nodes, passes: [] };

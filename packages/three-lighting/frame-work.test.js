@@ -69,6 +69,11 @@ const page = String.raw`<!doctype html>
       (i % 10 === 0 ? rig : parent).add(node);
       parent = node;
     }
+    // A hidden herd: nothing below a hidden node is visited (#177).
+    const herd = new THREE.Object3D();
+    herd.visible = false;
+    for (let i = 0; i < 50; i++) herd.add(new THREE.Mesh(new THREE.BoxGeometry(), new LitMaterial()));
+    scene.add(herd);
     const away = new THREE.Mesh(new THREE.BoxGeometry(), new LitMaterial());
     away.position.set(500, 1, 0);
     scene.add(away);
@@ -181,7 +186,8 @@ test.skipIf(!browser)('a frame of many passes updates each skeleton once', async
   // The frame walks the graph once; three visits, per pass, the scene and what the pass draws.
   const passes = r.bent.work.passes;
   expect(r.nodes).toBeGreaterThan(200);
-  expect(r.bent.work.nodes).toBe(r.nodes);
+  // All but the hidden herd's 50 meshes.
+  expect(r.bent.work.nodes).toBe(r.nodes - 50);
   expect(passes.map((p) => p.pass)).toEqual([
     'cascade 0', 'cascade 1', 'cascade 2', 'cascade 3', 'spot 0',
     ...[0, 1, 2, 3, 4, 5].map((face) => `point 0 face ${face}`),
