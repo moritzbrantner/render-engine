@@ -133,6 +133,12 @@ const page = String.raw`<!doctype html>
     glass.visible = false;
     const unblended = frame();
     glass.visible = true;
+    // More local lights than the frame's uniform block had room for: it is replaced (#181).
+    const few = l.pointLights;
+    l.pointLights = Array.from({ length: 24 }, (_, i) => ({ position: [i - 12, 2, 1], color: [1, 1, 1], intensity: 500, range: 8, radius: 0, shadows: null }));
+    frame();
+    l.pointLights = few;
+    frame();
     // Outside Lighting, three's own count goes on.
     const plain = renderer.info.render.frame;
     render(scene, camera);

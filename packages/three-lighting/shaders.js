@@ -143,45 +143,6 @@ uniform sampler2D occlusionTexture;
 uniform sampler2D normalMapTexture;
 #endif
 
-// Frame (shared by every LitMaterial, owned by Lighting).
-uniform float exposure;
-uniform float hasSun;
-uniform vec3 directionToLight;
-uniform vec3 sunColor;
-uniform vec3 ambientColor;
-uniform float sunShadows;
-uniform float gaussianFilter;
-// x: depth bias (m), y: normal bias (texels, ×√2), z: overlap proportion, w: cascade count.
-uniform vec4 shadowParams;
-uniform mat4 cascadeClipFromWorld[MAX_CASCADES];
-// x: far bound (m), y: texel size (m).
-uniform vec4 cascadeParams[MAX_CASCADES];
-uniform float shadowMapSize;
-uniform sampler2DShadow shadowMap0;
-uniform sampler2DShadow shadowMap1;
-uniform sampler2DShadow shadowMap2;
-uniform sampler2DShadow shadowMap3;
-// x: intensity (cd/m²), y: largest specular mip level, z: 1 when there is an environment map.
-uniform vec3 environment;
-uniform samplerCube diffuseEnvironmentMap;
-uniform samplerCube specularEnvironmentMap;
-// Bevy DistanceFog: colour, sun inscattering colour (a = strength), be.xyz + directional-light
-// exponent, bi.xyz + mode (0 off, 1 linear, 2 exponential, 3 exponential squared, 4 atmospheric).
-uniform vec4 fogColor;
-uniform vec4 fogDirectionalLightColor;
-uniform vec4 fogBe;
-uniform vec4 fogBi;
-// The moon: xyz direction to it, w 1 when there is one; colour × illuminance (lux).
-uniform vec4 moonDirectionToLight;
-uniform vec3 moonColor;
-// The sky's atmosphere (Bevy Atmosphere): world to atmosphere space; x planet radius,
-// y atmosphere radius (m), z 1 with a sky, w 1 when the moon is shaded before the sun (Bevy's
-// directional-light order); the sun and moon disc sizes (radians); the transmittance LUT.
-uniform mat4 worldToAtmosphere;
-uniform vec4 atmosphere;
-uniform vec2 disks;
-uniform sampler2D atmosphereTransmittance;
-
 // Point lights then spot lights, shadow casters first (Bevy's clustered order), LIGHT_STRIDE
 // vec4s each, laid out like render-engine's GpuLight: custom data (point: the cube projection's
 // lower-right 2×2 terms; spot: direction x and z, spot scale, spot offset), colour × lm/sr and
@@ -190,9 +151,57 @@ uniform sampler2D atmosphereTransmittance;
 // (three.js rewrites NUM_POINT_LIGHTS and friends in every shader, hence the LIT_ names.)
 #define LIGHT_STRIDE 5
 #define LIT_LOCAL_LIGHTS (LIT_POINT_LIGHTS + LIT_SPOT_LIGHTS)
+
+// Frame (shared by every LitMaterial, owned by Lighting): its values in one std140 uniform block,
+// written once a frame (three sets a material's plain uniforms again at every material switch,
+// #181), its textures as plain uniforms. frame-block.js lays the block out: keep the members,
+// their order and their types in step with it. Each vec3 shares 16 bytes with the float after it.
+layout(std140) uniform LitFrame {
+    mat4 cascadeClipFromWorld[MAX_CASCADES];
+    // The sky's atmosphere (Bevy Atmosphere): world to atmosphere space.
+    mat4 worldToAtmosphere;
+    // x: far bound (m), y: texel size (m).
+    vec4 cascadeParams[MAX_CASCADES];
+    // x: depth bias (m), y: normal bias (texels, ×√2), z: overlap proportion, w: cascade count.
+    vec4 shadowParams;
+    // Bevy DistanceFog: colour, sun inscattering colour (a = strength), be.xyz + directional-light
+    // exponent, bi.xyz + mode (0 off, 1 linear, 2 exponential, 3 exponential squared, 4 atmospheric).
+    vec4 fogColor;
+    vec4 fogDirectionalLightColor;
+    vec4 fogBe;
+    vec4 fogBi;
+    // The moon: xyz direction to it, w 1 when there is one.
+    vec4 moonDirectionToLight;
+    // x planet radius, y atmosphere radius (m), z 1 with a sky, w 1 when the moon is shaded before
+    // the sun (Bevy's directional-light order).
+    vec4 atmosphere;
+    vec3 directionToLight;
+    float exposure;
+    vec3 sunColor;
+    float hasSun;
+    vec3 ambientColor;
+    float sunShadows;
+    // x: intensity (cd/m²), y: largest specular mip level, z: 1 when there is an environment map.
+    vec3 environment;
+    float gaussianFilter;
+    // The moon's colour × illuminance (lux).
+    vec3 moonColor;
+    float shadowMapSize;
+    // The sun and moon disc sizes (radians).
+    vec2 disks;
 #if LIT_LOCAL_LIGHTS > 0
-uniform vec4 localLights[LIT_LOCAL_LIGHTS * LIGHT_STRIDE];
+    vec4 localLights[LIT_LOCAL_LIGHTS * LIGHT_STRIDE];
 #endif
+};
+uniform sampler2DShadow shadowMap0;
+uniform sampler2DShadow shadowMap1;
+uniform sampler2DShadow shadowMap2;
+uniform sampler2DShadow shadowMap3;
+uniform samplerCube diffuseEnvironmentMap;
+uniform samplerCube specularEnvironmentMap;
+// The sky's transmittance LUT.
+uniform sampler2D atmosphereTransmittance;
+
 #if LIT_POINT_SHADOWS > 0
 uniform samplerCubeShadow pointShadowMap0;
 #endif
