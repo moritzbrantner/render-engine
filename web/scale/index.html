@@ -1,0 +1,62 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>render-engine: frame cost at Greyhaven's scale</title>
+<pre id="out">running…</pre>
+<script type="module">
+  // The page of scripts/web-scale.sh (#172): times the Greyhaven-sized scene and counts the GPU
+  // API calls a frame makes. ?frames=300&width=1280&height=720
+  import init, { run } from './pkg/scale_bench.js';
+
+  // Every call into the browser's WebGPU objects, counted on their prototypes.
+  const calls = { total: 0, byName: {} };
+  let counting = false;
+  const wrapped = [];
+  for (const name of Object.getOwnPropertyNames(globalThis).filter((n) => n.startsWith('GPU'))) {
+    const proto = globalThis[name]?.prototype;
+    if (!proto) continue;
+    for (const key of Object.getOwnPropertyNames(proto)) {
+      const d = Object.getOwnPropertyDescriptor(proto, key);
+      if (typeof d.value !== 'function' || key === 'constructor') continue;
+      const f = d.value;
+      wrapped.push([proto, key, f]);
+      proto[key] = function (...args) {
+        if (counting) {
+          calls.total++;
+          calls.byName[key] = (calls.byName[key] ?? 0) + 1;
+        }
+        return f.apply(this, args);
+      };
+    }
+  }
+
+  const q = new URLSearchParams(location.search);
+  const [frames, width, height] = [Number(q.get('frames') ?? 300), Number(q.get('width') ?? 1280), Number(q.get('height') ?? 720)];
+  const out = document.getElementById('out');
+  try {
+    await init();
+    // Counting costs each call time: a counted run first, then the timed, uncounted one. Every
+    // frame of a run is submitted by itself, so the calls per frame are the calls per `submit`
+    // (the run's one-time resource creation is spread over its few hundred frames).
+    counting = true;
+    await run(width, height, 64);
+    counting = false;
+    for (const [proto, key, f] of wrapped) proto[key] = f;
+    const submits = calls.byName.submit;
+    const perFrame = Object.fromEntries(
+      Object.entries(calls.byName)
+        .map(([name, n]) => [name, Math.round((n / submits) * 10) / 10])
+        .filter(([, n]) => n >= 1)
+        .sort((a, b) => b[1] - a[1]),
+    );
+    const result = JSON.parse(await run(width, height, frames));
+    result.crossOriginIsolated = globalThis.crossOriginIsolated;
+    result.userAgent = navigator.userAgent;
+    result.gpuCallsPerFrame = Math.round(calls.total / submits);
+    result.gpuCallsPerFrameByName = perFrame;
+    globalThis.result = result;
+    out.textContent = JSON.stringify(result, null, 2);
+  } catch (error) {
+    globalThis.result = { error: String(error) };
+    out.textContent = String(error);
+  }
+</script>

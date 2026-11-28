@@ -26,6 +26,10 @@ pub struct FrameTimes {
     pub prepare_ms: f64,
     pub encode_ms: f64,
     pub submit_ms: f64,
+    /// Wall time per frame over the timed batches, each batch's wait for the GPU included: what
+    /// frames submitted back to back cost the whole pipeline (main thread, the browser's GPU
+    /// process and the GPU).
+    pub wall_ms: f64,
 }
 
 fn median(mut v: Vec<f64>) -> f64 {
@@ -129,6 +133,7 @@ pub async fn frame_times(
 
     let (mut gpu_ms, mut prepare, mut encode, mut submit) =
         (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let timed = now();
     while (prepare.len() as u32) < frames {
         let n = batch.min(frames - prepare.len() as u32);
         for f in 0..n {
@@ -180,5 +185,6 @@ pub async fn frame_times(
         prepare_ms: median(prepare),
         encode_ms: median(encode),
         submit_ms: median(submit),
+        wall_ms: (now() - timed) / f64::from(frames.max(1)),
     })
 }
