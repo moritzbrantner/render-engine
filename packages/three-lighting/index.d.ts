@@ -149,6 +149,20 @@ export interface Sky {
   environmentIntensity: number | null;
 }
 
+/**
+ * How far the inputs of the sky's LUTs may drift before they are drawn again
+ * (`Lighting.skyReuse`): the sun's or moon's turn (radians) and the camera's move (metres) for the
+ * sky-view LUT, and also the camera's turn (radians) for the aerial-view LUT. 0 redraws on any
+ * change.
+ */
+export interface SkyReuse {
+  lightTurn: number;
+  cameraMove: number;
+  cameraTurn: number;
+}
+/** No reuse beyond unchanged inputs: every tolerance 0. */
+export const NO_SKY_REUSE: Readonly<SkyReuse>;
+
 /** render-engine `Sky::default()`. */
 export const DEFAULT_SKY: Readonly<Sky>;
 
@@ -408,15 +422,15 @@ export class Lighting {
    */
   cascadeUpdateIntervals: number[];
   /**
-   * Per sun cascade, a mesh or `InstancedMesh` instance whose bounding radius is below this many of
-   * the cascade's texels casts nothing there (default 0: every caster).
+   * Per sun cascade, a mesh or an `InstancedMesh` or `BatchedMesh` instance whose bounding radius
+   * is below this many of the cascade's texels casts nothing there (default 0: every caster).
    */
   minCasterTexels: number;
   /**
    * The scene work of the last `render`: `nodes` the frame's one walk of the scene visited, and
    * per scene pass in drawing order (`cascade 0`, `spot 0`, `point 0 face 0`, `main opaque`,
    * `main blended`, or `main` without a sky) how many `objects` it handed three.js to draw and how
-   * many `instances` of InstancedMeshes it tested against its frustum.
+   * many `instances` of InstancedMeshes and BatchedMeshes it tested against its frustum.
    */
   frameWork: { nodes: number; passes: { pass: string; objects: number; instances: number }[] };
   sun: Sun | null;
@@ -429,6 +443,12 @@ export class Lighting {
    * `OES_texture_float_linear`.
    */
   sky: Sky | null;
+  /**
+   * Keeps the sky-view and aerial-view LUTs while the lights and the camera drift less than these
+   * tolerances (default `NO_SKY_REUSE`: both are drawn again on any change, about 7 fullscreen
+   * passes a frame under a moving sun or camera).
+   */
+  skyReuse: SkyReuse;
   /** Shaded before the spot lights and the sun (Bevy's order), shadow casters first. */
   pointLights: PointLight[];
   spotLights: SpotLight[];

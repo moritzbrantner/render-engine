@@ -868,8 +868,13 @@ view), so fewer, larger `InstancedMesh`es pay off.
 Different static meshes that share a `LitMaterial` (and an attribute layout) can go into one
 three `BatchedMesh`: each instance takes its matrix and its `setColorAt` colour (linear, times the
 base colour) like an `InstancedMesh` instance, and the whole batch is one multi-draw call per
-view. three culls its instances by their bounding spheres in every view itself (shadow views
-included, through `onBeforeRender` with the view's camera), so `culling.js` leaves it alone.
+view. In the main pass three culls (and sorts) its instances itself, when the batch asks for it
+(`perObjectFrustumCulled`, `sortObjects`). Each shadow view culls them like an `InstancedMesh`'s
+(#169), whatever those are set to: a batch straddling the view draws only the instances whose
+bounding sphere meets it, through a draw list and indirect texture kept per batch and view and
+uploaded only when the instances inside change, so a cascade draws its own part of a large batch
+and a batch drawn whole in the main pass (no per-view list rebuild) still does not cast whole.
+The spheres are recomputed when an instance's matrix, visibility or geometry changes.
 Only `LitMaterial` objects cast shadows. An object that should not (a part hidden inside another
 caster, a health bar) sets `object.userData.notShadowCaster = true`, Bevy's `NotShadowCaster`: it
 is left out of every sun cascade and spot or point view, per object and not inherited by its
@@ -887,8 +892,8 @@ Three more knobs cut the cost of the sun's cascades (#149); each is off by defau
   positions, `skinIndex`/`skinWeight` on a skinned mesh, and UVs where the material cuts out by
   alpha. An index-only simplification (the same vertices, fewer triangles) or a coarser LOD fits.
 - **Projected-size culling.** `lighting.minCasterTexels = n`: in each cascade, a mesh, or an
-  `InstancedMesh` instance, whose bounding sphere's radius is below `n` of that cascade's texels
-  casts nothing there. Batched meshes always cast.
+  `InstancedMesh` or `BatchedMesh` instance, whose bounding sphere's radius is below `n` of that
+  cascade's texels casts nothing there.
 - **Staggered cascades.** `lighting.cascadeUpdateIntervals = [1, 2, 2]`: cascade `i` with an
   interval `k > 1` is redrawn on the frames where `(frame + i) % k === 0` (so cascades of one
   interval take turns) and in between keeps its map and the matrices it was drawn with, so its
@@ -960,6 +965,20 @@ meshes, the sky over them, and the blended meshes. It needs `EXT_color_buffer_fl
 `OES_texture_float_linear`, which desktop and most mobile browsers have. Use the camera's real
 near plane; its far plane must lie beyond the scene, since the sky fills what the depth buffer
 leaves at the far plane.
+
+The sky-view and aerial-view LUTs are drawn again whenever one of their inputs changed at all,
+which under a day clock or a moving camera is every frame: seven fullscreen passes, the aerial
+march's into eight float targets each. `lighting.skyReuse = { lightTurn, cameraMove, cameraTurn }`
+(radians, metres, radians; #169) keeps them while the sun and moon turned and the camera moved no
+more than that since the LUT was drawn, the aerial view also while the camera turned no more than
+`cameraTurn`; a colour, disc, ground albedo or projection change still redraws at once. The
+default (`NO_SKY_REUSE`, all 0) keeps the exact behaviour. A kept LUT lags by at most its
+tolerances: the sky's gradient and the aerial perspective, both low-frequency, by a fraction of a
+degree or a metre; the sun's and moon's discs and their light on the scene are never from a LUT
+and never lag. In the mmorpg browser demo (1440×900, RTX 3060 Ti) `{ lightTurn: 0.05°,
+cameraMove: 1, cameraTurn: 0.25° }` takes 1.5–3 ms off the GPU frame with a standing camera
+(its sun moves with the clock) and about 1.2 ms while it walks and turns, where the aerial view is
+still marched in about a third of the frames.
 
 ### Particles (web)
 

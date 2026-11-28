@@ -40,6 +40,8 @@ export class PassLists {
   materials = [];
   /** The visible InstancedMeshes that draw an instance and cast (`ShadowCulling`). */
   instanced = [];
+  /** The visible BatchedMeshes that cast (`ShadowCulling`). */
+  batched = [];
 
   #objects = [];
   #kinds = [];
@@ -63,12 +65,13 @@ export class PassLists {
   /**
    * Walks `scene` once: every node counts, `material(node, its material)` runs for each that has
    * one (hidden ones too), and the visible ones that draw are kept for `list`. `notCaster(node)`
-   * says which InstancedMeshes cast nothing.
+   * says which InstancedMeshes and BatchedMeshes cast nothing.
    */
   walk(scene, material, notCaster) {
     this.nodes = 0;
     this.materials.length = 0;
     this.instanced.length = 0;
+    this.batched.length = 0;
     this.#objects.length = 0;
     this.#kinds.length = 0;
     this.#proxied.length = 0;
@@ -91,6 +94,7 @@ export class PassLists {
       this.#material(node, material);
     }
     if (visible && node.isInstancedMesh && node.count > 0 && !this.#notCaster(node)) this.instanced.push(node);
+    if (visible && node.isBatchedMesh && !this.#notCaster(node)) this.batched.push(node);
     if (visible && !tree && !root) {
       // A render order on a Group reaches its subtree where the Group's layers meet the camera's.
       const kind =

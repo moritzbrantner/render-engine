@@ -192,6 +192,31 @@ function sameKey(was, now) {
   return was !== null && was.length === now.length && was.every((x, i) => x === now[i]);
 }
 
+/** No reuse beyond unchanged inputs (`Lighting.skyReuse`'s default). */
+export const NO_SKY_REUSE = Object.freeze({ lightTurn: 0, cameraMove: 0, cameraTurn: 0 });
+
+/**
+ * Whether a sky-view or aerial-view LUT drawn for `was` (null: not drawn) stands for `now` under
+ * `reuse`'s tolerances (`lightTurn` and `cameraTurn` in radians, `cameraMove` in metres). A
+ * tolerance of 0 compares exactly, so the default keeps a LUT only for unchanged inputs.
+ */
+function lutCurrent(was, now, reuse) {
+  if (was === null || !sameKey(was.exact, now.exact) || was.directions.length !== now.directions.length) return false;
+  const turn = reuse.lightTurn > 0 ? Math.cos(reuse.lightTurn) : null;
+  for (let i = 0; i < now.directions.length; i++) {
+    const [a, b] = [was.directions[i], now.directions[i]];
+    if (turn === null ? !a.equals(b) : a.dot(b) < turn) return false;
+  }
+  if (reuse.cameraMove > 0 ? was.position.distanceTo(now.position) > reuse.cameraMove : !was.position.equals(now.position)) return false;
+  if (now.rotation === null) return true;
+  const [a, b] = [was.rotation, now.rotation];
+  if (!(reuse.cameraTurn > 0)) return a.every((x, i) => x === b[i]);
+  // The angle between two rotations: the trace of one times the other's transpose is 1 + 2 cos.
+  let trace = 0;
+  for (let i = 0; i < 9; i++) trace += a[i] * b[i];
+  return (trace - 1) / 2 >= Math.cos(reuse.cameraTurn);
+}
+
 /** Bevy `extract_atmosphere`: world to atmosphere space, the planet centre at the origin. */
 export function worldToAtmosphere() {
   return new Matrix4().makeTranslation(0, INNER_RADIUS, 0);
@@ -448,7 +473,7 @@ export class SkyPasses {
    * @param lights the directional lights in Bevy's order: `{ directionToLight, color, diskSize,
    *   diskIntensity }`, colour × illuminance
    */
-  render(renderer, { groundAlbedo, lights, worldFromView, clipFromView, exposure, environment }) {
+  render(renderer, { groundAlbedo, lights, worldFromView, clipFromView, exposure, environment, reuse = NO_SKY_REUSE }) {
     const u = this.uniforms;
     u.groundAlbedo.value.set(...groundAlbedo);
     u.worldFromView.value.copy(worldFromView);
@@ -482,22 +507,26 @@ export class SkyPasses {
       this.#lutPass(renderer, m.transmittance, this.transmittance);
     }
     // Each LUT is redrawn when any of its inputs changed at all (exact comparison), so a kept LUT
-    // holds what this frame would draw.
+    // holds what this frame would draw. With `reuse`, the sky-view and aerial-view LUTs are also
+    // kept while the lights turned and the camera moved (the aerial view: and turned) no more
+    // than its tolerances since the LUT was drawn; everything else still compares exactly.
     const multiscatteringKey = [...groundAlbedo];
-    const lightKey = lights
-      .slice(0, 2)
-      .flatMap((l) => [l.directionToLight.x, l.directionToLight.y, l.directionToLight.z, ...l.color, l.diskSize, l.diskIntensity]);
-    const skyViewKey = [...multiscatteringKey, ...camWorld.toArray(), ...lightKey];
-    const aerialViewKey = [...skyViewKey, ...worldFromView.elements, ...clipFromView.elements];
+    // What compares exactly, then what `reuse` loosens: light directions, camera position, and
+    // for the aerial view the camera's rotation.
+    const exact = [...multiscatteringKey, ...lights.slice(0, 2).flatMap((l) => [...l.color, l.diskSize, l.diskIntensity])];
+    const directions = lights.slice(0, 2).map((l) => new Vector3().copy(l.directionToLight).normalize());
+    const e = worldFromView.elements;
+    const skyViewKey = { exact, directions, position: camWorld, rotation: null };
+    const aerialViewKey = { exact: [...exact, ...clipFromView.elements], directions, position: camWorld, rotation: [e[0], e[1], e[2], e[4], e[5], e[6], e[8], e[9], e[10]] };
     if (!sameKey(this.#drawn.multiscattering, multiscatteringKey)) {
       this.#drawn.multiscattering = multiscatteringKey;
       this.#lutPass(renderer, m.multiscattering, this.multiscattering);
     }
-    if (!sameKey(this.#drawn.skyView, skyViewKey)) {
+    if (!lutCurrent(this.#drawn.skyView, skyViewKey, reuse)) {
       this.#drawn.skyView = skyViewKey;
       this.#lutPass(renderer, m.skyView, this.skyView);
     }
-    if (!sameKey(this.#drawn.aerialView, aerialViewKey)) {
+    if (!lutCurrent(this.#drawn.aerialView, aerialViewKey, reuse)) {
       this.#drawn.aerialView = aerialViewKey;
       this.#marchAerialView(renderer);
     }
