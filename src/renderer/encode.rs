@@ -72,32 +72,45 @@ impl Renderer {
             .gpu_culling
             .as_ref()
             .map(GpuCulling::indirect_buffer);
+        // Each draw sets only what changed since the last one and what its pipeline reads (#174):
+        // an opaque caster's shadow pipeline (`shadow`) takes neither the material nor the normal
+        // and surface streams.
         let draw = |pass: &mut wgpu::RenderPass<'_>,
                     pipelines: &[wgpu::RenderPipeline],
                     draws: Range<usize>,
                     phases: Range<Phase>,
+                    shadow: bool,
                     index: &dyn Fn(&Draw) -> usize| {
             pass.set_bind_group(0, frame_group, &[]);
-            let (mut mesh_bound, mut material_bound) = (None, None);
+            let (mut pipeline_bound, mut material_bound) = (None, None);
+            // The mesh whose buffers are bound, and whether all its streams are.
+            let mut mesh_bound = None;
             for d in viewport.draws[draws]
                 .iter()
                 .filter(|d| phases.contains(&d.phase))
             {
-                pass.set_pipeline(&pipelines[index(d)]);
-                if material_bound != Some(d.material) {
+                let pipeline = index(d);
+                if pipeline_bound != Some(pipeline) {
+                    pass.set_pipeline(&pipelines[pipeline]);
+                    pipeline_bound = Some(pipeline);
+                }
+                let surface = !shadow || d.phase != Phase::Opaque;
+                if surface && material_bound != Some(d.material) {
                     pass.set_bind_group(2, &world.material(d.material).group, &[]);
                     material_bound = Some(d.material);
                 }
                 let mesh = world.mesh(d.mesh);
-                if mesh_bound != Some(d.mesh) {
+                if mesh_bound != Some((d.mesh, true)) && mesh_bound != Some((d.mesh, surface)) {
                     pass.set_vertex_buffer(0, mesh.positions.slice(..));
-                    pass.set_vertex_buffer(1, mesh.normals.slice(..));
-                    pass.set_vertex_buffer(2, mesh.surface.slice(..));
+                    if surface {
+                        pass.set_vertex_buffer(1, mesh.normals.slice(..));
+                        pass.set_vertex_buffer(2, mesh.surface.slice(..));
+                    }
                     if let Some(skin) = &mesh.skin {
                         pass.set_vertex_buffer(3, skin.slice(..));
                     }
                     pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
-                    mesh_bound = Some(d.mesh);
+                    mesh_bound = Some((d.mesh, surface));
                 }
                 match (d.gpu, indirect) {
                     (Some(slot), Some(buffer)) => pass.draw_indexed_indirect(
@@ -150,6 +163,7 @@ impl Renderer {
                 &self.shadow_pipelines,
                 shadow.draws.clone(),
                 Phase::Opaque..Phase::End,
+                true,
                 &|d: &Draw| {
                     shadow_pipeline_index(d.skinned, shadow.local, d.face, d.phase != Phase::Opaque)
                 },
@@ -203,6 +217,7 @@ impl Renderer {
                     lit_pipelines,
                     viewport.main_draws.clone(),
                     Phase::Opaque..Phase::End,
+                    false,
                     &lit_index,
                 );
                 if !soft {
@@ -235,6 +250,7 @@ impl Renderer {
                     lit_pipelines,
                     viewport.main_draws.clone(),
                     Phase::Opaque..Phase::Blend,
+                    false,
                     &lit_index,
                 );
                 if stats.is_some() {
@@ -266,6 +282,7 @@ impl Renderer {
                     lit_pipelines,
                     viewport.main_draws.clone(),
                     Phase::Blend..Phase::End,
+                    false,
                     &lit_index,
                 );
                 if !soft {

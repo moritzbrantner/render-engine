@@ -381,6 +381,19 @@ impl Renderer {
                 ],
                 immediate_size: 0,
             });
+        // An opaque caster's shadow reads only its positions (and joints and weights): no material
+        // group, and the normal and surface streams' slots left empty (#174).
+        let opaque_shadow_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("opaque shadow"),
+            bind_group_layouts: &[Some(&frame_layout), Some(&shadow_view_layout)],
+            immediate_size: 0,
+        });
+        let opaque_streams = |skinned: bool| -> Vec<Option<wgpu::VertexBufferLayout<'_>>> {
+            let all = vertex_streams(skinned);
+            let mut streams_list = vec![all[0].clone(), None, None];
+            streams_list.extend(all[3..].iter().cloned());
+            streams_list
+        };
         // Unclipped depth like Bevy's directional shadow views: natively where the device has
         // `DEPTH_CLIP_CONTROL`, else clamped in a fragment shader (see `lit.wgsl`).
         let unclipped_depth = device
@@ -397,20 +410,33 @@ impl Renderer {
                         (true, false) => Some("shadow_emulated_fs"),
                         (true, true) => Some("shadow_emulated_masked_fs"),
                     };
+                    let opaque = opaque_streams(skinned);
                     shadow_pipelines.push(device.create_render_pipeline(
                         &wgpu::RenderPipelineDescriptor {
                             label: Some(if local { "local shadow" } else { "sun shadow" }),
-                            layout: Some(&shadow_pipeline_layout),
+                            layout: Some(if masked {
+                                &shadow_pipeline_layout
+                            } else {
+                                &opaque_shadow_layout
+                            }),
                             vertex: wgpu::VertexState {
                                 module: &shader,
-                                entry_point: Some(match (emulated, skinned) {
-                                    (false, false) => "shadow_vs",
-                                    (true, false) => "shadow_emulated_vs",
-                                    (false, true) => "shadow_skinned_vs",
-                                    (true, true) => "shadow_emulated_skinned_vs",
+                                entry_point: Some(match (masked, emulated, skinned) {
+                                    (true, false, false) => "shadow_vs",
+                                    (true, true, false) => "shadow_emulated_vs",
+                                    (true, false, true) => "shadow_skinned_vs",
+                                    (true, true, true) => "shadow_emulated_skinned_vs",
+                                    (false, false, false) => "shadow_opaque_vs",
+                                    (false, true, false) => "shadow_opaque_emulated_vs",
+                                    (false, false, true) => "shadow_opaque_skinned_vs",
+                                    (false, true, true) => "shadow_opaque_emulated_skinned_vs",
                                 }),
                                 compilation_options: Default::default(),
-                                buffers: vertex_streams(skinned),
+                                buffers: if masked {
+                                    vertex_streams(skinned)
+                                } else {
+                                    &opaque
+                                },
                             },
                             primitive: wgpu::PrimitiveState {
                                 unclipped_depth: !local && unclipped_depth,
