@@ -311,6 +311,17 @@ RTX 3060 Ti (driver 595.99.02), 2026-11-28, two runs each:
   overview 9.4 ms) and 11–17 ms of GPU time, where its native client on render-engine takes
   3.7–5.9 ms of GPU time for the same views.
 
+Since #174 a draw sets only what changed and what its pipeline reads: the pipeline when it
+changes, and for an opaque caster's shadow neither the material group nor the normal and surface
+streams. The same scene then makes 11 500 calls a frame (4 per draw), and on the same machine
+(two runs, Firefox one):
+
+| after #174 | `prepare` ms | `encode` ms | main thread ms | wall per frame ms | GPU ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| native | 1.07–1.08 | 1.23–1.26 | 2.4 | 2.5 | 1.58 |
+| Chromium 159 | 1.26–1.31 | 0.88–0.95 | 2.1–2.3 | 2.5–2.8 | 1.05 |
+| Firefox 159 | 1.6 | 1.0 | 2.6 | 3.3 | 1.03 |
+
 What this does not show: the scene is untextured primitives with a quarter of Greyhaven's
 triangles (0.55 M main, 1.33 M shadow against 1.2–2.6 M and 4.7–7.0 M), without skinned units
 (mmorpg uploads about 0.9 MB of instance and joint data a frame, this scene 16 instances),

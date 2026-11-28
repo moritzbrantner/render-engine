@@ -256,6 +256,53 @@ fn shadow_emulated_skinned_vs(in: SkinnedVertexIn) -> ShadowOut {
     return out;
 }
 
+// An opaque caster's shadow reads neither its UV nor its material, so its pipelines take the
+// position stream alone (a skinned one also the joints and weights) and no material group (#174).
+struct ShadowVertexIn {
+    @builtin(instance_index) instance: u32,
+    @location(0) position: vec3<f32>,
+}
+
+struct SkinnedShadowVertexIn {
+    @builtin(instance_index) instance: u32,
+    @location(0) position: vec3<f32>,
+    @location(5) joint_indices: vec4<u32>,
+    @location(6) joint_weights: vec4<f32>,
+}
+
+fn shadow_opaque(in: ShadowVertexIn) -> ShadowOut {
+    return shadow_vertex(instances[visible[in.instance]].world_from_local, in.position, vec2(0.0));
+}
+
+fn shadow_opaque_skinned(in: SkinnedShadowVertexIn) -> ShadowOut {
+    let model = skinned_world_from_local(visible[in.instance], in.joint_indices, in.joint_weights);
+    return shadow_vertex(model, in.position, vec2(0.0));
+}
+
+@vertex
+fn shadow_opaque_vs(in: ShadowVertexIn) -> ShadowOut {
+    return shadow_opaque(in);
+}
+
+@vertex
+fn shadow_opaque_emulated_vs(in: ShadowVertexIn) -> ShadowOut {
+    var out = shadow_opaque(in);
+    out.clip.z = min(out.clip.z, 1.0);
+    return out;
+}
+
+@vertex
+fn shadow_opaque_skinned_vs(in: SkinnedShadowVertexIn) -> ShadowOut {
+    return shadow_opaque_skinned(in);
+}
+
+@vertex
+fn shadow_opaque_emulated_skinned_vs(in: SkinnedShadowVertexIn) -> ShadowOut {
+    var out = shadow_opaque_skinned(in);
+    out.clip.z = min(out.clip.z, 1.0);
+    return out;
+}
+
 fn shadow_alpha_discard(uv: vec2<f32>) {
     if (textured_base_color(uv).a < material.alpha_cutoff) {
         discard;
