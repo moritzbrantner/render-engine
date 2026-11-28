@@ -276,6 +276,50 @@ was not separated and is unmeasured here. Whether crossings of this order limit 
 in a browser is exactly what [mmorpg#615](https://github.com/moenarch-games/mmorpg/issues/615)
 would need to measure; this smoke does not show it either way.
 
+### At the scale of a game frame (#172)
+
+The crossings above stop at 67 draws. `scripts/web-scale.sh` times a synthetic scene of the scale
+of mmorpg's Greyhaven views on render-engine (`examples/scale_scene/scene.rs`: 22 016 retained
+instances of 900 mesh/material pairs over 400 × 400 m, 16 units listed each frame, a sun with four
+cascades over 160 m, the sky with its environment light, 13 point lights; five views culled, 900
+main and 1 979 shadow draws) natively (`examples/scale_frame.rs`) and through `render-engine-web`
+(`web/examples/scale_bench`, `web/scale/`), by one protocol: medians over 300 frames at 1280×720,
+submitted back to back. mmorpg's own views (`outpost_frame_time`, same GPU, 2026-11-28) prepare
+19 900–22 100 instances in 5 views into 170–970 main and 2 080–2 960 shadow draws.
+
+RTX 3060 Ti (driver 595.99.02), 2026-11-28, two runs each:
+
+| | `prepare` ms | `encode` ms | `submit` ms | main thread ms | wall per frame ms | GPU ms |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| native | 1.08–1.09 | 2.11–2.12 | 0.12–0.13 | 3.3 | 3.4–3.6 | 1.58 |
+| Chromium 159 | 1.27–1.30 | 1.32–1.48 | 0.01 | 2.6–2.8 | 4.2 | 1.06–1.07 |
+| Firefox 159 | 1.6–1.9 | 1.6–1.8 | 0.02–0.04 | 3.2–3.7 | 4.7–5.6 | 1.03–1.04 |
+
+- A frame makes about 20 300 WebGPU calls (2 879 `drawIndexed`, each with a `setPipeline`,
+  `setBindGroup` and `setIndexBuffer` and three `setVertexBuffer`): about 7 per draw, as on
+  `many_instances`. They cost the main thread about 1.4 ms in Chromium, 0.07 µs each: the calls
+  are recorded into the browser's command stream, and its GPU process replays them.
+- That replay is not on the main thread's clock, so `wall per frame` is the measure of the whole
+  pipeline: frames submitted back to back, each batch of 64 waited for. 4.2 ms in Chromium and
+  4.7–5.6 ms in Firefox against 3.4–3.6 ms natively, so at this scale the crossings do not limit
+  a 60 Hz frame on this machine.
+- `prepare` is 1.2× native in Chromium and 1.5–1.7× in Firefox (wasm32, no SIMD or threads).
+  Native `encode` includes wgpu's own validation and recording, which the browser does in its GPU
+  process; the columns are not like for like, the wall time is.
+- Against three-lighting: mmorpg's browser demo on the same machine spends 8–15 ms of the main
+  thread per frame in its `render` phase (#168: idle 14.6, move-rotate 10.1, dense-hub 8.2,
+  overview 9.4 ms) and 11–17 ms of GPU time, where its native client on render-engine takes
+  3.7–5.9 ms of GPU time for the same views.
+
+What this does not show: the scene is untextured primitives with a quarter of Greyhaven's
+triangles (0.55 M main, 1.33 M shadow against 1.2–2.6 M and 4.7–7.0 M), without skinned units
+(mmorpg uploads about 0.9 MB of instance and joint data a frame, this scene 16 instances),
+particles or a HUD, and mmorpg's native `prepare` is 2.2–2.5 ms on its views, twice this
+scene's. The game's own work to build a frame (mmorpg's presentation, in WASM) is not in it
+either. Scaling `prepare` by the measured ratios puts a Greyhaven frame at roughly 5–6 ms of main
+thread in Chromium; that is an estimate, and only mmorpg's views through `render-engine-web`
+would measure it.
+
 ## Where browser adapters live
 
 - **Scene and simulation authority stay in the games** (D7). The engine sees a `World` and a

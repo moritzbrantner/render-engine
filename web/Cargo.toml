@@ -36,6 +36,13 @@ name = "shooter_showcase"
 path = "examples/shooter_showcase/main.rs"
 crate-type = ["cdylib"]
 
+# Frame cost at the scale of mmorpg's Greyhaven views (#172, `web/scale/`,
+# `scripts/web-scale.sh`): `examples/scale_scene/scene.rs` timed like the native `scale_frame`.
+[[example]]
+name = "scale_bench"
+path = "examples/scale_bench/main.rs"
+crate-type = ["cdylib"]
+
 [dev-dependencies]
 glam = "=0.34.3"
 serde_json = "=1.0.154"
